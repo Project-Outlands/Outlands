@@ -39,8 +39,6 @@ import com.cleanroommc.client.modlist.ModListConfig;
 import com.cleanroommc.client.modlist.screen.ModListScreen;
 import com.cleanroommc.common.PatchModPresentChecker;
 import com.cleanroommc.discovery.CleanroomModDiscoverer;
-import com.cleanroommc.kirino.KirinoClientCore;
-import com.cleanroommc.kirino.KirinoCommonCore;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.Gui;
@@ -245,8 +243,6 @@ public class FMLClientHandler implements IFMLSidedHandler
             return;
         }
 
-        KirinoCommonCore.configEvent();
-
         List<String> injectedModContainers = FMLCommonHandler.instance().beginLoading(this);
         try
         {
@@ -306,8 +302,6 @@ public class FMLClientHandler implements IFMLSidedHandler
                 sharedModList.put(sharedModId, sharedModDescriptor);
             }
         }
-
-        KirinoClientCore.init();
     }
 
     private void detectOptifine()
@@ -415,8 +409,6 @@ public class FMLClientHandler implements IFMLSidedHandler
         if (!hasError())
             Loader.instance().loadingComplete();
         SplashProgress.finish();
-
-        KirinoClientCore.postInit();
     }
 
     public void extendModList()

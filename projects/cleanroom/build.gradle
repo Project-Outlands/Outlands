@@ -48,17 +48,17 @@ java {
 sourceSets {
     main {
         java {
-            srcDirs = ["$rootDir/src/main/java", "$rootDir/projects/kirino/src/main/java"]
+            srcDirs = ["$rootDir/src/main/java"]
         }
         resources {
-            srcDirs = ["$rootDir/src/main/resources", "$rootDir/projects/kirino/src/main/resources"]
+            srcDirs = ["$rootDir/src/main/resources"]
         }
     }
     test {
         compileClasspath += sourceSets.main.runtimeClasspath
         runtimeClasspath += sourceSets.main.runtimeClasspath
         java {
-            srcDirs = ["$rootDir/src/test/java", "$rootDir/projects/kirino/src/test/java"]
+            srcDirs = ["$rootDir/src/test/java"]
         }
         resources {
             srcDirs = ["$rootDir/src/test/resources"]
@@ -387,10 +387,6 @@ dependencies {
 
     // Mac
     installer 'ca.weblite:java-objc-bridge:1.2'
-
-    // Kirino Engine
-    installer 'org.joml:joml:1.10.9'
-    installer 'io.github.classgraph:classgraph:4.8.184'
 
     // Mixin
     installer "com.cleanroommc:cleanmix:$props.cleanmix_version"

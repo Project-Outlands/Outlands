@@ -28,8 +28,6 @@ import java.util.zip.ZipFile;
 
 import com.cleanroommc.common.PatchModPresentChecker;
 import com.cleanroommc.discovery.CleanroomModDiscoverer;
-import com.cleanroommc.kirino.KirinoCommonCore;
-import com.cleanroommc.kirino.KirinoServerCore;
 import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetHandlerPlayServer;
 import net.minecraft.network.NetworkManager;
@@ -99,7 +97,6 @@ public class FMLServerHandler implements IFMLSidedHandler
     public void beginServerLoading(MinecraftServer minecraftServer)
     {
         server = minecraftServer;
-        KirinoCommonCore.configEvent();
 
         if (PatchModPresentChecker.isNotPresent() && CleanroomModDiscoverer.instance().hasForgeMods())
         {
@@ -114,7 +111,6 @@ public class FMLServerHandler implements IFMLSidedHandler
         Loader.instance().loadMods(injectedModContainers);
 
         Loader.instance().preinitializeMods();
-        KirinoServerCore.init();
     }
 
     /**
@@ -124,7 +120,6 @@ public class FMLServerHandler implements IFMLSidedHandler
     public void finishServerLoading()
     {
         Loader.instance().initializeMods();
-        KirinoServerCore.postInit();
     }
 
     @Override

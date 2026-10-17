@@ -26,10 +26,7 @@ public final class ModListConfig {
             "configanytime",
             "mixinbooter",
             "fugue",
-            "scalar",
-            "kirino_ecs",
-            "kirino_engine",
-            "kirino_gl"
+            "scalar"
     };
 
     @Config.RequiresMcRestart

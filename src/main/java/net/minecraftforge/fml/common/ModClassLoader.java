@@ -149,7 +149,6 @@ public class ModClassLoader extends URLClassLoader
             "libraryjavasound-",
             "fastutil-",
             "Reflect-",
-            "classgraph-",
             "mixinextras-",
             "jakarta.",
             "jaxb-",
