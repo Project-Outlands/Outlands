@@ -281,9 +281,10 @@ dependencies {
         lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
     }
 
-    // LWJGL
-    compileOnly "com.cleanroommc:lwjglx:1.0.0"
-    installer "com.cleanroommc:lwjglxx:1.1.22"
+    // LWJGL: the LWJGL2 API surface comes from the in-tree shims, so only LWJGL3 is compiled against.
+    lwjglLibraries[0].each {
+        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
+    }
     lwjglLibraries[0].each {
         if (it == 'lwjgl') {
             installer "org.lwjgl:$it:$props.lwjgl_version:unsafe"

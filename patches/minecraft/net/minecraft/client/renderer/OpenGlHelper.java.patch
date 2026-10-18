@@ -1,5 +1,21 @@
 --- before/net/minecraft/client/renderer/OpenGlHelper.java
 +++ after/net/minecraft/client/renderer/OpenGlHelper.java
+@@ -6,6 +6,7 @@
+ import java.nio.ByteBuffer;
+ import java.nio.FloatBuffer;
+ import java.nio.IntBuffer;
++import java.nio.charset.StandardCharsets;
+ import java.util.Locale;
+ import net.minecraft.client.Minecraft;
+ import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+@@ -19,7 +20,6 @@
+ import org.lwjgl.opengl.ARBFramebufferObject;
+ import org.lwjgl.opengl.ARBMultitexture;
+ import org.lwjgl.opengl.ARBShaderObjects;
+-import org.lwjgl.opengl.ARBVertexBufferObject;
+ import org.lwjgl.opengl.ARBVertexShader;
+ import org.lwjgl.opengl.ContextCapabilities;
+ import org.lwjgl.opengl.EXTBlendFuncSeparate;
 @@ -31,8 +31,8 @@
  import org.lwjgl.opengl.GL20;
  import org.lwjgl.opengl.GL30;
@@ -33,7 +49,225 @@
          }
          catch (Throwable throwable)
          {
-@@ -854,6 +858,12 @@
+@@ -350,14 +354,7 @@
+ 
+     public static void glShaderSource(int shaderIn, ByteBuffer string)
+     {
+-        if (arbShaders)
+-        {
+-            ARBShaderObjects.glShaderSourceARB(shaderIn, string);
+-        }
+-        else
+-        {
+-            GL20.glShaderSource(shaderIn, string);
+-        }
++        GL20.glShaderSource(shaderIn, StandardCharsets.UTF_8.decode(string.duplicate()));
+     }
+ 
+     public static void glCompileShader(int shaderIn)
+@@ -437,11 +434,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform1ARB(location, values);
++            GL20.glUniform1iv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform1(location, values);
++            GL20.glUniform1iv(location, values);
+         }
+     }
+ 
+@@ -461,11 +458,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform1ARB(location, values);
++            GL20.glUniform1fv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform1(location, values);
++            GL20.glUniform1fv(location, values);
+         }
+     }
+ 
+@@ -473,11 +470,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform2ARB(location, values);
++            GL20.glUniform2iv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform2(location, values);
++            GL20.glUniform2iv(location, values);
+         }
+     }
+ 
+@@ -485,11 +482,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform2ARB(location, values);
++            GL20.glUniform2fv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform2(location, values);
++            GL20.glUniform2fv(location, values);
+         }
+     }
+ 
+@@ -497,11 +494,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform3ARB(location, values);
++            GL20.glUniform3iv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform3(location, values);
++            GL20.glUniform3iv(location, values);
+         }
+     }
+ 
+@@ -509,11 +506,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform3ARB(location, values);
++            GL20.glUniform3fv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform3(location, values);
++            GL20.glUniform3fv(location, values);
+         }
+     }
+ 
+@@ -521,11 +518,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform4ARB(location, values);
++            GL20.glUniform4iv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform4(location, values);
++            GL20.glUniform4iv(location, values);
+         }
+     }
+ 
+@@ -533,11 +530,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniform4ARB(location, values);
++            GL20.glUniform4fv(location, values);
+         }
+         else
+         {
+-            GL20.glUniform4(location, values);
++            GL20.glUniform4fv(location, values);
+         }
+     }
+ 
+@@ -545,11 +542,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniformMatrix2ARB(location, transpose, matrices);
++            GL20.glUniformMatrix2fv(location, transpose, matrices);
+         }
+         else
+         {
+-            GL20.glUniformMatrix2(location, transpose, matrices);
++            GL20.glUniformMatrix2fv(location, transpose, matrices);
+         }
+     }
+ 
+@@ -557,11 +554,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniformMatrix3ARB(location, transpose, matrices);
++            GL20.glUniformMatrix3fv(location, transpose, matrices);
+         }
+         else
+         {
+-            GL20.glUniformMatrix3(location, transpose, matrices);
++            GL20.glUniformMatrix3fv(location, transpose, matrices);
+         }
+     }
+ 
+@@ -569,11 +566,11 @@
+     {
+         if (arbShaders)
+         {
+-            ARBShaderObjects.glUniformMatrix4ARB(location, transpose, matrices);
++            GL20.glUniformMatrix4fv(location, transpose, matrices);
+         }
+         else
+         {
+-            GL20.glUniformMatrix4(location, transpose, matrices);
++            GL20.glUniformMatrix4fv(location, transpose, matrices);
+         }
+     }
+ 
+@@ -584,43 +581,22 @@
+ 
+     public static int glGenBuffers()
+     {
+-        return arbVbo ? ARBVertexBufferObject.glGenBuffersARB() : GL15.glGenBuffers();
++        return GL15.glGenBuffers();
+     }
+ 
+     public static void glBindBuffer(int target, int buffer)
+     {
+-        if (arbVbo)
+-        {
+-            ARBVertexBufferObject.glBindBufferARB(target, buffer);
+-        }
+-        else
+-        {
+-            GL15.glBindBuffer(target, buffer);
+-        }
++        GL15.glBindBuffer(target, buffer);
+     }
+ 
+     public static void glBufferData(int target, ByteBuffer data, int usage)
+     {
+-        if (arbVbo)
+-        {
+-            ARBVertexBufferObject.glBufferDataARB(target, data, usage);
+-        }
+-        else
+-        {
+-            GL15.glBufferData(target, data, usage);
+-        }
++        GL15.glBufferData(target, data, usage);
+     }
+ 
+     public static void glDeleteBuffers(int buffer)
+     {
+-        if (arbVbo)
+-        {
+-            ARBVertexBufferObject.glDeleteBuffersARB(buffer);
+-        }
+-        else
+-        {
+-            GL15.glDeleteBuffers(buffer);
+-        }
++        GL15.glDeleteBuffers(buffer);
+     }
+ 
+     public static boolean useVbo()
+@@ -854,6 +830,12 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -46,7 +280,7 @@
      }
  
      public static void glBlendFunc(int sFactorRGB, int dFactorRGB, int sfactorAlpha, int dfactorAlpha)
-@@ -916,54 +926,23 @@
+@@ -916,54 +898,23 @@
  
      public static void openFile(File fileIn)
      {
