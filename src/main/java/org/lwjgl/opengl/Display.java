@@ -115,7 +115,6 @@ public class Display {
         attachmentPixelFormat = pixel_format;
         hasDrawable = true;
         attachmentDrawable = shared_drawable;
-        System.out.println("[LWJGL2] TODO: Implement Display.create(PixelFormat, Drawable)"); // TODO
         create();
     }
 
@@ -124,7 +123,6 @@ public class Display {
         attachmentPixelFormat = pixel_format;
         hasContextAttribs = true;
         attachmentContextAttribs = attribs;
-        System.out.println("[LWJGL2] TODO: Implement Display.create(PixelFormat, ContextAttribs)"); // TODO
         create();
     }
 
@@ -132,6 +130,10 @@ public class Display {
         hasPixelFormat = true;
         attachmentPixelFormat = pixel_format;
         create();
+    }
+
+    private static int contextProfileHint(ContextAttribs attribs) {
+        return attribs.isProfileCore() ? GLFW_OPENGL_CORE_PROFILE : GLFW_OPENGL_COMPAT_PROFILE;
     }
 
     private static void processAttachments() {
@@ -186,7 +188,17 @@ public class Display {
             }
         }
         if (hasContextAttribs) {
-
+            if (attachmentContextAttribs.isDebug()) {
+                glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+            }
+            if (attachmentContextAttribs.isForwardCompatible()) {
+                glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+            }
+            if (attachmentContextAttribs.isRobustAccess()) {
+                glfwWindowHint(GLFW_CONTEXT_ROBUSTNESS, attachmentContextAttribs.isLoseContextOnReset()
+                        ? GLFW_LOSE_CONTEXT_ON_RESET
+                        : GLFW_NO_RESET_NOTIFICATION);
+            }
         }
         if (hasDrawable) {
 
@@ -234,6 +246,15 @@ public class Display {
             versionMinor = 6;
         }
 
+        if (hasContextAttribs) {
+            versionMajor = attachmentContextAttribs.getMajorVersion();
+            versionMinor = attachmentContextAttribs.getMinorVersion();
+            if (versionMajor < 2) {
+                versionMajor = 2;
+                versionMinor = 1;
+            }
+        }
+
         System.out.println("[LWJGL2] OpenGL version after validation is " + versionMajor + "." + versionMinor);
 
         // try OpenGL versions one by one to find the best fit one
@@ -247,7 +268,14 @@ public class Display {
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, versionMajor);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, versionMinor);
             if (versionMajor > 3 || (versionMajor == 3 && versionMinor >= 2)) {
-                glfwWindowHint(GLFW_OPENGL_PROFILE, ForgeEarlyConfig.OPENGL_COMPAT_PROFILE ? GLFW_OPENGL_COMPAT_PROFILE : GLFW_OPENGL_CORE_PROFILE);
+                if (hasContextAttribs && attachmentContextAttribs.isProfileES()) {
+                    // GLFW has no ES profile bit, an ES context is requested through the client API instead
+                    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+                } else if (hasContextAttribs && attachmentContextAttribs.getProfileMask() != 0) {
+                    glfwWindowHint(GLFW_OPENGL_PROFILE, contextProfileHint(attachmentContextAttribs));
+                } else {
+                    glfwWindowHint(GLFW_OPENGL_PROFILE, ForgeEarlyConfig.OPENGL_COMPAT_PROFILE ? GLFW_OPENGL_COMPAT_PROFILE : GLFW_OPENGL_CORE_PROFILE);
+                }
             }
 
             glfwWindowHint(GLFW_MAXIMIZED, ForgeEarlyConfig.WINDOW_START_MAXIMIZED ? GLFW_TRUE : GLFW_FALSE);

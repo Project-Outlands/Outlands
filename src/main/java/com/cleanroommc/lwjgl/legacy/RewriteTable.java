@@ -12,7 +12,7 @@ public final class RewriteTable {
     private RewriteTable() {}
 
     /** SHA-256 of the table body, must match rewrite-table.tsv. */
-    public static final String TABLE_SHA256 = "107c0b0c70caf3d58561379bbb1e0f75375f86ab466fc202e3f2abc72c23214c";
+    public static final String TABLE_SHA256 = "17ac8b26a7176904b7f8a695984f0711c4c7a5fed4e47b6e6f5a6a147c7d5316";
 
     /** owner\0name\0desc */
     public static String key(String owner, String name, String desc) {
@@ -20,7 +20,7 @@ public final class RewriteTable {
     }
 
     /** Same owner and descriptor, different method name. Value = new name. */
-    public static final Map<String, String> RENAME = new HashMap<>(375 * 2);
+    public static final Map<String, String> RENAME = new HashMap<>(376 * 2);
     /** Same descriptor, different owner and name. Value = "targetOwner\0targetName". */
     public static final Map<String, String> ALIAS = new HashMap<>(27 * 2);
     /** Descriptor changes. Value = "targetOwner\0targetName\0targetDesc\0recipe". */
@@ -222,6 +222,7 @@ public final class RewriteTable {
         RENAME.put(key("org/lwjgl/opengl/GL15", "glGetBufferParameter", "(IILjava/nio/IntBuffer;)V"), "glGetBufferParameteriv");
         RENAME.put(key("org/lwjgl/opengl/GL15", "glGetQuery", "(II)I"), "glGetQueryi");
         RENAME.put(key("org/lwjgl/opengl/GL15", "glGetQuery", "(IILjava/nio/IntBuffer;)V"), "glGetQueryiv");
+        RENAME.put(key("org/lwjgl/opengl/GL15", "glGetQueryObject", "(IILjava/nio/IntBuffer;)V"), "glGetQueryObjectiv");
         RENAME.put(key("org/lwjgl/opengl/GL15", "glGetQueryObjectu", "(IILjava/nio/IntBuffer;)V"), "glGetQueryObjectuiv");
         RENAME.put(key("org/lwjgl/opengl/GL20", "glGetProgram", "(II)I"), "glGetProgrami");
         RENAME.put(key("org/lwjgl/opengl/GL20", "glGetProgram", "(IILjava/nio/IntBuffer;)V"), "glGetProgramiv");

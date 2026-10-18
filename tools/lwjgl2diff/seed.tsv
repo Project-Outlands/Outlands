@@ -89,3 +89,6 @@ ADAPTER	org/lwjgl/opengl/GL32	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	com/clean
 ADAPTER	org/lwjgl/opengl/GL32	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	-
 ADAPTER	org/lwjgl/opengl/GL32	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	-
 ADAPTER	org/lwjgl/opengl/GL32	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	-
+# the typed suffix family is ambiguous here (iv vs uiv), so pin the signed form
+RENAME	org/lwjgl/opengl/GL15	glGetQueryObject	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectiv	(IILjava/nio/IntBuffer;)V	-
+RENAME	org/lwjgl/opengl/GL15	glGetQueryObjectu	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectuiv	(IILjava/nio/IntBuffer;)V	-
