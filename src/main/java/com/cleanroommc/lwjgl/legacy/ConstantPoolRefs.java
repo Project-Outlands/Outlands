@@ -16,8 +16,8 @@ final class ConstantPoolRefs {
     }
 
     /**
-     * Second gate: returns true if any Fieldref/Methodref owner is a class {@link RewriteTable} can rewrite a member
-     * of. Parse errors are treated as "yes".
+     * Second gate: returns true if the class references a member {@link RewriteTable} can rewrite, matched on owner,
+     * name and descriptor. Parse errors are treated as "yes".
      */
     static boolean hasLwjgl2MemberRef(byte[] b) {
         if (b.length < 10) {
@@ -84,7 +84,23 @@ final class ConstantPoolRefs {
                 continue;
             }
             final String owner = utf8(b, offset[nameIdx]);
-            if (owner != null && RewriteTableIndex.OWNERS.contains(owner)) {
+            if (owner == null || !RewriteTableIndex.OWNERS.contains(owner)) {
+                continue;
+            }
+            // The owner alone only says "this class is touched by the table", not that this member is: resolve the
+            // NameAndType as well, so the gate lets through exactly the classes the rewriter will change.
+            final int nameTypeIdx = u2(b, offset[i] + 3);
+            if (nameTypeIdx <= 0 || nameTypeIdx >= cpCount || tag[nameTypeIdx] != 12) {
+                return true;
+            }
+            final String name = utf8(b, offset[u2(b, offset[nameTypeIdx] + 1)]);
+            if (name == null) {
+                continue;
+            }
+            final int descIdx = u2(b, offset[nameTypeIdx] + 3);
+            final int descOffset = descIdx > 0 && descIdx < cpCount ? offset[descIdx] : 0;
+            final String desc = utf8(b, descOffset);
+            if (desc != null && RewriteTableIndex.isRewritable(owner, name, desc)) {
                 return true;
             }
         }

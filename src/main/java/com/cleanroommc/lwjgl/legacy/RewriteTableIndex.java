@@ -22,6 +22,16 @@ final class RewriteTableIndex {
 
     private RewriteTableIndex() {}
 
+    /** Whether the table acts on exactly this member; the five tables are consulted in {@code CompatRewriter} order. */
+    static boolean isRewritable(String owner, String name, String desc) {
+        String key = RewriteTable.key(owner, name, desc);
+        return RewriteTable.RENAME.containsKey(key)
+                || RewriteTable.ALIAS.containsKey(key)
+                || RewriteTable.CONVERT.containsKey(key)
+                || RewriteTable.CTOR.containsKey(key)
+                || RewriteTable.ADAPTER.containsKey(key);
+    }
+
     @SafeVarargs
     private static Set<String> owners(Map<String, String>... tables) {
         Set<String> owners = new HashSet<>();
