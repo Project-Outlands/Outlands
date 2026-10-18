@@ -151,6 +151,17 @@ def resolve(idx, owner, name, desc):
     return None
 
 
+def adapter_shape(owner, desc, adapter_desc):
+    """'static' when the adapter keeps the descriptor, 'instance' when it takes the receiver as first argument."""
+    if adapter_desc == desc:
+        return 'static'
+    src = parse_desc(desc)[0]
+    dst = parse_desc(adapter_desc)[0]
+    if len(dst) == len(src) + 1 and dst[0] == 'L' + owner + ';' and dst[1:] == src:
+        return 'instance'
+    return None
+
+
 def parse_desc(desc):
     i, ps = 1, []
     while desc[i] != ')':
@@ -239,21 +250,20 @@ def main():
             else:
                 unresolved.append((cls, name, desc, fams))
 
-    # every target must exist in L3
+    # every target must exist in L3, except the shim and adapter classes we produce ourselves
     bad = []
     for r in rows:
         kind, owner, name, desc, towner, tname, tdesc, _recipe = r
-        if kind == 'CONVERT':
-            if not resolve(l3, towner, tname, tdesc):
+        if kind == 'ADAPTER':
+            if adapter_shape(owner, desc, tdesc) is None:
                 bad.append(r)
         elif kind == 'CTOR':
-            if not resolve(l3, towner, tname, tdesc):
+            if tname != '<init>' or tdesc != desc or towner in l3:
                 bad.append(r)
-        elif kind in ('RENAME', 'ALIAS', 'ADAPTER'):
-            if not resolve(l3, towner, tname, tdesc) and not tdesc.startswith('(') is False:
-                bad.append(r)
+        elif not resolve(l3, towner, tname, tdesc):
+            bad.append(r)
     if bad:
-        print('table entries whose target is missing in L3:', file=sys.stderr)
+        print('table entries with an invalid target:', file=sys.stderr)
         for r in bad:
             print('  ' + '\t'.join(r), file=sys.stderr)
         sys.exit(1)
@@ -343,9 +353,9 @@ public final class RewriteTable {
     public static final Map<String, String> ALIAS = new HashMap<>(%d * 2);
     /** Descriptor changes. Value = "targetOwner\\0targetName\\0targetDesc\\0recipe". */
     public static final Map<String, String> CONVERT = new HashMap<>(%d * 2);
-    /** Constructor call -> static factory. Value = "factoryOwner\\0factoryName\\0factoryDesc". */
+    /** Allocation redirected to a replacement class. Value = replacementOwner. */
     public static final Map<String, String> CTOR = new HashMap<>(%d * 2);
-    /** Redirect to an adapter method. Value = "adapterOwner\\0adapterName\\0adapterDesc". */
+    /** Static replacement for a dropped member. Value = "adapterOwner\\0adapterName\\0adapterDesc". */
     public static final Map<String, String> ADAPTER = new HashMap<>(%d * 2);
 
     static {
@@ -361,6 +371,8 @@ public final class RewriteTable {
                     value = _jstr(towner + '\0' + tname)
                 elif kind == 'CONVERT':
                     value = _jstr(towner + '\0' + tname + '\0' + tdesc + '\0' + recipe)
+                elif kind == 'CTOR':
+                    value = _jstr(towner)
                 else:
                     value = _jstr(towner + '\0' + tname + '\0' + tdesc)
                 f.write(f'        {kind}.put({key(owner, name, desc)}, {value});\n')

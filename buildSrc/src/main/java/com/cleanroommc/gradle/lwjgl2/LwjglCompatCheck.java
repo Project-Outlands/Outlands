@@ -143,9 +143,19 @@ public final class LwjglCompatCheck {
                 validateRecipe(index, desc, tDesc, recipe, row, errors);
                 break;
             case "CTOR":
+                if (!"<init>".equals(tName) || !desc.equals(tDesc)) {
+                    errors.add("CTOR must keep the constructor descriptor: " + join(row));
+                }
+                if (index.hasClass(tOwner)) {
+                    errors.add("CTOR replacement must not shadow an LWJGL3 class: " + tOwner);
+                }
+                break;
             case "ADAPTER":
-                if (!index.hasMethod(tOwner, tName, tDesc)) {
-                    errors.add(kind + " target missing: " + tOwner + '.' + tName + tDesc);
+                if (!isAdapterShape(owner, desc, tDesc)) {
+                    errors.add("ADAPTER must keep the descriptor or take the receiver first: " + join(row));
+                }
+                if (index.hasClass(tOwner)) {
+                    errors.add("ADAPTER owner must not shadow an LWJGL3 class: " + tOwner);
                 }
                 break;
             default:
@@ -221,6 +231,11 @@ public final class LwjglCompatCheck {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** The adapter either keeps the descriptor or prepends the receiver, which turns the call into a static one. */
+    private static boolean isAdapterShape(String owner, String desc, String adapterDesc) {
+        return desc.equals(adapterDesc) || adapterDesc.equals("(L" + owner + ';' + desc.substring(1));
+    }
 
     private static String join(String[] row) {
         return String.join(" | ", row);
@@ -345,6 +360,10 @@ public final class LwjglCompatCheck {
                 }
             }
             return idx;
+        }
+
+        boolean hasClass(String owner) {
+            return classes.containsKey(owner);
         }
 
         boolean hasMethod(String owner, String name, String desc) {

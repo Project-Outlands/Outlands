@@ -11,6 +11,7 @@ import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 /**
@@ -48,12 +49,60 @@ public final class CompatRewriter {
         boolean changed = false;
         for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; ) {
             AbstractInsnNode next = insn.getNext();
-            if (insn.getType() == AbstractInsnNode.METHOD_INSN) {
+            if (insn.getOpcode() == Opcodes.NEW) {
+                changed |= redirectAllocation((TypeInsnNode) insn);
+            } else if (insn.getType() == AbstractInsnNode.METHOD_INSN) {
                 changed |= rewriteCall(mn, (MethodInsnNode) insn);
             }
             insn = next;
         }
         return changed;
+    }
+
+    /**
+     * Points an allocation at the replacement class; only types change, so the stack shape and any existing
+     * stack map frame stay valid. Gives up when the matching {@code <init>} call sits behind a branch.
+     */
+    private static boolean redirectAllocation(TypeInsnNode allocation) {
+        int nested = 0;
+        for (AbstractInsnNode p = allocation.getNext(); p != null; p = p.getNext()) {
+            int opcode = p.getOpcode();
+            if (opcode < 0) {
+                if (p.getType() == AbstractInsnNode.FRAME) {
+                    return false;
+                }
+                continue;
+            }
+            if (opcode == Opcodes.NEW) {
+                if (allocation.desc.equals(((TypeInsnNode) p).desc)) {
+                    nested++;
+                }
+                continue;
+            }
+            if (p.getType() == AbstractInsnNode.JUMP_INSN || opcode == Opcodes.RETURN || opcode == Opcodes.ARETURN
+                    || opcode == Opcodes.ATHROW) {
+                return false;
+            }
+            if (p.getType() != AbstractInsnNode.METHOD_INSN) {
+                continue;
+            }
+            MethodInsnNode call = (MethodInsnNode) p;
+            if (opcode != Opcodes.INVOKESPECIAL || !"<init>".equals(call.name) || !allocation.desc.equals(call.owner)) {
+                continue;
+            }
+            if (nested > 0) {
+                nested--;
+                continue;
+            }
+            String replacement = RewriteTable.CTOR.get(RewriteTable.key(call.owner, call.name, call.desc));
+            if (replacement == null) {
+                return false;
+            }
+            allocation.desc = replacement;
+            call.owner = replacement;
+            return true;
+        }
+        return false;
     }
 
     private static boolean rewriteCall(MethodNode mn, MethodInsnNode call) {
@@ -78,8 +127,42 @@ public final class CompatRewriter {
             return convert(mn, call, convert);
         }
 
-        // CTOR/ADAPTER entries are handled once the adapter class exists; until then the shim layer covers them.
+        String adapter = RewriteTable.ADAPTER.get(key);
+        if (adapter != null) {
+            return adapt(call, adapter);
+        }
         return false;
+    }
+
+    /** Rewrites owner/name and, when the adapter takes the receiver as its first argument, the invocation kind. */
+    private static boolean adapt(MethodInsnNode call, String payload) {
+        int first = payload.indexOf('\0');
+        int second = payload.indexOf('\0', first + 1);
+        String adapterOwner = payload.substring(0, first);
+        String adapterName = payload.substring(first + 1, second);
+        String adapterDesc = payload.substring(second + 1);
+
+        Type[] from = Type.getArgumentTypes(call.desc);
+        Type[] to = Type.getArgumentTypes(adapterDesc);
+        boolean instanceToStatic = to.length == from.length + 1 && to[0].equals(Type.getObjectType(call.owner));
+        if (!instanceToStatic) {
+            if (!adapterDesc.equals(call.desc)) {
+                throw new IllegalStateException("adapter shape mismatch: " + call.owner + '.' + call.name + call.desc);
+            }
+        } else if (call.getOpcode() == Opcodes.INVOKESTATIC) {
+            throw new IllegalStateException("adapter receiver on a static call: " + call.owner + '.' + call.name
+                    + call.desc);
+        }
+        if (!Type.getReturnType(adapterDesc).equals(Type.getReturnType(call.desc))) {
+            throw new IllegalStateException("adapter return type mismatch: " + call.owner + '.' + call.name + call.desc);
+        }
+        call.owner = adapterOwner;
+        call.name = adapterName;
+        call.desc = adapterDesc;
+        if (instanceToStatic) {
+            call.setOpcode(Opcodes.INVOKESTATIC);
+        }
+        return true;
     }
 
     private static boolean convert(MethodNode mn, MethodInsnNode call, String payload) {

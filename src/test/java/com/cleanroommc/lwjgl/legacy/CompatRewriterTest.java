@@ -9,6 +9,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.analysis.Analyzer;
 import org.objectweb.asm.tree.analysis.BasicVerifier;
 
@@ -180,6 +181,77 @@ class CompatRewriterTest {
         }
         assertNotNull(glByte, "GL_BYTE + unsigned must be pushed");
         assertNull(findCall(mn, "memAddress"), "typeFromUnsigned must stay in place");
+        assertStackConsistent(mn);
+    }
+
+    @Test
+    void redirectsAllocationToShimSubclass() {
+        byte[] original = sample("(Ljava/nio/ByteBuffer;)Ljava/lang/Object;", mv -> {
+            mv.visitTypeInsn(Opcodes.NEW, "org/lwjgl/PointerBuffer");
+            mv.visitInsn(Opcodes.DUP);
+            mv.visitVarInsn(Opcodes.ALOAD, 0);
+            mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "org/lwjgl/PointerBuffer", "<init>",
+                    "(Ljava/nio/ByteBuffer;)V", false);
+            mv.visitInsn(Opcodes.ARETURN);
+        });
+
+        byte[] rewritten = CompatRewriter.rewrite(original);
+        assertNotNull(rewritten, "CTOR should have been applied");
+
+        MethodNode mn = onlyMethod(rewritten);
+        TypeInsnNode allocation = null;
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() == Opcodes.NEW) {
+                allocation = (TypeInsnNode) insn;
+            }
+        }
+        assertNotNull(allocation);
+        assertEquals("com/cleanroommc/lwjgl/legacy/ShimPointerBuffer", allocation.desc);
+
+        MethodInsnNode init = findCall(mn, "<init>");
+        assertNotNull(init);
+        assertEquals("com/cleanroommc/lwjgl/legacy/ShimPointerBuffer", init.owner);
+        assertEquals("(Ljava/nio/ByteBuffer;)V", init.desc, "only the owner may change");
+        assertStackConsistent(mn);
+    }
+
+    @Test
+    void adaptsDroppedInstanceMethodToStaticHelper() {
+        byte[] original = sample("(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;", mv -> {
+            mv.visitVarInsn(Opcodes.ALOAD, 0);
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "org/lwjgl/PointerBuffer", "flip",
+                    "()Lorg/lwjgl/PointerBuffer;", false);
+            mv.visitInsn(Opcodes.ARETURN);
+        });
+
+        byte[] rewritten = CompatRewriter.rewrite(original);
+        assertNotNull(rewritten, "ADAPTER should have been applied");
+
+        MethodNode mn = onlyMethod(rewritten);
+        MethodInsnNode call = findCall(mn, "flip");
+        assertNotNull(call);
+        assertEquals(Opcodes.INVOKESTATIC, call.getOpcode(), "the receiver becomes the first parameter");
+        assertEquals("com/cleanroommc/lwjgl/legacy/L2Adapters", call.owner);
+        assertEquals("(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;", call.desc);
+        assertStackConsistent(mn);
+    }
+
+    @Test
+    void adaptsDroppedStaticMember() {
+        byte[] original = sample("()Z", mv -> {
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "org/lwjgl/openal/AL", "isCreated", "()Z", false);
+            mv.visitInsn(Opcodes.IRETURN);
+        });
+
+        byte[] rewritten = CompatRewriter.rewrite(original);
+        assertNotNull(rewritten, "ADAPTER should have been applied");
+
+        MethodNode mn = onlyMethod(rewritten);
+        MethodInsnNode call = findCall(mn, "isCreated");
+        assertNotNull(call);
+        assertEquals(Opcodes.INVOKESTATIC, call.getOpcode());
+        assertEquals("com/cleanroommc/lwjgl/legacy/L2Adapters", call.owner);
+        assertEquals("()Z", call.desc);
         assertStackConsistent(mn);
     }
 

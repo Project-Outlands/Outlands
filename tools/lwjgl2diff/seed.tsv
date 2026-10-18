@@ -58,3 +58,19 @@ ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/ShortBuff
 ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/IntBuffer;)V	-
 ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/FloatBuffer;)V	-
 ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/DoubleBuffer;)V	-
+#
+# ---------------------------------------------------------------- CTOR
+# new PointerBuffer(ByteBuffer) -> allocation of the subclass that keeps the container, as LWJGL2 did
+CTOR	org/lwjgl/PointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/ShimPointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	-
+#
+# ---------------------------------------------------------------- ADAPTER
+# both-exist classes: LWJGL3 dropped the member, the adapter rebuilds it from the modern API
+ADAPTER	org/lwjgl/PointerBuffer	getBuffer	()Ljava/nio/ByteBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	getBuffer	(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	position	(I)Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	position	(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	flip	()Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	flip	(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/openal/AL	create	()V	com/cleanroommc/lwjgl/legacy/L2Adapters	alCreate	()V	-
+ADAPTER	org/lwjgl/openal/AL	isCreated	()Z	com/cleanroommc/lwjgl/legacy/L2Adapters	isCreated	()Z	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformSize	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformSize	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformType	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformType	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glShaderSource	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
+ADAPTER	org/lwjgl/opengl/ARBShaderObjects	glShaderSourceARB	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-

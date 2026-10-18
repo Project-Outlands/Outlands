@@ -12,7 +12,7 @@ public final class RewriteTable {
     private RewriteTable() {}
 
     /** SHA-256 of the table body, must match rewrite-table.tsv. */
-    public static final String TABLE_SHA256 = "71e6bd66db910e617934189fb75e722e2487a9202fca5c1b83f20eb5ae169b4c";
+    public static final String TABLE_SHA256 = "12adcd95a4bfbcf8006231200a4ccee2bfbcc08cae75875d9d7adf98e33648e5";
 
     /** owner\0name\0desc */
     public static String key(String owner, String name, String desc) {
@@ -25,10 +25,10 @@ public final class RewriteTable {
     public static final Map<String, String> ALIAS = new HashMap<>(27 * 2);
     /** Descriptor changes. Value = "targetOwner\0targetName\0targetDesc\0recipe". */
     public static final Map<String, String> CONVERT = new HashMap<>(21 * 2);
-    /** Constructor call -> static factory. Value = "factoryOwner\0factoryName\0factoryDesc". */
-    public static final Map<String, String> CTOR = new HashMap<>(0 * 2);
-    /** Redirect to an adapter method. Value = "adapterOwner\0adapterName\0adapterDesc". */
-    public static final Map<String, String> ADAPTER = new HashMap<>(0 * 2);
+    /** Allocation redirected to a replacement class. Value = replacementOwner. */
+    public static final Map<String, String> CTOR = new HashMap<>(1 * 2);
+    /** Static replacement for a dropped member. Value = "adapterOwner\0adapterName\0adapterDesc". */
+    public static final Map<String, String> ADAPTER = new HashMap<>(9 * 2);
 
     static {
         RENAME.put(key("org/lwjgl/openal/AL10", "alGetDouble", "(ILjava/nio/DoubleBuffer;)V"), "alGetDoublev");
@@ -456,6 +456,18 @@ public final class RewriteTable {
         CONVERT.put(key("org/lwjgl/opengl/GL20", "glVertexAttribPointer", "(IIZZILjava/nio/ByteBuffer;)V"), "org/lwjgl/opengl/GL20\0glVertexAttribPointer\0(IIIZILjava/nio/ByteBuffer;)V\0typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_BYTE");
         CONVERT.put(key("org/lwjgl/opengl/GL20", "glVertexAttribPointer", "(IIZZILjava/nio/IntBuffer;)V"), "org/lwjgl/opengl/GL20\0glVertexAttribPointer\0(IIIZILjava/nio/IntBuffer;)V\0typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_INT");
         CONVERT.put(key("org/lwjgl/opengl/GL20", "glVertexAttribPointer", "(IIZZILjava/nio/ShortBuffer;)V"), "org/lwjgl/opengl/GL20\0glVertexAttribPointer\0(IIIZILjava/nio/ShortBuffer;)V\0typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_SHORT");
+
+        CTOR.put(key("org/lwjgl/PointerBuffer", "<init>", "(Ljava/nio/ByteBuffer;)V"), "com/cleanroommc/lwjgl/legacy/ShimPointerBuffer");
+
+        ADAPTER.put(key("org/lwjgl/PointerBuffer", "flip", "()Lorg/lwjgl/PointerBuffer;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0flip\0(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;");
+        ADAPTER.put(key("org/lwjgl/PointerBuffer", "getBuffer", "()Ljava/nio/ByteBuffer;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0getBuffer\0(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;");
+        ADAPTER.put(key("org/lwjgl/PointerBuffer", "position", "(I)Lorg/lwjgl/PointerBuffer;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0position\0(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;");
+        ADAPTER.put(key("org/lwjgl/openal/AL", "create", "()V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0alCreate\0()V");
+        ADAPTER.put(key("org/lwjgl/openal/AL", "isCreated", "()Z"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0isCreated\0()Z");
+        ADAPTER.put(key("org/lwjgl/opengl/ARBShaderObjects", "glShaderSourceARB", "(ILjava/nio/ByteBuffer;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glShaderSource\0(ILjava/nio/ByteBuffer;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniformSize", "(II)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniformSize\0(II)I");
+        ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniformType", "(II)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniformType\0(II)I");
+        ADAPTER.put(key("org/lwjgl/opengl/GL20", "glShaderSource", "(ILjava/nio/ByteBuffer;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glShaderSource\0(ILjava/nio/ByteBuffer;)V");
 
     }
 }
