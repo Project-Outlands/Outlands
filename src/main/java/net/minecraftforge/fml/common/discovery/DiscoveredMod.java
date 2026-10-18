@@ -1,4 +1,4 @@
-package com.cleanroommc.discovery;
+package net.minecraftforge.fml.common.discovery;
 
 import java.io.File;
 import java.util.List;

@@ -1,6 +1,6 @@
 package com.cleanroommc.cleanmix;
 
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.relauncher.CoreModManager;
 import net.minecraftforge.fml.relauncher.IFMLLoadingPlugin;
@@ -60,7 +60,7 @@ public class CleanMixHooks {
 
     public static void loadMixinBooterEarlyMixins(List<CoreModManager.FMLPluginWrapper> loadPlugins) {
         ILogger logger = MixinService.getService().getLogger("CleanMix");
-        Set<String> presentMods = CleanroomModDiscoverer.instance().presentMods();
+        Set<String> presentMods = ModDiscoverer.instance().presentMods();
         Set<IEarlyMixinLoader> queuedLoaders = new LinkedHashSet<>();
         Context context = new Context(null, presentMods);
         for (CoreModManager.FMLPluginWrapper plugin : loadPlugins) {
@@ -129,7 +129,7 @@ public class CleanMixHooks {
         for (ILateMixinLoader lateLoader : lateLoaders) {
             try {
                 for (String mixinConfig : lateLoader.getMixinConfigs()) {
-                    Context context = new Context(mixinConfig, CleanroomModDiscoverer.instance().presentMods());
+                    Context context = new Context(mixinConfig, ModDiscoverer.instance().presentMods());
                     if (lateLoader.shouldMixinConfigQueue(context)) {
                         logger.info("Adding [{}] mixin configuration.", mixinConfig);
                         Mixins.addConfiguration(mixinConfig);

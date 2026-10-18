@@ -39,8 +39,10 @@ import java.util.Set;
 
 import com.cleanroommc.cleanmix.CleanMixHooks;
 import com.cleanroommc.client.LoadingTracker;
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
-import com.cleanroommc.discovery.IdentifiedMods;
+import net.minecraft.launchwrapper.Launch;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
+import net.minecraftforge.fml.common.discovery.IdentifiedMods;
+import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.common.ForgeVersion;
 import net.minecraftforge.common.capabilities.CapabilityManager;
@@ -175,7 +177,7 @@ public class Loader
     private static List<String> injectedContainers;
     private ImmutableMap<String, String> fmlBrandingProperties;
     private File forcedModFile;
-    private CleanroomModDiscoverer discoverer;
+    private ModDiscoverer discoverer;
     private ProgressBar progressBar;
 
     public static Loader instance()
@@ -492,9 +494,11 @@ public class Loader
         modController = new LoadController(this);
         modController.transition(LoaderState.LOADING, false);
         injectedContainers.addAll(injectedModContainers);
-        discoverer = CleanroomModDiscoverer.instance();
+        discoverer = ModDiscoverer.instance();
         discoverer.addBuiltInModContainers(mods, minecraft, mcp);
         IdentifiedMods identifiedMods = discoverer.identifyMods(modClassLoader, injectedContainers, mods);
+        // Discovery has written every cache entry for this launch; drop the ones whose jar is gone.
+        RecordFile.sweep(Launch.minecraftHome);
         mods = identifiedMods.mods();
         identifyDuplicates(mods);
         namedMods = Maps.uniqueIndex(mods, ModContainer::getModId);

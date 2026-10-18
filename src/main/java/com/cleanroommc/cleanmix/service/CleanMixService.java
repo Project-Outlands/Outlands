@@ -2,7 +2,7 @@ package com.cleanroommc.cleanmix.service;
 
 import com.cleanroommc.cleanmix.CleanMixModContainer;
 import com.cleanroommc.common.CleanroomEnvironment;
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import com.google.common.base.Strings;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraft.launchwrapper.LaunchClassLoader;
@@ -73,7 +73,7 @@ public class CleanMixService extends AbstractMixinServiceLaunchWrapper {
 
     /**
      * @see CoreModManager#handleLaunch(File, LaunchClassLoader, FMLTweaker)
-     * @see CleanroomModDiscoverer#discoverMixinMods() 
+     * @see ModDiscoverer#discoverMixinMods() 
      */
     @Override
     public Collection<IContainerHandle> getMixinContainers() {
@@ -89,7 +89,7 @@ public class CleanMixService extends AbstractMixinServiceLaunchWrapper {
     protected String resolveSourceId(URI source) {
         if ("file".equals(source.getScheme())) {
             try {
-                String modId = CleanroomModDiscoverer.instance().modFromSource(new File(source));
+                String modId = ModDiscoverer.instance().modFromSource(new File(source));
                 if (modId != null) {
                     return modId;
                 }

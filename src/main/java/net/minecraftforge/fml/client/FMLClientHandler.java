@@ -38,7 +38,7 @@ import java.util.function.Predicate;
 import com.cleanroommc.client.modlist.ModListConfig;
 import com.cleanroommc.client.modlist.screen.ModListScreen;
 import com.cleanroommc.common.PatchModPresentChecker;
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.Gui;
@@ -221,7 +221,7 @@ public class FMLClientHandler implements IFMLSidedHandler
         SplashProgress.start();
         client = minecraft;
 
-        if (PatchModPresentChecker.isNotPresent() && CleanroomModDiscoverer.instance().hasForgeMods())
+        if (PatchModPresentChecker.isNotPresent() && ModDiscoverer.instance().hasForgeMods())
         {
             String warning = PatchModPresentChecker.getWarningMessage();
             String prompt = "Press any key to continue, ESC to exit.";

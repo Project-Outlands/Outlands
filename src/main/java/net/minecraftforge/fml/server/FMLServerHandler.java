@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import com.cleanroommc.common.PatchModPresentChecker;
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetHandlerPlayServer;
 import net.minecraft.network.NetworkManager;
@@ -98,7 +98,7 @@ public class FMLServerHandler implements IFMLSidedHandler
     {
         server = minecraftServer;
 
-        if (PatchModPresentChecker.isNotPresent() && CleanroomModDiscoverer.instance().hasForgeMods())
+        if (PatchModPresentChecker.isNotPresent() && ModDiscoverer.instance().hasForgeMods())
         {
             String text = PatchModPresentChecker.getWarningMessage() + "\n\n"
                 + "Run the command /fml confirm to proceed, or /fml cancel to abort.";

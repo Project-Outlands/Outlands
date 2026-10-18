@@ -24,7 +24,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.cleanroommc.common.CleanroomEnvironment;
-import com.cleanroommc.discovery.CleanroomModDiscoverer;
+import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraft.launchwrapper.ITweaker;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraft.launchwrapper.LaunchClassLoader;
@@ -245,9 +245,9 @@ public class CoreModManager {
             loadCoreMod(classLoader, coreModClassName, null);
         }
         // Coremods
-        CleanroomModDiscoverer.instance().discoverCoreMods(mcDir, classLoader, tweaker);
+        ModDiscoverer.instance().discoverCoreMods(mcDir, classLoader, tweaker);
         // Mixin Mods
-        CleanroomModDiscoverer.instance().discoverMixinMods();
+        ModDiscoverer.instance().discoverMixinMods();
     }
 
     // Some mods call this reflectively
@@ -421,7 +421,7 @@ public class CoreModManager {
         // Add the sorting tweaker first- it'll appear twice in the list
         tweakers.addFirst(fmlInjectionAndSortingTweaker);
         // Load rescued (ForceLoadAsMod) coremods
-        CleanroomModDiscoverer.instance().rescueDroppedCoremods();
+        ModDiscoverer.instance().rescueDroppedCoremods();
         // Early Mixin Loaders Instantiation
         CleanMixHooks.loadMixinBooterEarlyMixins(loadPlugins);
         // Add loadPlugins (including rescued coremods)

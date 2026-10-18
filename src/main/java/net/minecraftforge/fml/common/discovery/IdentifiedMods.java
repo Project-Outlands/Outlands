@@ -1,4 +1,4 @@
-package com.cleanroommc.discovery;
+package net.minecraftforge.fml.common.discovery;
 
 import net.minecraftforge.fml.common.ModContainer;
 
