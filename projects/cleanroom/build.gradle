@@ -80,11 +80,11 @@ repositories {
     mavenLocal()
     mavenCentral()
     maven {
-        name = 'Cleanroom Maven'
-        url = 'https://repo.cleanroommc.com/releases/'
+        url = "https://maven.arcseekers.com/releases/"
     }
     maven {
-        url = "https://maven.arcseekers.com/releases/"
+        name = 'Cleanroom Maven'
+        url = 'https://repo.cleanroommc.com/releases/'
     }
 }
 
@@ -309,7 +309,7 @@ dependencies {
     installer "org.ow2.asm:asm-deprecated:$props.asm_deprecated"
 
     // Hacks
-    installer "top.outlands:foundation:0.22.1"
+    installer "top.outlands:foundation:0.22.2"
     installer 'net.lenni0451:Reflect:1.6.4'
     installer 'net.lenni0451.commons:unchecked:1.9.2'
     installer 'org.javassist:javassist:3.30.2-GA'

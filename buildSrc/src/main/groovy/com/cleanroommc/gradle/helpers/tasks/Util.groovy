@@ -149,9 +149,10 @@ class Util {
 		def urlList = [
 				"https://repo.maven.apache.org/maven2/",
 				"https://libraries.minecraft.net/",
+                "https://nexus.jsdu.cn/repository",
+                "https://maven.arcseekers.com/releases/",
+                "https://maven.minecraftforge.net/",
 				"https://repo.cleanroommc.com/releases/",
-				"https://maven.arcseekers.com/releases/",
-				"https://maven.minecraftforge.net/",
 		]
 		try {
 			return urlList.stream().map(original -> original + path)
