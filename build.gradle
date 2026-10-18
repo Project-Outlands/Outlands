@@ -17,7 +17,7 @@ buildscript {
 }
 
 plugins {
-    id "org.jetbrains.gradle.plugin.idea-ext" version "1.3"
+    id "org.jetbrains.gradle.plugin.idea-ext" version "1.4.1"
     //id "com.palantir.git-version" version "4.2.0"
 }
 apply plugin: 'com.palantir.git-version' // Declared in buildSrc/build.gradle
