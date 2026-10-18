@@ -16,3 +16,5 @@ version.txt
 src/main/java/com/cleanroommc/common/CleanroomVersion.java
 
 !/.idea/icon.svg
+
+/tools/**/__pycache__/
