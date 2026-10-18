@@ -12,6 +12,7 @@ import javax.annotation.Nullable;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.fml.common.discovery.DiscoveredMod;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
+import top.outlands.foundation.boot.LoadingContext;
 
 import org.spongepowered.asm.util.Constants.ManifestAttributes;
 
@@ -114,9 +115,22 @@ final class ModSourceIndex {
                 || discovered.tweaker() != null;
     }
 
-    /** The artifact root (jar file or class directory) the class was found in, or {@code null} when unknown. */
+    /**
+     * The artifact root (jar file or class directory) the class was found in, or {@code null} when unknown.
+     *
+     * <p>{@link LoadingContext} answers this without any lookup: Foundation records the code source of the class it is
+     * loading for the duration of the transformer calls. Only classes loaded outside it fall back to a resource
+     * lookup, which costs a jar index scan.
+     */
     @Nullable
     private static File sourceOf(String internalName) {
+        LoadingContext context = LoadingContext.current();
+        if (context != null && context.codeSourceUrl() != null) {
+            File source = sourceOf(context.codeSourceUrl(), internalName);
+            if (source != null) {
+                return source;
+            }
+        }
         URL resource;
         try {
             resource = Launch.classLoader.getResource(internalName + ".class");

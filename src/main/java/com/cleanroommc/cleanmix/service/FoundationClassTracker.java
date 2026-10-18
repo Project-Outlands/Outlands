@@ -3,8 +3,7 @@ package com.cleanroommc.cleanmix.service;
 import net.minecraft.launchwrapper.Launch;
 import org.spongepowered.asm.service.IClassTracker;
 import top.outlands.foundation.boot.ActualClassLoader;
-import top.outlands.foundation.trie.PrefixTrie;
-import top.outlands.foundation.trie.TrieNode;
+import top.outlands.foundation.boot.PrefixMatcher;
 
 final class FoundationClassTracker implements IClassTracker {
 
@@ -22,10 +21,10 @@ final class FoundationClassTracker implements IClassTracker {
     @Override
     public String getClassRestrictions(String className) {
         String restrictions = "";
-        if (isExcluded(ActualClassLoader.classLoaderExceptions, className)) {
+        if (ActualClassLoader.classLoaderExceptions.matches(className)) {
             restrictions = "PACKAGE_CLASSLOADER_EXCLUSION";
         }
-        if (isExcluded(ActualClassLoader.transformerExceptions, className)) {
+        if (ActualClassLoader.transformerExceptions.matches(className)) {
             restrictions = (!restrictions.isEmpty() ? restrictions + "," : "") + "PACKAGE_TRANSFORMER_EXCLUSION";
         }
         return restrictions;
@@ -42,17 +41,12 @@ final class FoundationClassTracker implements IClassTracker {
                 || isExcluded(ActualClassLoader.transformerExceptions, name, transformedName);
     }
 
-    private static boolean isExcluded(PrefixTrie<Boolean> trie, String name, String transformedName) {
-        return isExcluded(trie, name) || (transformedName != null && isExcluded(trie, transformedName));
+    private static boolean isExcluded(PrefixMatcher matcher, String name, String transformedName) {
+        return isExcluded(matcher, name) || (transformedName != null && isExcluded(matcher, transformedName));
     }
 
-    /**
-     * An exclusion can be revoked by re-putting it as {@code false} (see
-     * {@link ActualClassLoader#removeTransformerExclusion}), so the node's value decides, not its presence.
-     */
-    private static boolean isExcluded(PrefixTrie<Boolean> trie, String name) {
-        TrieNode<Boolean> node = trie.getFirstKeyValueNode(name);
-        return node != null && Boolean.TRUE.equals(node.getValue());
+    private static boolean isExcluded(PrefixMatcher matcher, String name) {
+        return matcher.matches(name);
     }
 
 }
