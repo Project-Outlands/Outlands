@@ -45,6 +45,8 @@ import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.launcher.FMLTweaker;
 import net.minecraftforge.fml.relauncher.CoreModManager;
 import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
+
+import javax.annotation.Nullable;
 import org.apache.commons.io.IOUtils;
 import org.spongepowered.asm.launch.MixinBootstrap;
 import org.spongepowered.asm.launch.platform.container.ContainerHandleURI;
@@ -133,6 +135,15 @@ public final class ModDiscoverer {
 
     public Set<String> modsFromSource(File source) {
         return Collections.unmodifiableSet(fileToModIds.get(source.getAbsoluteFile()));
+    }
+
+    /**
+     * The early scan's record for {@code source}, or {@code null} when the source was not scanned. Callers must
+     * treat {@code null} as "not classified yet", never as "not a mod".
+     */
+    @Nullable
+    public DiscoveredMod discoveredMod(File source) {
+        return discoveredFiles.get(source.getAbsoluteFile());
     }
 
     public boolean isModBuiltIn(String modId) {
