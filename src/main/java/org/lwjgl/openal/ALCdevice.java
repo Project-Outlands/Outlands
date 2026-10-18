@@ -45,6 +45,11 @@ public final class ALCdevice {
      *
      * @param device address of actual device
      */
+    /** Wraps an existing handle, for the LWJGL3 side which only deals in raw device pointers. */
+    public static ALCdevice wrap(long handle) {
+        return new ALCdevice(handle);
+    }
+
     ALCdevice(long device) {
         this.device = device;
         this.valid = true;

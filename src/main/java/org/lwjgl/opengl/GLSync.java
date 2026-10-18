@@ -27,4 +27,9 @@ public final class GLSync extends PointerWrapperAbstract {
     GLSync(final long sync) {
         super(sync);
     }
+
+    /** Wraps a raw sync object, for the LWJGL3 side which deals in plain handles. */
+    public static GLSync wrap(final long sync) {
+        return new GLSync(sync);
+    }
 }

@@ -12,7 +12,7 @@ public final class RewriteTable {
     private RewriteTable() {}
 
     /** SHA-256 of the table body, must match rewrite-table.tsv. */
-    public static final String TABLE_SHA256 = "12adcd95a4bfbcf8006231200a4ccee2bfbcc08cae75875d9d7adf98e33648e5";
+    public static final String TABLE_SHA256 = "107c0b0c70caf3d58561379bbb1e0f75375f86ab466fc202e3f2abc72c23214c";
 
     /** owner\0name\0desc */
     public static String key(String owner, String name, String desc) {
@@ -28,7 +28,7 @@ public final class RewriteTable {
     /** Allocation redirected to a replacement class. Value = replacementOwner. */
     public static final Map<String, String> CTOR = new HashMap<>(1 * 2);
     /** Static replacement for a dropped member. Value = "adapterOwner\0adapterName\0adapterDesc". */
-    public static final Map<String, String> ADAPTER = new HashMap<>(9 * 2);
+    public static final Map<String, String> ADAPTER = new HashMap<>(24 * 2);
 
     static {
         RENAME.put(key("org/lwjgl/openal/AL10", "alGetDouble", "(ILjava/nio/DoubleBuffer;)V"), "alGetDoublev");
@@ -463,11 +463,26 @@ public final class RewriteTable {
         ADAPTER.put(key("org/lwjgl/PointerBuffer", "getBuffer", "()Ljava/nio/ByteBuffer;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0getBuffer\0(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;");
         ADAPTER.put(key("org/lwjgl/PointerBuffer", "position", "(I)Lorg/lwjgl/PointerBuffer;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0position\0(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;");
         ADAPTER.put(key("org/lwjgl/openal/AL", "create", "()V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0alCreate\0()V");
+        ADAPTER.put(key("org/lwjgl/openal/AL", "getDevice", "()Lorg/lwjgl/openal/ALCdevice;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0getDevice\0()Lorg/lwjgl/openal/ALCdevice;");
         ADAPTER.put(key("org/lwjgl/openal/AL", "isCreated", "()Z"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0isCreated\0()Z");
+        ADAPTER.put(key("org/lwjgl/openal/ALC10", "alcGetInteger", "(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0alcGetInteger\0(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V");
+        ADAPTER.put(key("org/lwjgl/openal/ALC10", "alcGetString", "(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0alcGetString\0(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;");
+        ADAPTER.put(key("org/lwjgl/openal/ALC10", "alcIsExtensionPresent", "(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0alcIsExtensionPresent\0(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z");
+        ADAPTER.put(key("org/lwjgl/opengl/AMDDebugOutput", "glDebugMessageCallbackAMD", "(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glDebugMessageCallbackAMD\0(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/ARBDebugOutput", "glDebugMessageCallbackARB", "(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glDebugMessageCallbackARB\0(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V");
         ADAPTER.put(key("org/lwjgl/opengl/ARBShaderObjects", "glShaderSourceARB", "(ILjava/nio/ByteBuffer;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glShaderSource\0(ILjava/nio/ByteBuffer;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniform", "(III)Ljava/lang/String;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniform\0(III)Ljava/lang/String;");
+        ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniform", "(IIILjava/nio/IntBuffer;)Ljava/lang/String;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniform\0(IIILjava/nio/IntBuffer;)Ljava/lang/String;");
         ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniformSize", "(II)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniformSize\0(II)I");
         ADAPTER.put(key("org/lwjgl/opengl/GL20", "glGetActiveUniformType", "(II)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetActiveUniformType\0(II)I");
         ADAPTER.put(key("org/lwjgl/opengl/GL20", "glShaderSource", "(ILjava/nio/ByteBuffer;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glShaderSource\0(ILjava/nio/ByteBuffer;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/GL32", "glClientWaitSync", "(Lorg/lwjgl/opengl/GLSync;IJ)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glClientWaitSync\0(Lorg/lwjgl/opengl/GLSync;IJ)I");
+        ADAPTER.put(key("org/lwjgl/opengl/GL32", "glDeleteSync", "(Lorg/lwjgl/opengl/GLSync;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glDeleteSync\0(Lorg/lwjgl/opengl/GLSync;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/GL32", "glFenceSync", "(II)Lorg/lwjgl/opengl/GLSync;"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glFenceSync\0(II)Lorg/lwjgl/opengl/GLSync;");
+        ADAPTER.put(key("org/lwjgl/opengl/GL32", "glGetSynci", "(Lorg/lwjgl/opengl/GLSync;I)I"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glGetSynci\0(Lorg/lwjgl/opengl/GLSync;I)I");
+        ADAPTER.put(key("org/lwjgl/opengl/GL32", "glWaitSync", "(Lorg/lwjgl/opengl/GLSync;IJ)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glWaitSync\0(Lorg/lwjgl/opengl/GLSync;IJ)V");
+        ADAPTER.put(key("org/lwjgl/opengl/GL43", "glDebugMessageCallback", "(Lorg/lwjgl/opengl/KHRDebugCallback;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glDebugMessageCallback\0(Lorg/lwjgl/opengl/KHRDebugCallback;)V");
+        ADAPTER.put(key("org/lwjgl/opengl/KHRDebug", "glDebugMessageCallback", "(Lorg/lwjgl/opengl/KHRDebugCallback;)V"), "com/cleanroommc/lwjgl/legacy/L2Adapters\0glDebugMessageCallback\0(Lorg/lwjgl/opengl/KHRDebugCallback;)V");
 
     }
 }
