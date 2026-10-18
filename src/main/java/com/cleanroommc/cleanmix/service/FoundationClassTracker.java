@@ -32,7 +32,7 @@ final class FoundationClassTracker implements IClassTracker {
 
     @Override
     public void registerInvalidClass(String name) {
-        this.classLoader.getInvalidClasses().add(name);
+        this.classLoader.registerInvalidClass(name);
     }
 
     /** Whether the name or transformedName is excluded from the classloader or from the transformer chain. */
