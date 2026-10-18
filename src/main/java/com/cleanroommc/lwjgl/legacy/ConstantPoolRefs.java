@@ -15,7 +15,10 @@ final class ConstantPoolRefs {
         return new String(classBytes, java.nio.charset.StandardCharsets.ISO_8859_1).indexOf(LWJGL_PREFIX) >= 0;
     }
 
-    /** Second gate: returns true if any Fieldref/Methodref owner is a LWJGL2 class. Parse errors are treated as "yes". */
+    /**
+     * Second gate: returns true if any Fieldref/Methodref owner is a class {@link RewriteTable} can rewrite a member
+     * of. Parse errors are treated as "yes".
+     */
     static boolean hasLwjgl2MemberRef(byte[] b) {
         if (b.length < 10) {
             return false;
@@ -81,7 +84,7 @@ final class ConstantPoolRefs {
                 continue;
             }
             final String owner = utf8(b, offset[nameIdx]);
-            if (owner != null && Lwjgl2ClassSet.NAMES.contains(owner)) {
+            if (owner != null && RewriteTableIndex.OWNERS.contains(owner)) {
                 return true;
             }
         }
