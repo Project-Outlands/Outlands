@@ -269,10 +269,22 @@ configurations {
     testCompile.extendsFrom(lwjglNatives)
 }
 
+// Plain LWJGL3 API jars (no classifier) for the table check and the upcoming compile-time API
+configurations {
+    lwjgl3Api {
+        transitive = false
+    }
+}
+
 dependencies {
-    // LWJGL
-    compileOnly "com.cleanroommc:lwjglx:1.0.0"
-    installer "com.cleanroommc:lwjglxx:1.1.22"
+    lwjglLibraries[0].each {
+        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
+    }
+
+    // LWJGL: the LWJGL2 API surface comes from the in-tree shims, so only LWJGL3 is compiled against.
+    lwjglLibraries[0].each {
+        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
+    }
     lwjglLibraries[0].each {
         if (it == 'lwjgl') {
             installer "org.lwjgl:$it:$props.lwjgl_version:unsafe"
@@ -1098,4 +1110,28 @@ publishing {
             artifact createMMCPack.outputZip
         }
     }
+}
+
+// Verifies the LWJGL2 -> LWJGL3 rewrite table against the resolved LWJGL3 jars.
+// Regenerate with: python3 tools/lwjgl2diff/derive.py ... --emit-java src/main/java
+tasks.register('checkLwjglCompatTable') {
+    group = 'verification'
+    description = 'Verify the LWJGL2->LWJGL3 rewrite table against the resolved LWJGL3 jars'
+    def table = rootProject.file('tools/lwjgl2diff/rewrite-table.tsv')
+    def generated = rootProject.file('src/main/java/com/cleanroommc/lwjgl/legacy/RewriteTable.java')
+    inputs.file(table)
+    inputs.file(generated)
+    inputs.files(configurations.lwjgl3Api)
+    outputs.upToDateWhen { false }
+    doLast {
+        def lwjgl3 = configurations.lwjgl3Api.files.sort { it.name }
+        if (lwjgl3.isEmpty()) {
+            throw new GradleException('no LWJGL3 jars found in the installer configuration')
+        }
+        com.cleanroommc.gradle.lwjgl2.LwjglCompatCheck.run(table, generated, lwjgl3)
+    }
+}
+
+tasks.named('check').configure {
+    dependsOn 'checkLwjglCompatTable'
 }

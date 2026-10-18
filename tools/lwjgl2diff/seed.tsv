@@ -1,0 +1,94 @@
+# Manual table entries, merged into rewrite-table.tsv by derive.py.
+# columns: kind, owner, name, desc, targetOwner, targetName, targetDesc, recipe
+# RENAME is derived automatically; only ALIAS (owner/name change) and CONVERT (argument change) belong here.
+# Every target is validated against the real L3 jars.
+#
+# ---------------------------------------------------------------- CONVERT
+# vertex array pointers: L2 infers the type from the buffer class, L3 requires it explicitly
+CONVERT	org/lwjgl/opengl/GL11	glVertexPointer	(IILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL11	glVertexPointer	(IIILjava/nio/FloatBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_FLOAT
+CONVERT	org/lwjgl/opengl/GL11	glVertexPointer	(IILjava/nio/ShortBuffer;)V	org/lwjgl/opengl/GL11	glVertexPointer	(IIILjava/nio/ShortBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_SHORT
+CONVERT	org/lwjgl/opengl/GL11	glVertexPointer	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL11	glVertexPointer	(IIILjava/nio/IntBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_INT
+CONVERT	org/lwjgl/opengl/GL11	glVertexPointer	(IILjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL11	glVertexPointer	(IIIJ)V	insConst:1:org/lwjgl/opengl/GL11/GL_DOUBLE;addr:3
+CONVERT	org/lwjgl/opengl/GL11	glTexCoordPointer	(IILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL11	glTexCoordPointer	(IIILjava/nio/FloatBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_FLOAT
+CONVERT	org/lwjgl/opengl/GL11	glTexCoordPointer	(IILjava/nio/ShortBuffer;)V	org/lwjgl/opengl/GL11	glTexCoordPointer	(IIILjava/nio/ShortBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_SHORT
+CONVERT	org/lwjgl/opengl/GL11	glTexCoordPointer	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL11	glTexCoordPointer	(IIILjava/nio/IntBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_INT
+CONVERT	org/lwjgl/opengl/GL11	glTexCoordPointer	(IILjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL11	glTexCoordPointer	(IIIJ)V	insConst:1:org/lwjgl/opengl/GL11/GL_DOUBLE;addr:3
+CONVERT	org/lwjgl/opengl/GL11	glNormalPointer	(ILjava/nio/ByteBuffer;)V	org/lwjgl/opengl/GL11	glNormalPointer	(IILjava/nio/ByteBuffer;)V	insConst:0:org/lwjgl/opengl/GL11/GL_BYTE
+CONVERT	org/lwjgl/opengl/GL11	glNormalPointer	(ILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL11	glNormalPointer	(IILjava/nio/FloatBuffer;)V	insConst:0:org/lwjgl/opengl/GL11/GL_FLOAT
+CONVERT	org/lwjgl/opengl/GL11	glNormalPointer	(ILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL11	glNormalPointer	(IILjava/nio/IntBuffer;)V	insConst:0:org/lwjgl/opengl/GL11/GL_INT
+CONVERT	org/lwjgl/opengl/GL11	glNormalPointer	(ILjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL11	glNormalPointer	(IIJ)V	insConst:0:org/lwjgl/opengl/GL11/GL_DOUBLE;addr:1
+CONVERT	org/lwjgl/opengl/GL11	glColorPointer	(IILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL11	glColorPointer	(IIILjava/nio/FloatBuffer;)V	insConst:1:org/lwjgl/opengl/GL11/GL_FLOAT
+CONVERT	org/lwjgl/opengl/GL11	glColorPointer	(IILjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL11	glColorPointer	(IIIJ)V	insConst:1:org/lwjgl/opengl/GL11/GL_DOUBLE;addr:2
+CONVERT	org/lwjgl/opengl/GL11	glColorPointer	(IZILjava/nio/ByteBuffer;)V	org/lwjgl/opengl/GL11	glColorPointer	(IIILjava/nio/ByteBuffer;)V	typeFromUnsigned:1:org/lwjgl/opengl/GL11/GL_BYTE
+CONVERT	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIZILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIIZILjava/nio/FloatBuffer;)V	insConst:2:org/lwjgl/opengl/GL11/GL_FLOAT
+CONVERT	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIZILjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIIZIJ)V	insConst:2:org/lwjgl/opengl/GL11/GL_DOUBLE;addr:4
+CONVERT	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIZZILjava/nio/ByteBuffer;)V	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIIZILjava/nio/ByteBuffer;)V	typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_BYTE
+CONVERT	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIZZILjava/nio/ShortBuffer;)V	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIIZILjava/nio/ShortBuffer;)V	typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_SHORT
+CONVERT	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIZZILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL20	glVertexAttribPointer	(IIIZILjava/nio/IntBuffer;)V	typeFromUnsigned:2:org/lwjgl/opengl/GL11/GL_INT
+# L3 3.4.x dropped the count+type+Buffer form, so pass the raw address
+CONVERT	org/lwjgl/opengl/GL11	glDrawElements	(IIILjava/nio/ByteBuffer;)V	org/lwjgl/opengl/GL11	glDrawElements	(IIIJ)V	addr:3
+#
+# ---------------------------------------------------------------- ALIAS
+# ARB shader uniforms -> core GL20 (identical descriptor, pure owner/name redirect)
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform1ARB	(ILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniform1fv	(ILjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform2ARB	(ILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniform2fv	(ILjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform3ARB	(ILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniform3fv	(ILjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform4ARB	(ILjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniform4fv	(ILjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform1ARB	(ILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL20	glUniform1iv	(ILjava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform2ARB	(ILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL20	glUniform2iv	(ILjava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform3ARB	(ILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL20	glUniform3iv	(ILjava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniform4ARB	(ILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL20	glUniform4iv	(ILjava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniformMatrix2ARB	(IZLjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniformMatrix2fv	(IZLjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniformMatrix3ARB	(IZLjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniformMatrix3fv	(IZLjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBShaderObjects	glUniformMatrix4ARB	(IZLjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL20	glUniformMatrix4fv	(IZLjava/nio/FloatBuffer;)V	-
+# ARB VBO -> core GL15
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glGenBuffersARB	()I	org/lwjgl/opengl/GL15	glGenBuffers	()I	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glGenBuffersARB	(Ljava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGenBuffers	(Ljava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBindBufferARB	(II)V	org/lwjgl/opengl/GL15	glBindBuffer	(II)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glDeleteBuffersARB	(I)V	org/lwjgl/opengl/GL15	glDeleteBuffers	(I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glDeleteBuffersARB	(Ljava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glDeleteBuffers	(Ljava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(IJI)V	org/lwjgl/opengl/GL15	glBufferData	(IJI)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(ILjava/nio/ByteBuffer;I)V	org/lwjgl/opengl/GL15	glBufferData	(ILjava/nio/ByteBuffer;I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(ILjava/nio/ShortBuffer;I)V	org/lwjgl/opengl/GL15	glBufferData	(ILjava/nio/ShortBuffer;I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(ILjava/nio/IntBuffer;I)V	org/lwjgl/opengl/GL15	glBufferData	(ILjava/nio/IntBuffer;I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(ILjava/nio/FloatBuffer;I)V	org/lwjgl/opengl/GL15	glBufferData	(ILjava/nio/FloatBuffer;I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferDataARB	(ILjava/nio/DoubleBuffer;I)V	org/lwjgl/opengl/GL15	glBufferData	(ILjava/nio/DoubleBuffer;I)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/ByteBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/ByteBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/ShortBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/ShortBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/IntBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/FloatBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/FloatBuffer;)V	-
+ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/DoubleBuffer;)V	org/lwjgl/opengl/GL15	glBufferSubData	(IJLjava/nio/DoubleBuffer;)V	-
+#
+# ---------------------------------------------------------------- CTOR
+# new PointerBuffer(ByteBuffer) -> allocation of the subclass that keeps the container, as LWJGL2 did
+CTOR	org/lwjgl/PointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/ShimPointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	-
+#
+# ---------------------------------------------------------------- ADAPTER
+# both-exist classes: LWJGL3 dropped the member, the adapter rebuilds it from the modern API
+ADAPTER	org/lwjgl/PointerBuffer	getBuffer	()Ljava/nio/ByteBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	getBuffer	(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	position	(I)Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	position	(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	flip	()Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	flip	(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/openal/AL	create	()V	com/cleanroommc/lwjgl/legacy/L2Adapters	alCreate	()V	-
+ADAPTER	org/lwjgl/openal/AL	isCreated	()Z	com/cleanroommc/lwjgl/legacy/L2Adapters	isCreated	()Z	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformSize	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformSize	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformType	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformType	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glShaderSource	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
+ADAPTER	org/lwjgl/opengl/ARBShaderObjects	glShaderSourceARB	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
+ADAPTER	org/lwjgl/openal/AL	getDevice	()Lorg/lwjgl/openal/ALCdevice;	com/cleanroommc/lwjgl/legacy/L2Adapters	getDevice	()Lorg/lwjgl/openal/ALCdevice;	-
+ADAPTER	org/lwjgl/openal/ALC10	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/openal/ALC10	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	com/cleanroommc/lwjgl/legacy/L2Adapters	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	-
+ADAPTER	org/lwjgl/openal/ALC10	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(III)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniform	(III)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/opengl/KHRDebug	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
+ADAPTER	org/lwjgl/opengl/GL43	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
+ADAPTER	org/lwjgl/opengl/ARBDebugOutput	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	-
+ADAPTER	org/lwjgl/opengl/AMDDebugOutput	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	com/cleanroommc/lwjgl/legacy/L2Adapters	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	-
+ADAPTER	org/lwjgl/opengl/GL32	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	-
+ADAPTER	org/lwjgl/opengl/GL32	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	-
+# the typed suffix family is ambiguous here (iv vs uiv), so pin the signed form
+RENAME	org/lwjgl/opengl/GL15	glGetQueryObject	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectiv	(IILjava/nio/IntBuffer;)V	-
+RENAME	org/lwjgl/opengl/GL15	glGetQueryObjectu	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectuiv	(IILjava/nio/IntBuffer;)V	-
