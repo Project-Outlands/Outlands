@@ -95,7 +95,7 @@ configurations {
     }
 }
 dependencies {
-    renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr3'
+    renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr5'
 }
 
 tasks.register('renamePatchedSources', JavaExec) {
