@@ -5,6 +5,7 @@ import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.common.config.ConfigManager;
 import org.lwjgl.system.Platform;
 import org.lwjgl.LWJGLException;
+import org.lwjgl.MainThread;
 import org.lwjgl.input.*;
 import org.lwjgl.util.Rectangle;
 import org.lwjgl.PointerBuffer;
@@ -63,6 +64,11 @@ public class Display {
 
     static {
         Sys.initialize(); // init using dummy sys method
+
+        // TODO: drop once the SDL display rewrite replaces this static block.
+        if (!GLFW.glfwInit()) {
+            throw new IllegalStateException("Unable to initialize glfw");
+        }
 
         long monitor = glfwGetPrimaryMonitor();
         GLFWVidMode vidmode = glfwGetVideoMode(monitor);
@@ -624,6 +630,8 @@ public class Display {
     }
 
     public static void processMessages() {
+        // Queued main-thread tasks land here; must precede the window calls so they apply this frame.
+        MainThread.drain();
         glfwPollEvents();
         Keyboard.poll();
         Mouse.poll();

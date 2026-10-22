@@ -1,41 +1,81 @@
 package org.lwjgl;
 
-import static org.lwjgl.glfw.GLFW.glfwInit;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_EVENTS;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_GAMEPAD;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_HAPTIC;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_JOYSTICK;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_SENSOR;
+import static org.lwjgl.sdl.SDLInit.SDL_INIT_VIDEO;
+import static org.lwjgl.sdl.SDLInit.SDL_Init;
 
-import java.awt.*;
 import java.net.URI;
 import java.util.Objects;
 
-import javax.swing.JOptionPane;
-import javax.swing.UIManager;
+import org.lwjgl.sdl.SDLClipboard;
+import org.lwjgl.sdl.SDLHints;
+import org.lwjgl.sdl.SDLMessageBox;
+import org.lwjgl.sdl.SDLMisc;
+import org.lwjgl.sdl.SDLStdinc;
+import org.lwjgl.sdl.SDLTimer;
+import org.lwjgl.system.Configuration;
+import org.lwjgl.system.Platform;
+import org.lwjgl.system.Pointer;
 
 import net.minecraftforge.common.ForgeEarlyConfig;
-import org.lwjgl.Version;
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.system.*;
-import org.lwjgl.opengl.Display;
 
+/**
+ * LWJGL2 system/runtime services, backed by SDL3.
+ */
 public class Sys {
 
-    static {
-        if (Platform.get() == Platform.MACOSX) {
-            Configuration.GLFW_CHECK_THREAD0.set(false);
-            Configuration.GLFW_LIBRARY_NAME.set("glfw_async");
-            Toolkit.getDefaultToolkit();
+    private static boolean initialized = false;
+
+    /**
+     * Brings up the SDL subsystems. Idempotent; must be reached from the main thread.
+     */
+    public static void initialize() {
+        if (initialized) {
+            return;
         }
-        if (Objects.requireNonNullElse(System.getenv("XDG_SESSION_TYPE"),"").toLowerCase().startsWith("wayland")) {
-            if (!ForgeEarlyConfig.FORCE_WAYLAND) {
-                GLFW.glfwInitHint(GLFW.GLFW_PLATFORM, GLFW.GLFW_PLATFORM_X11);
-            } else {
-                GLFW.glfwInitHint(GLFW.GLFW_PLATFORM, GLFW.GLFW_PLATFORM_WAYLAND);
+        MainThread.runOnMainThread(() -> {
+            if (Platform.get() == Platform.MACOSX) {
+                Configuration.HARFBUZZ_LIBRARY_NAME.set("freetype");
             }
+            applyPlatformHints();
+            if (!SDL_Init(
+                SDL_INIT_VIDEO | SDL_INIT_EVENTS
+                    | SDL_INIT_JOYSTICK
+                    | SDL_INIT_GAMEPAD
+                    | SDL_INIT_HAPTIC
+                    | SDL_INIT_SENSOR)) {
+                throw new SDLException("Could not initialize SDL");
+            }
+            initialized = true;
+        });
+    }
+
+    /** Applies the per-platform driver hints. */
+    private static void applyPlatformHints() {
+        final Platform platform = Platform.get();
+        switch (platform) {
+            case MACOSX -> SDLHints.SDL_SetHint(SDLHints.SDL_HINT_MAC_OPENGL_ASYNC_DISPATCH, "1");
+            case LINUX -> {
+                SDLHints.SDL_SetHint(SDLHints.SDL_HINT_VIDEO_FORCE_EGL, "1");
+                SDLStdinc.SDL_setenv_unsafe("__GL_THREADED_OPTIMIZATIONS", "0", 1);
+            }
+            default -> {}
         }
-        if (!glfwInit()) {
-            throw new IllegalStateException("Unable to initialize glfw");
+        SDLHints.SDL_SetHint(SDLHints.SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+        if (platform == Platform.LINUX && isWaylandSession()) {
+            SDLHints.SDL_SetHint(SDLHints.SDL_HINT_VIDEO_DRIVER, ForgeEarlyConfig.FORCE_WAYLAND ? "wayland" : "x11");
         }
     }
 
-    public static void initialize() {}
+    private static boolean isWaylandSession() {
+        return Objects.requireNonNullElse(System.getenv("XDG_SESSION_TYPE"), "")
+            .toLowerCase()
+            .startsWith("wayland");
+    }
 
     /** Returns the LWJGL version. */
     public static String getVersion() {
@@ -61,41 +101,37 @@ public class Sys {
      * @return the current hires time, in ticks (always >= 0)
      */
     public static long getTime() {
-        return (long) (GLFW.glfwGetTime() * 1000);
+        return SDLTimer.SDL_GetTicksNS() / 1_000_000L;
     }
 
     public static long getNanoTime() {
-        return (long) (GLFW.glfwGetTime() * (1000L * 1000L * 1000L));
+        return SDLTimer.SDL_GetTicksNS();
     }
 
     public static boolean openURL(String url) {
-        if (!Desktop.isDesktopSupported()) return false;
-
-        Desktop desktop = Desktop.getDesktop();
-        if (!desktop.isSupported(Desktop.Action.BROWSE)) return false;
-
-        try {
-            desktop.browse(new URI(url));
-            return true;
-        } catch (Exception ex) {
-            return false;
-        }
+        return MainThread.runOnMainThread(() -> SDLMisc.SDL_OpenURL(url));
     }
 
     public static void alert(String title, String message) {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            LWJGLUtil.log("Caught exception while setting LAF: " + e);
-        }
-        JOptionPane.showMessageDialog(null, message, title, JOptionPane.WARNING_MESSAGE);
+        MainThread.runOnMainThread(
+            () -> SDLMessageBox.SDL_ShowSimpleMessageBox(
+                SDLMessageBox.SDL_MESSAGEBOX_WARNING,
+                title,
+                message,
+                org.lwjgl.opengl.Display.getWindow()));
     }
 
     public static boolean is64Bit() {
-        return Platform.getArchitecture().toString().endsWith("64");
+        return Pointer.BITS64;
     }
 
     public static String getClipboard() {
-        return GLFW.glfwGetClipboardString(Display.getWindow());
+        final String text = MainThread.runOnMainThread(SDLClipboard::SDL_GetClipboardText);
+        return text == null ? "" : text;
+    }
+
+    /** Convenience overload for callers holding a URI. */
+    public static boolean openURL(URI uri) {
+        return uri != null && openURL(uri.toString());
     }
 }
