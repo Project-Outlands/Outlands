@@ -83,8 +83,8 @@ ext {
     // Do not change the order unless it is required so
     lwjglLibraries = [
         [
-            'lwjgl-glfw', 'lwjgl-sdl', 'lwjgl-jemalloc', 'lwjgl-openal',
-            'lwjgl-opengl', 'lwjgl-stb', 'lwjgl-tinyfd', 'lwjgl'
+            'lwjgl-sdl', 'lwjgl-jemalloc', 'lwjgl-openal',
+            'lwjgl-opengl', 'lwjgl-stb', 'lwjgl'
         ],
 
         [

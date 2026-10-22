@@ -3,9 +3,9 @@ package com.cleanroommc.client;
 import java.io.*;
 import java.util.*;
 
-import com.cleanroommc.client.windows.TaskbarApi;
-import com.cleanroommc.client.windows.WindowsProperties;
-import com.sun.jna.platform.win32.WinDef.HWND;
+
+
+
 
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.common.ForgeEarlyConfig;
@@ -165,10 +165,10 @@ public class LoadingTracker {
         });
 
         if (ForgeEarlyConfig.MODERN_WINDOWS_STYLES.UPDATE_WINDOWS_TASKBAR_PROGRESS) {
-            setTaskbarState(TaskbarApi.TBPFLAG.TBPF_NORMAL);
+            setTaskbarState(false);
             updateTaskbar(0, true);
         } else {
-            setTaskbarState(TaskbarApi.TBPFLAG.TBPF_INDETERMINATE);
+            setTaskbarState(true);
         }
     }
 
@@ -279,13 +279,13 @@ public class LoadingTracker {
         }
     }
 
-    private static void setTaskbarState(TaskbarApi.TBPFLAG flag) {
-        if (!SystemUtils.IS_OS_WINDOWS) return;
-        TaskbarApi api = TaskbarApi.getInstance();
-        if (api == null || WindowsProperties.handle == Long.MIN_VALUE) return;
+    private static void setTaskbarState(boolean indeterminate) {
         try {
-            HWND hwnd = TaskbarApi.hwndFromGlfw(WindowsProperties.handle);
-            api.setProgressState(hwnd, flag);
+            if (indeterminate) {
+                TaskbarProgress.setIndeterminate();
+            } else {
+                TaskbarProgress.setNormal();
+            }
         } catch (Throwable t) {
             FMLLog.log.debug("LoadingTracker: Failed to set taskbar state", t);
         }
@@ -296,17 +296,14 @@ public class LoadingTracker {
     }
 
     private static void updateTaskbar(int progress, boolean force) {
-        if (!SystemUtils.IS_OS_WINDOWS || !ForgeEarlyConfig.MODERN_WINDOWS_STYLES.UPDATE_WINDOWS_TASKBAR_PROGRESS) return;
-        TaskbarApi api = TaskbarApi.getInstance();
-        if (api == null || WindowsProperties.handle == Long.MIN_VALUE) return;
+        if (!ForgeEarlyConfig.MODERN_WINDOWS_STYLES.UPDATE_WINDOWS_TASKBAR_PROGRESS) return;
 
         long now = System.nanoTime();
         if (!force && lastTaskbarUpdateNanos != 0L && now - lastTaskbarUpdateNanos < TASKBAR_UPDATE_DEBOUNCE_NANOS) return;
         lastTaskbarUpdateNanos = now;
 
         try {
-            HWND hwnd = TaskbarApi.hwndFromGlfw(WindowsProperties.handle);
-            api.setProgressValue(hwnd, progress, MAX_PROGRESS);
+            TaskbarProgress.setValue(progress, MAX_PROGRESS);
         } catch (Throwable t) {
             FMLLog.log.debug("LoadingTracker: Failed to update taskbar progress", t);
         }

@@ -503,6 +503,9 @@ public class Display {
         while (SDLEvents.SDL_PollEvent(sdlEvent)) {
             handleSdlEvent();
         }
+        // Refreshed after the queue drains so state queries match the events just delivered.
+        Keyboard.sdlKeyPressedArray = SDLKeyboard.SDL_GetKeyboardState();
+        Mouse.updateSdlButtonState();
     }
 
     /**

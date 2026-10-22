@@ -1,5 +1,8 @@
 package com.cleanroommc.client.windows;
 
+import org.lwjgl.Sys;
+import org.lwjgl.sdl.SDLVideo;
+
 import com.sun.jna.Function;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -13,7 +16,7 @@ import com.sun.jna.platform.win32.WinDef.HWND;
 import com.sun.jna.platform.win32.WinNT.HRESULT;
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
-import org.lwjgl.glfw.GLFWNativeWin32;
+
 
 import java.util.List;
 
@@ -96,9 +99,7 @@ public final class TaskbarApi implements AutoCloseable {
         return api;
     }
 
-    public static HWND hwndFromGlfw(long glfwWindow) {
-        return new HWND(Pointer.createConstant(GLFWNativeWin32.glfwGetWin32Window(glfwWindow)));
-    }
+
 
     public void hrInit() {
         checkHR(invokeHRESULT(VTBL_HR_INIT), "ITaskbarList::HrInit");
@@ -166,7 +167,12 @@ public final class TaskbarApi implements AutoCloseable {
     }
 
     public static boolean flashTaskbarUntilForeground(long window) {
-        final WinDef.HWND hwnd = TaskbarApi.hwndFromGlfw(window);
+        Sys.checkSdl(SDLVideo.SDL_FlashWindow(window, SDLVideo.SDL_FLASH_UNTIL_FOCUSED));
+        return true;
+    }
+
+    private static boolean flashWindowLegacy(long window) {
+        final WinDef.HWND hwnd = new HWND(Pointer.createConstant(window));
         User32Ex.FLASHWINFO info = new User32Ex.FLASHWINFO();
         info.hwnd = hwnd;
         info.dwFlags = User32Ex.FLASHW_TRAY | User32Ex.FLASHW_TIMERNOFG;

@@ -19,9 +19,16 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.glfw.GLFWImage;
+
+
 import org.lwjgl.BufferUtils;
+import org.lwjgl.MainThread;
+import org.lwjgl.Sys;
+import org.lwjgl.sdl.SDLMouse;
+import org.lwjgl.sdl.SDLPixels;
+import org.lwjgl.sdl.SDLSurface;
+import org.lwjgl.sdl.SDL_Surface;
+import java.util.Objects;
 import org.lwjgl.LWJGLException;
 import com.cleanroommc.lwjgl.legacy.BufferCasts;
 
@@ -78,12 +85,22 @@ public class Cursor {
         for (i = 0; i < array.length; i++) {
             fixed[i] = array[width * (height - i / width - 1) + i % width];
         }
-        ByteBuffer bb = BufferUtils.createByteBuffer(images.capacity() * 4);
+        final ByteBuffer bb = BufferUtils.createByteBuffer(images.capacity() * 4);
         bb.asIntBuffer().put(fixed);
-        GLFWImage image = new GLFWImage(BufferUtils.createByteBuffer(GLFWImage.SIZEOF));
-        image.set(width, height, bb);
-        addr = GLFW.glfwCreateCursor(image, xHotspot, height - yHotspot);
-        
+
+        final SDL_Surface surface = Sys
+            .checkSdl(SDLSurface.SDL_CreateSurface(width, height, SDLPixels.SDL_PIXELFORMAT_ARGB8888));
+        Sys.checkSdl(SDLSurface.SDL_LockSurface(surface));
+        final ByteBuffer pixels = Objects.requireNonNull(surface.pixels());
+        final int savedPos = bb.position();
+        pixels.put(bb);
+        bb.position(savedPos);
+        SDLSurface.SDL_UnlockSurface(surface);
+
+        addr = MainThread.runOnMainThread(
+            () -> Sys.checkSdl(SDLMouse.SDL_CreateColorCursor(surface, xHotspot, height - yHotspot)));
+        SDLSurface.SDL_DestroySurface(surface);
+
         cursors = null;
     }
 
@@ -204,7 +221,12 @@ public class Cursor {
      * cursor)
      */
     public void destroy() {
-        // TODO
+        if (destroyed) {
+            return;
+        }
+        destroyed = true;
+        final long handle = addr;
+        MainThread.runOnMainThread(() -> SDLMouse.SDL_DestroyCursor(handle));
     }
 
     /**

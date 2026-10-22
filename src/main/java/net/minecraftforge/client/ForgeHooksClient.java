@@ -40,6 +40,7 @@ import javax.vecmath.Vector4f;
 import com.cleanroommc.client.LoadingTracker;
 import com.cleanroommc.client.windows.DwmApi;
 import com.cleanroommc.client.windows.NtDll;
+import com.cleanroommc.client.TaskbarProgress;
 import com.cleanroommc.client.windows.TaskbarApi;
 import com.cleanroommc.client.windows.WindowsProperties;
 import net.minecraft.block.Block;
@@ -1020,13 +1021,6 @@ public class ForgeHooksClient
     
     public static void clearTaskbarProgress() {
         LoadingTracker.finish();
-        if (SystemUtils.IS_OS_WINDOWS) {
-            var taskbar = TaskbarApi.getInstance();
-            if (taskbar != null) {
-                taskbar.clearProgress(TaskbarApi.hwndFromGlfw(WindowsProperties.handle));
-            } else {
-                FMLLog.log.error("Unable to clear taskbar progress, cannot invoke a null object.");
-            }
-        }
+        TaskbarProgress.clear();
     }
 }

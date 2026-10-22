@@ -1,5 +1,7 @@
 package org.lwjgl.input;
 
+import java.nio.ByteBuffer;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Map;
@@ -8,7 +10,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.lang3.StringUtils;
-import org.lwjgl.glfw.GLFW;
+import org.lwjgl.sdl.SDLKeyboard;
 import org.lwjgl.LWJGLException;
 import org.lwjgl.Sys;
 import org.lwjgl.opengl.Display;
@@ -169,6 +171,9 @@ public class Keyboard {
 
     public static final int KEYBOARD_SIZE = Short.MAX_VALUE;
 
+    /** Snapshot of SDL's keyboard state array, refreshed by the event pump. */
+    public static ByteBuffer sdlKeyPressedArray = null;
+
     private static final String[] unlocalizedKeyNameMiniLut = new String[Short.MAX_VALUE];
 
     static {
@@ -207,24 +212,6 @@ public class Keyboard {
         }
     }
 
-    public static void addGlfwKeyEvent(long window, int key, int scancode, int action, int mods, char c) {
-        final KeyState state;
-        switch (action) {
-            case GLFW.GLFW_PRESS -> state = KeyState.PRESS;
-            case GLFW.GLFW_RELEASE -> state = KeyState.RELEASE;
-            case GLFW.GLFW_REPEAT -> {
-                state = KeyState.REPEAT;
-                if (!doRepeatEvents) {
-                    return;
-                }
-            }
-            default -> state = KeyState.RELEASE;
-        }
-        try {
-            queue.add(new KeyEvent(KeyCodes.toLwjglKey(key), c, state, Sys.getNanoTime()));
-        } catch (IllegalStateException ignored) {}
-    }
-
     public static void addKeyEvent(int key, boolean pressed) {
         try {
             queue.add(new KeyEvent(key, '\0', pressed ? KeyState.PRESS : KeyState.RELEASE, Sys.getNanoTime()));
@@ -261,7 +248,12 @@ public class Keyboard {
     public static void create() throws LWJGLException {}
 
     public static boolean isKeyDown(int key) {
-        return GLFW.glfwGetKey(Display.getWindow(), KeyCodes.toGlfwKey(key)) == GLFW.GLFW_PRESS;
+        final ByteBuffer state = sdlKeyPressedArray;
+        if (state == null) {
+            return false;
+        }
+        final int scancode = KeyCodes.lwjglToSdlScancode(key);
+        return scancode > 0 && scancode < state.capacity() && state.get(scancode) != 0;
     }
 
     public static void poll() {
@@ -316,17 +308,17 @@ public class Keyboard {
         if (key == KEY_NONE) {
             return "NONE";
         }
-        // GLFW caches this internally, and knows when keyboard layouts switch.
-        final String glfwName = StringUtils.toRootUpperCase(GLFW.glfwGetKeyName(KeyCodes.toGlfwKey(key), 0));
+        // SDL resolves names from the active layout and reports layout changes via SDL_EVENT_KEYMAP_CHANGED.
+        final String sdlName = StringUtils.toRootUpperCase(SDLKeyboard.SDL_GetKeyName(KeyCodes.lwjglToSdlKeycode(key)));
         final String name;
-        if (glfwName == null) {
+        if (sdlName == null || sdlName.isEmpty()) {
             if (key >= 0 && key < unlocalizedKeyNameMiniLut.length) {
                 name = unlocalizedKeyNameMiniLut[key];
             } else {
                 name = "Key " + key;
             }
         } else {
-            name = glfwName;
+            name = sdlName;
         }
         reverseKeyMap.put(name, key);
         return name;

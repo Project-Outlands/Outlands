@@ -10,7 +10,8 @@ import com.sun.jna.Structure;
 import com.sun.jna.platform.win32.WinDef.HWND;
 import com.sun.jna.ptr.IntByReference;
 import net.minecraftforge.common.ForgeEarlyConfig;
-import org.lwjgl.glfw.GLFWNativeWin32;
+import org.lwjgl.sdl.SDLProperties;
+import org.lwjgl.sdl.SDLVideo;
 import org.lwjgl.system.NativeType;
 import java.util.List;
 
@@ -97,7 +98,14 @@ public interface DwmApi extends Library {
             return;
         }
 
-        final HWND hwnd = new HWND(Pointer.createConstant(GLFWNativeWin32.glfwGetWin32Window(window)));
+        final long nativeHandle = SDLProperties.SDL_GetPointerProperty(
+            SDLVideo.SDL_GetWindowProperties(window),
+            SDLVideo.SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+            0L);
+        if (nativeHandle == 0L) {
+            return;
+        }
+        final HWND hwnd = new HWND(Pointer.createConstant(nativeHandle));
         if (fullscreen) {
             DwmApi.disableWindowEffect(hwnd);
             return;
