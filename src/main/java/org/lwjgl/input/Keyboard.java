@@ -230,6 +230,22 @@ public class Keyboard {
             queue.add(new KeyEvent(key, '\0', pressed ? KeyState.PRESS : KeyState.RELEASE, Sys.getNanoTime()));
         } catch (IllegalStateException ignored) {}
     }
+
+    /**
+     * Records a key event already translated to an LWJGL2 keycode.
+     *
+     * @param key      LWJGL2 keycode
+     * @param c        the character produced, or {@code '\0'}
+     * @param state    press, release or repeat
+     */
+    public static void addSdlKeyEvent(int key, char c, KeyState state) {
+        if (state == KeyState.REPEAT && !doRepeatEvents) {
+            return;
+        }
+        try {
+            queue.add(new KeyEvent(key, c, state, Sys.getNanoTime()));
+        } catch (IllegalStateException ignored) {}
+    }
     public static void addKeyEvent(KeyEvent event) {
         try {
             queue.add(event);

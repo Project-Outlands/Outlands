@@ -15,15 +15,18 @@
  */
 package org.lwjgl.opengl;
 
-import static org.lwjgl.glfw.GLFW.GLFW_FALSE;
-import static org.lwjgl.glfw.GLFW.GLFW_VISIBLE;
-import static org.lwjgl.glfw.GLFW.glfwWindowHint;
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.sdl.SDLVideo.SDL_CreateWindow;
+import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_HIDDEN;
+import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
+import static org.lwjgl.system.MemoryUtil.NULL;
 
-import org.lwjgl.glfw.GLFW;
 import org.lwjgl.LWJGLException;
 import org.lwjgl.LWJGLUtil;
+import org.lwjgl.MainThread;
 import org.lwjgl.PointerBuffer;
+import org.lwjgl.Sys;
+import org.lwjgl.sdl.SDLVideo;
 
 /** @author Spasi */
 public class DrawableGL implements DrawableLWJGL {
@@ -38,7 +41,15 @@ public class DrawableGL implements DrawableLWJGL {
     protected ContextGL context;
 
     protected DrawableGL() {
-        context = new ContextGL(Display.getWindow(), false);
+        this(Display.getWindow(), Display.getGlContext(), false);
+    }
+
+    protected DrawableGL(long window, long glContext, boolean shared) {
+        context = new ContextGL(window, glContext, shared);
+    }
+
+    protected DrawableGL(ContextGL gl) {
+        context = gl;
     }
 
     public void setPixelFormat(final PixelFormatLWJGL pf) throws LWJGLException {
@@ -62,12 +73,18 @@ public class DrawableGL implements DrawableLWJGL {
 
     public ContextGL createSharedContext() throws LWJGLException {
         synchronized (GlobalLock.lock) {
-            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-            long hiddenWindow = GLFW.glfwCreateWindow(16, 16, "MC - Shared Drawable", 0, this.context.glfwWindow);
-            if (hiddenWindow == 0) {
-                throw new LWJGLException("Couldn't create shared context hidden window");
-            }
-            return new ContextGL(hiddenWindow, true);
+            return MainThread.runOnMainThread(() -> {
+                final long prevContext = SDLVideo.SDL_GL_GetCurrentContext();
+                final long prevWindow = SDLVideo.SDL_GL_GetCurrentWindow();
+                Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(this.context.sdlWindow, this.context.sdlContext));
+
+                final long hiddenWindow = Sys
+                    .checkSdl(SDL_CreateWindow("MC - Shared Drawable", 16, 16, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN));
+                final long sharedContext = Sys.checkSdl(SDLVideo.SDL_GL_CreateContext(hiddenWindow));
+
+                Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(prevWindow, prevContext));
+                return new ContextGL(hiddenWindow, sharedContext, true);
+            });
         }
     }
 

@@ -134,4 +134,43 @@ public class Sys {
     public static boolean openURL(URI uri) {
         return uri != null && openURL(uri.toString());
     }
+
+    /**
+     * Fails when an SDL call reported an error.
+     *
+     * @param result the SDL return value
+     */
+    public static void checkSdl(boolean result) {
+        if (!result) {
+            throw new SDLException();
+        }
+    }
+
+    /**
+     * Fails when an SDL call returned a null pointer.
+     *
+     * @param result the SDL return value
+     * @return the same value
+     */
+    public static <T> T checkSdl(T result) {
+        if (result == null) {
+            throw new SDLException();
+        }
+        return result;
+    }
+
+    /** Fails when an SDL call returned zero, which SDL uses for null handles and error codes. */
+    public static int checkSdl(int result) {
+        if (result == 0) {
+            throw new SDLException();
+        }
+        return result;
+    }
+
+    public static long checkSdl(long result) {
+        if (result == 0) {
+            throw new SDLException();
+        }
+        return result;
+    }
 }

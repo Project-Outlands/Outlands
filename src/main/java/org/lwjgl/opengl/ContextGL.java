@@ -15,10 +15,13 @@
  */
 package org.lwjgl.opengl;
 
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL;
+import static org.lwjgl.system.MemoryUtil.NULL;
+
 import org.lwjgl.LWJGLException;
+import org.lwjgl.MainThread;
 import org.lwjgl.PointerBuffer;
+import org.lwjgl.Sys;
+import org.lwjgl.sdl.SDLVideo;
 
 /**
  * <p/>
@@ -32,17 +35,20 @@ import org.lwjgl.PointerBuffer;
  */
 public final class ContextGL implements Context {
 
-    public long glfwWindow = Long.MIN_VALUE;
+    public long sdlWindow;
+    public long sdlContext;
     public final boolean shared;
+    private GLCapabilitiesHolder capabilities = new GLCapabilitiesHolder();
 
-    public ContextGL(long glfwWindow, boolean shared) {
-        this.glfwWindow = glfwWindow;
+    public ContextGL(long sdlWindow, long sdlContext, boolean shared) {
+        this.sdlWindow = sdlWindow;
+        this.sdlContext = sdlContext;
         this.shared = shared;
     }
 
     public void releaseCurrent() throws LWJGLException {
-        GLFW.glfwMakeContextCurrent(0);
-        GL.setCapabilities(null);
+        capabilities.release();
+        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL)));
     }
 
     public synchronized void releaseDrawable() throws LWJGLException {}
@@ -50,20 +56,20 @@ public final class ContextGL implements Context {
     public synchronized void update() {}
 
     public static void swapBuffers() throws LWJGLException {
-        GLFW.glfwSwapBuffers(Display.getWindow());
+        Display.swapBuffers();
     }
 
     public synchronized void makeCurrent() throws LWJGLException {
-        GLFW.glfwMakeContextCurrent(glfwWindow);
-        GL.createCapabilities();
+        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlContext)));
+        capabilities.ensure();
     }
 
     public synchronized boolean isCurrent() throws LWJGLException {
-        return GLFW.glfwGetCurrentContext() == glfwWindow;
+        return SDLVideo.SDL_GL_GetCurrentContext() == sdlContext;
     }
 
     public static void setSwapInterval(int value) {
-        GLFW.glfwSwapInterval(value);
+        Display.setSwapInterval(value);
     }
 
     public synchronized void forceDestroy() throws LWJGLException {
@@ -71,11 +77,37 @@ public final class ContextGL implements Context {
     }
 
     public synchronized void destroy() throws LWJGLException {
-        if (shared && glfwWindow > 0) {
-            GLFW.glfwDestroyWindow(glfwWindow);
-            glfwWindow = -1;
+        if (!shared || sdlWindow == NULL) {
+            return;
         }
+        MainThread.runOnMainThread(() -> {
+            if (sdlContext != NULL) {
+                SDLVideo.SDL_GL_DestroyContext(sdlContext);
+                sdlContext = NULL;
+            }
+            SDLVideo.SDL_DestroyWindow(sdlWindow);
+            sdlWindow = NULL;
+        });
     }
 
     public synchronized void setCLSharingProperties(final PointerBuffer properties) throws LWJGLException {}
+
+    /** Lazily installs the GL capability table for the active context. */
+    private static final class GLCapabilitiesHolder {
+
+        private boolean initialized = false;
+
+        void ensure() {
+            if (!initialized) {
+                GL.createCapabilities();
+                initialized = true;
+            } else {
+                GL.setCapabilities(GL.getCapabilities());
+            }
+        }
+
+        void release() {
+            GL.setCapabilities(null);
+        }
+    }
 }
