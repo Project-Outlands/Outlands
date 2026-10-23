@@ -1,13 +1,14 @@
 --- before/net/minecraft/client/gui/GuiTextField.java
 +++ after/net/minecraft/client/gui/GuiTextField.java
-@@ -1,5 +1,6 @@
+@@ -1,5 +1,7 @@
  package net.minecraft.client.gui;
  
-+import com.cleanroommc.client.IMEHandler;
++import com.cleanroommc.client.TextFieldHandler;
++import com.cleanroommc.client.TextInputArea;
  import com.google.common.base.Predicate;
  import com.google.common.base.Predicates;
  import net.minecraft.client.Minecraft;
-@@ -71,6 +72,7 @@
+@@ -71,6 +73,7 @@
              }
  
              this.setCursorPositionEnd();
@@ -15,7 +16,33 @@
          }
      }
  
-@@ -590,6 +592,7 @@
+@@ -418,9 +421,11 @@
+ 
+                     if (ChatAllowedCharacters.isAllowedCharacter(typedChar))
+                     {
++                        // Characters come from the IME buffer instead; the key event only opens the write below.
+                         if (this.isEnabled)
+                         {
+-                            this.writeText(Character.toString(typedChar));
++                            this.writeText(TextFieldHandler.textBuffer.toString());
++                            TextFieldHandler.textBuffer.setLength(0);
+                         }
+ 
+                         return true;
+@@ -539,6 +544,12 @@
+                 this.drawSelectionBox(k1, i1 - 1, l1 - 1, i1 + 1 + this.fontRenderer.FONT_HEIGHT);
+             }
+         }
++
++        if (this.isFocused)
++        {
++            // Keeps the OS IME windows anchored to the caret as it moves.
++            TextInputArea.update(this);
++        }
+     }
+ 
+     protected void drawSelectionBox(int startX, int startY, int endX, int endY)
+@@ -590,6 +601,7 @@
          if (this.text.length() > length)
          {
              this.text = this.text.substring(0, length);
@@ -23,7 +50,7 @@
          }
      }
  
-@@ -603,6 +606,11 @@
+@@ -603,6 +615,11 @@
          return this.cursorPosition;
      }
  
@@ -35,11 +62,35 @@
      public boolean getEnableBackgroundDrawing()
      {
          return this.enableBackgroundDrawing;
-@@ -631,6 +639,7 @@
+@@ -625,12 +642,30 @@
+ 
+     public void setFocused(boolean isFocusedIn)
+     {
+-        if (isFocusedIn && !this.isFocused)
++        boolean wasFocused = this.isFocused;
++        if (isFocusedIn && !wasFocused)
+         {
+             this.cursorCounter = 0;
          }
  
          this.isFocused = isFocusedIn;
-+        IMEHandler.setIME(this.isFocused);
++        if (isFocusedIn)
++        {
++            TextFieldHandler.setFocusedTextField(this);
++        }
++        // setFocused is called every mouse click and every keystroke's parent path, so only a real
++        // transition may open or close the text input session.
++        if (isFocusedIn != wasFocused)
++        {
++            if (isFocusedIn)
++            {
++                TextFieldHandler.beginTextInput();
++            }
++            else
++            {
++                TextFieldHandler.endTextInput(this);
++            }
++        }
  
          if (Minecraft.getMinecraft().currentScreen != null)
          {

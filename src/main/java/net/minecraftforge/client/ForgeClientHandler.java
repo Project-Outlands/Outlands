@@ -20,12 +20,14 @@
 package net.minecraftforge.client;
 
 import com.cleanroommc.client.IMEHandler;
+import com.cleanroommc.client.TextFieldHandler;
 import com.cleanroommc.client.modlist.LegacyModListScreen;
 import com.cleanroommc.client.modlist.ModListConfig;
 import com.cleanroommc.client.modlist.ModListConstants;
 import com.cleanroommc.client.modlist.screen.ModListScreen;
 import com.cleanroommc.client.windows.TaskbarApi;
 import com.cleanroommc.client.windows.WindowsProperties;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiChat;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
@@ -83,6 +85,11 @@ public class ForgeClientHandler
     public static void onGuiOpen(GuiOpenEvent event)
     {
         GuiScreen gui = event.getGui();
+        if (gui != Minecraft.getMinecraft().currentScreen)
+        {
+            // A closing screen must not leave the IME session open behind it.
+            TextFieldHandler.resetTextInput();
+        }
         if (gui instanceof GuiChat)
         {
             // Skip, this should be handled by Focus

@@ -1,39 +1,38 @@
 package com.cleanroommc.client;
 
-import com.cleanroommc.client.ime.DummyIMEHandler;
-import com.cleanroommc.client.ime.SdlTextInputHandler;
-import com.cleanroommc.client.ime.WindowsIMEHandler;
 import net.minecraftforge.common.ForgeModContainer;
 import net.minecraftforge.fml.common.FMLLog;
 import org.lwjgl.sdl.SDLVideo;
 
-import java.util.function.Consumer;
-
+/**
+ * Entry point for IME blocking: routes the "is a text field focused" signal that MC raises into SDL's text
+ * input session. All platforms go through the same session, because SDL already talks to IMM32 on Windows and
+ * to XIM/ibus on X11 and Wayland itself.
+ */
 public class IMEHandler {
-    private static final Consumer<Boolean> instance;
+    private static final boolean blockingEnabled;
     static {
         if (ForgeModContainer.inputMethodBlockingEnabled) {
             final String videoDriver = SDLVideo.SDL_GetCurrentVideoDriver();
             if (videoDriver == null) {
-                instance = new DummyIMEHandler();
-                FMLLog.log.warn("IME handler initialization failed: SDL video driver unavailable");
+                blockingEnabled = false;
+                FMLLog.log.warn("IME handling disabled: SDL video driver unavailable");
             } else {
-                switch (videoDriver) {
-                    case "windows" -> instance = new WindowsIMEHandler();
-                    case "x11", "wayland" -> instance = new SdlTextInputHandler();
-                    default -> {
-                        instance = new DummyIMEHandler();
-                        FMLLog.log.warn(
-                            "IME handler initialization failed: unsupported SDL video driver {}",
-                            videoDriver);
-                    }
-                }
+                blockingEnabled = true;
             }
         } else {
-            instance = new DummyIMEHandler();
+            blockingEnabled = false;
         }
     }
+
     public static void setIME(boolean active) {
-        instance.accept(active);
+        if (!blockingEnabled) {
+            return;
+        }
+        if (active) {
+            TextFieldHandler.beginTextInput();
+        } else {
+            TextFieldHandler.endTextInput(null);
+        }
     }
 }
