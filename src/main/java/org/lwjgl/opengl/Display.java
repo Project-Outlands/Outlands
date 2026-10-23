@@ -65,7 +65,6 @@ import org.lwjgl.MainThread;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.Sys;
 import org.lwjgl.input.KeyCodes;
-import org.lwjgl.input.KeyEvent;
 import org.lwjgl.input.KeyState;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
@@ -87,7 +86,6 @@ import org.lwjgl.sdl.SDLPixels;
 import org.lwjgl.sdl.SDLSurface;
 import org.lwjgl.sdl.SDLVideo;
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.system.Platform;
 import org.lwjgl.util.Rectangle;
 
 /**
@@ -119,8 +117,6 @@ public class Display {
 
     private static boolean latestResized = false;
 
-    private static boolean cancelNextChar = false;
-    private static KeyEvent ingredientKeyEvent = null;
     private static boolean lastAltIsRightAlt = false;
     private static ByteBuffer[] savedIcons;
 
@@ -656,22 +652,15 @@ public class Display {
                 ctrlGraphicalMode = false;
             }
 
-            cancelNextChar = false;
             if ((mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_GUI) != 0) {
                 Keyboard.addSdlKeyEvent(lwjglKey, character, state);
-                if (Platform.get() != Platform.MACOSX) {
-                    cancelNextChar = true;
-                }
             } else if ((mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_CTRL) != 0 && !ctrlGraphicalMode) {
                 Keyboard.addSdlKeyEvent(lwjglKey, (char) (keycode & 0x1f), state);
-                cancelNextChar = true;
-            } else if (state != KeyState.RELEASE) {
-                // Defer to the char event that always follows a printable key press.
-                ingredientKeyEvent = new KeyEvent(lwjglKey, '\0', state, Sys.getNanoTime());
             } else {
-                Keyboard.addSdlKeyEvent(lwjglKey, '\0', state);
+                Keyboard.addSdlKeyEvent(lwjglKey, character, state);
             }
         } else {
+            // Other key with no char event associated
             Keyboard.addSdlKeyEvent(lwjglKey, character, state);
         }
     }
@@ -681,27 +670,8 @@ public class Display {
         if (text == null || text.isEmpty()) {
             return;
         }
-        if (ingredientKeyEvent != null && !cancelNextChar) {
-            final char first = text.charAt(0);
-            Keyboard.addKeyEvent(
-                new KeyEvent(
-                    ingredientKeyEvent.key,
-                    first,
-                    ingredientKeyEvent.state,
-                    ingredientKeyEvent.nano));
-            ingredientKeyEvent = null;
-            text.substring(1)
-                .chars()
-                .forEachOrdered(c -> Keyboard.addCharEvent(Keyboard.KEY_NONE, (char) c));
-        } else {
-            if (ingredientKeyEvent != null) {
-                Keyboard.addKeyEvent(ingredientKeyEvent);
-                ingredientKeyEvent = null;
-            }
-            text.chars()
-                .forEachOrdered(c -> Keyboard.addCharEvent(Keyboard.KEY_NONE, (char) c));
-        }
-        cancelNextChar = false;
+        // Key events are queued by handleKeyEvent; text input only contributes the characters on top of them.
+        text.chars().forEachOrdered(c -> Keyboard.addCharEvent(Keyboard.KEY_NONE, (char) c));
     }
 
     public static void swapBuffers() {
