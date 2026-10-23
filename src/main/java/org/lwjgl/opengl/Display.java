@@ -228,6 +228,8 @@ public class Display {
         MainThread.runOnMainThread(() -> createWindow(resolvedMajor, resolvedMinor));
 
         Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
+        // OPENGL_EXPLICIT_INIT is set in Sys.initialize, so GL.create() has not run yet. It must be
+        // driven here, once a context is current, or every GL call resolves to a null pointer.
         GL.create(SDLVideo::SDL_GL_GetProcAddress);
         drawable = new DrawableGL();
         try {

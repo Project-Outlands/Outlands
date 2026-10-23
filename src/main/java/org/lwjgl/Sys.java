@@ -37,6 +37,9 @@ public class Sys {
         if (initialized) {
             return;
         }
+        // GL.create() must not run from GL's static initializer: at that point no context is current,
+        // so the function pointers would resolve against nothing. Display.create() drives it instead.
+        Configuration.OPENGL_EXPLICIT_INIT.set(true);
         MainThread.runOnMainThread(() -> {
             if (Platform.get() == Platform.MACOSX) {
                 Configuration.HARFBUZZ_LIBRARY_NAME.set("freetype");
