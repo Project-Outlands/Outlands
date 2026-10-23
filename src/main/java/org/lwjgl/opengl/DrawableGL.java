@@ -78,9 +78,13 @@ public class DrawableGL implements DrawableLWJGL {
                 final long prevWindow = SDLVideo.SDL_GL_GetCurrentWindow();
                 Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(this.context.sdlWindow, this.context.sdlContext));
 
+                // The new context must be told to share with the one made current just above, otherwise
+                // textures uploaded through one are invisible to the other.
+                Sys.checkSdl(SDLVideo.SDL_GL_SetAttribute(SDLVideo.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1));
                 final long hiddenWindow = Sys
                     .checkSdl(SDL_CreateWindow("MC - Shared Drawable", 16, 16, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN));
                 final long sharedContext = Sys.checkSdl(SDLVideo.SDL_GL_CreateContext(hiddenWindow));
+                Sys.checkSdl(SDLVideo.SDL_GL_SetAttribute(SDLVideo.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0));
 
                 Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(prevWindow, prevContext));
                 return new ContextGL(hiddenWindow, sharedContext, true);
