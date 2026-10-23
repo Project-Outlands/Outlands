@@ -8,6 +8,7 @@ import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_MOTION;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_WHEEL;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_QUIT;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_TEXT_INPUT;
+import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_TEXT_EDITING;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_EXPOSED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_FOCUS_GAINED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_FOCUS_LOST;
@@ -62,6 +63,7 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
 
+import com.cleanroommc.client.ImeComposition;
 import com.cleanroommc.client.TextFieldHandler;
 import net.minecraftforge.common.ForgeEarlyConfig;
 
@@ -83,6 +85,7 @@ import org.lwjgl.sdl.SDL_MouseWheelEvent;
 import org.lwjgl.sdl.SDL_Surface;
 import org.lwjgl.sdl.SDL_Rect;
 import org.lwjgl.sdl.SDL_TextInputEvent;
+import org.lwjgl.sdl.SDL_TextEditingEvent;
 import org.lwjgl.sdl.SDL_WindowEvent;
 import org.lwjgl.sdl.SDLError;
 import org.lwjgl.sdl.SDLEvents;
@@ -150,6 +153,7 @@ public class Display {
     private static final SDL_WindowEvent sdlWindowEvent = sdlEvent.window();
     private static final SDL_KeyboardEvent sdlKeyEvent = sdlEvent.key();
     private static final SDL_TextInputEvent sdlTextEvent = sdlEvent.text();
+    private static final SDL_TextEditingEvent sdlEditEvent = sdlEvent.edit();
     private static final SDL_MouseMotionEvent sdlMotionEvent = sdlEvent.motion();
     private static final SDL_MouseButtonEvent sdlButtonEvent = sdlEvent.button();
     private static final SDL_MouseWheelEvent sdlWheelEvent = sdlEvent.wheel();
@@ -620,6 +624,10 @@ public class Display {
                 handleTextEvent();
                 yield true;
             }
+            case SDL_EVENT_TEXT_EDITING -> {
+                handleTextEditingEvent();
+                yield true;
+            }
             default -> false;
         };
     }
@@ -689,6 +697,11 @@ public class Display {
         TextFieldHandler.onTextInput(text);
         // Key events are queued by handleKeyEvent; text input only contributes the characters on top of them.
         text.chars().forEachOrdered(c -> Keyboard.addCharEvent(Keyboard.KEY_NONE, (char) c));
+    }
+
+    private static void handleTextEditingEvent() {
+        // Composition is not committed text: record it for the field to draw, do not queue it as input.
+        ImeComposition.update(sdlEditEvent.textString(), sdlEditEvent.start());
     }
 
     public static void swapBuffers() {

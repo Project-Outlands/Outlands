@@ -71,6 +71,7 @@ public final class TextFieldHandler {
         }
         focusedTextInput = NO_FIELD;
         textBuffer.setLength(0);
+        ImeComposition.clear();
     }
 
     public static void setFocusedTextField(GuiTextField textField) {

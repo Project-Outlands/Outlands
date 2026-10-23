@@ -83,6 +83,10 @@ public class Sys {
             default -> {}
         }
         SDLHints.SDL_SetHint(SDLHints.SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+        // Declare that the game draws the IME composition string itself: SDL then reports it through
+        // SDL_EVENT_TEXT_EDITING and stops painting its own composition window. Candidates stay native,
+        // which is why 'candidates' is absent here.
+        SDLHints.SDL_SetHint(SDLHints.SDL_HINT_IME_IMPLEMENTED_UI, "composition");
         if (platform == Platform.LINUX && isWaylandSession()) {
             SDLHints.SDL_SetHint(SDLHints.SDL_HINT_VIDEO_DRIVER, ForgeEarlyConfig.FORCE_WAYLAND ? "wayland" : "x11");
         }
