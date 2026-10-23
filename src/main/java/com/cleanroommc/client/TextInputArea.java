@@ -10,27 +10,16 @@ import org.lwjgl.sdl.SDLKeyboard;
 import org.lwjgl.sdl.SDL_Rect;
 import org.lwjgl.system.MemoryStack;
 
-/**
- * Tells SDL where the focused text field's caret sits, so the OS puts its IME composition and candidate
- * windows next to it instead of the window corner.
- * <p>
- * The rectangle is in window pixels, not GUI units: SDL feeds it straight into {@code ImmSetCompositionWindow}
- * and {@code ImmSetCandidateWindow} on Windows, which work in client coordinates.
- */
+/** Anchors the OS IME windows to the focused text field's caret. Rectangles are in window pixels, not GUI units. */
 public final class TextInputArea {
 
     private TextInputArea() {}
 
-    /** Last rectangle handed to SDL, so the FFI call is skipped while nothing moved. */
     private static int lastX = Integer.MIN_VALUE;
     private static int lastY;
     private static int lastHeight;
     private static int lastCursor;
 
-    /**
-     * Publishes the caret rectangle of {@code field}.
-     * Call from the render thread only; it reads GUI state and must run on the main thread for SDL.
-     */
     public static void update(GuiTextField field) {
         if (field == null || !field.getVisible() || !Display.isCreated()) {
             return;
@@ -44,11 +33,10 @@ public final class TextInputArea {
         }
 
         final boolean background = field.getEnableBackgroundDrawing();
-        // Mirrors GuiTextField.drawTextBox: the text origin shifts by the box padding and is vertically centred.
         final int textX = field.x + (background ? 4 : 0);
         final int textY = field.y + (background ? (field.height - 8) / 2 : 0);
 
-        // The field clips its text to its width, so the caret never moves past the visible prefix.
+
         final String text = field.getText();
         final int scroll = Math.min(field.getLineScrollOffset(), text.length());
         final String visible = font.trimStringToWidth(text.substring(scroll), field.width);
@@ -82,7 +70,7 @@ public final class TextInputArea {
         }
     }
 
-    /** Forces the next {@link #update} to publish, e.g. after the session restarts or the window moved. */
+
     public static void invalidate() {
         lastX = Integer.MIN_VALUE;
     }

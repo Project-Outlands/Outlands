@@ -12,20 +12,15 @@ import java.lang.ref.WeakReference;
 
 /**
  * Owns SDL's text input session and buffers committed IME text until the focused field consumes it.
- * <p>
- * SDL reports a key press and the characters it produces as separate events. Only
- * {@code SDL_EVENT_TEXT_INPUT} carries what the IME actually committed, so text fields take their input from
- * {@link #textBuffer} and read the character on the key event as a mere trigger.
- * <p>
- * Mirrors lwjgl3ify's handler of the same name.
+ * Only {@code SDL_EVENT_TEXT_INPUT} carries what the IME committed, so fields read {@link #textBuffer}
+ * and treat the key event character as a mere trigger.
  */
 public final class TextFieldHandler {
 
-    /** Depth counts nested begin/end so a child GUI closing cannot stop the session its parent still needs. */
+    /** Counts nested begin/end so a closing child GUI cannot stop the session its parent still needs. */
     private static int textInputDepth = 0;
     private static final WeakReference<GuiTextField> NO_FIELD = new WeakReference<>(null);
     private static WeakReference<GuiTextField> focusedTextInput = NO_FIELD;
-    /** Text committed by the IME but not yet written into the focused field. */
     public static final StringBuilder textBuffer = new StringBuilder(8);
 
     private TextFieldHandler() {}
@@ -63,7 +58,6 @@ public final class TextFieldHandler {
         }
     }
 
-    /** Drops the session unconditionally, for when the GUI changes underneath an open field. */
     public static void resetTextInput() {
         if (textInputDepth != 0) {
             setSessionActive(false);
@@ -80,12 +74,10 @@ public final class TextFieldHandler {
         }
     }
 
-    /** Consumes committed IME text; called for every {@code SDL_EVENT_TEXT_INPUT} while a field is focused. */
     public static void onTextInput(String text) {
         if (textInputDepth <= 0 || focusedTextInput.get() == null) {
             return;
         }
-        // Control characters would let multi-line input reach single-line fields.
         if (text.chars().allMatch(c -> ChatAllowedCharacters.isAllowedCharacter((char) c))) {
             textBuffer.append(text);
         }

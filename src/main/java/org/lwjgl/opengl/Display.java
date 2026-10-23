@@ -111,16 +111,9 @@ public class Display {
     private static boolean displayDirty = false;
     private static boolean displayResizable = true;
     private static boolean displayCloseRequested = false;
-    /** Mirrors what {@link #setBorderless} last applied; the window's own flags stay authoritative. */
     private static boolean borderlessInsteadOfFullscreen = false;
 
-    /**
-     * Extra pixels added to the display bounds in borderless mode.
-     * <p>
-     * A window matching the display exactly is treated as exclusive fullscreen by the desktop compositor:
-     * the taskbar hides and other top-level windows - the IME candidate window among them - are suppressed.
-     * Overshooting by a pixel keeps the window out of that state while still covering the display.
-     */
+    /** Pixels the borderless window extends past the display; an exact match reads as exclusive fullscreen. */
     private static final int BORDERLESS_OVERSCAN = 1;
 
     private static DisplayMode mode = new DisplayMode(854, 480);
@@ -264,7 +257,6 @@ public class Display {
 
         displayCreated = true;
 
-        // Minecraft asks for fullscreen before the window exists; apply it once there is one to resize.
         if (pendingBorderless) {
             pendingBorderless = false;
             borderlessInsteadOfFullscreen = true;
@@ -273,13 +265,6 @@ public class Display {
         }
     }
 
-    /**
-     * Stretches the window one pixel past the display on every side and pins it on top.
-     * <p>
-     * Matching the display exactly would make the compositor treat the window as exclusive fullscreen: the
-     * taskbar hides and other top-level windows, including the IME candidate window, are suppressed. The
-     * overscan keeps the window out of that state; always-on-top then covers the taskbar instead.
-     */
     private static void applyBorderlessGeometry() {
         Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
         final Rectangle bounds = currentDisplayBounds();
@@ -950,10 +935,7 @@ public class Display {
     /** A display with its desktop-relative bounds. */
     public record PositionedDisplayMode(int x, int y, Rectangle bounds, long displayId, DisplayMode mode) {}
 
-    /**
-     * Set when {@link #setFullscreen} is called before the window exists, which is what
-     * {@code Minecraft.setInitialDisplayMode} does when the game starts in fullscreen.
-     */
+    /** Set when {@link #setFullscreen} runs before the window exists; applied once create() finishes. */
     private static boolean pendingBorderless = false;
 
     public static void setFullscreen(boolean fullscreen) {
@@ -961,14 +943,10 @@ public class Display {
             pendingBorderless = fullscreen;
             return;
         }
-        // Exclusive mode switches the display resolution, which blacks out and remodes the monitor. A borderless
-        // window covering the display looks the same to the player and keeps the desktop resolution.
         setBorderless(fullscreen);
     }
 
     public static void toggleBorderless() {
-        // Ask the window rather than the cached flag: the flag starts out describing the intended
-        // default, while the window may have been created decorated.
         setBorderless(!isBorderlessActive());
     }
 
@@ -979,7 +957,6 @@ public class Display {
         }
         MainThread.runOnMainThread(() -> {
             if (toBorderless) {
-                // Leave SDL's exclusive fullscreen if it was entered some other way.
                 if ((SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_FULLSCREEN) != 0) {
                     Sys.checkSdl(SDL_SetWindowFullscreen(sdlWindow, false));
                 }
@@ -994,13 +971,10 @@ public class Display {
                     SDL_WINDOWPOS_CENTERED));
             }
             Sys.checkSdl(SDL_SyncWindow(sdlWindow));
-            // The cached sizes still describe the previous geometry; Minecraft reads them back right
-            // after toggling, so they have to match the window that now exists.
             updateWindowDimensions();
         });
     }
 
-    /** Desktop bounds of the display the window currently sits on. */
     private static Rectangle currentDisplayBounds() {
         // Both getters return a display id, not a success flag, so neither may go through checkSdl.
         int display = SDL_GetDisplayForWindow(sdlWindow);
@@ -1018,7 +992,6 @@ public class Display {
         return borderlessInsteadOfFullscreen;
     }
 
-    /** True when the window is actually undecorated and covering the display, read from SDL. */
     private static boolean isBorderlessActive() {
         return displayCreated
             && (SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_BORDERLESS) != 0
