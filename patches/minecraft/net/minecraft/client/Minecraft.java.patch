@@ -306,21 +306,61 @@
                      if (!itemstack.isEmpty() && this.playerController.processRightClick(this.player, this.world, enumhand) == EnumActionResult.SUCCESS
                         )
                      {
-@@ -1607,6 +1614,10 @@
+@@ -1607,43 +1614,27 @@
  
      public void toggleFullscreen()
      {
-+        if (net.minecraftforge.common.ForgeEarlyConfig.WINDOW_BORDERLESS_REPLACES_FULLSCREEN) {
-+            Display.toggleBorderless();
-+            return;
-+        }
++        // Always borderless. Exclusive fullscreen remodes the monitor and hides native IME windows; the
++        // undecorated window covers the display instead, so nothing below has to switch display modes.
          try
          {
              this.fullscreen = !this.fullscreen;
-@@ -1655,12 +1666,17 @@
+             this.gameSettings.fullScreen = this.fullscreen;
++            Display.toggleBorderless();
+ 
+             if (this.fullscreen)
+             {
+-                this.updateDisplayMode();
+                 this.displayWidth = Display.getDisplayMode().getWidth();
+                 this.displayHeight = Display.getDisplayMode().getHeight();
+-
+-                if (this.displayWidth <= 0)
+-                {
+-                    this.displayWidth = 1;
+-                }
+-
+-                if (this.displayHeight <= 0)
+-                {
+-                    this.displayHeight = 1;
+-                }
+             }
+             else
+             {
+-                Display.setDisplayMode(new DisplayMode(this.tempDisplayWidth, this.tempDisplayHeight));
+                 this.displayWidth = this.tempDisplayWidth;
+                 this.displayHeight = this.tempDisplayHeight;
+-
+-                if (this.displayWidth <= 0)
+-                {
+-                    this.displayWidth = 1;
+-                }
+-
+-                if (this.displayHeight <= 0)
+-                {
+-                    this.displayHeight = 1;
+-                }
+             }
++
++            this.displayWidth = Math.max(1, this.displayWidth);
++            this.displayHeight = Math.max(1, this.displayHeight);
+ 
+             if (this.currentScreen != null)
+             {
+@@ -1654,13 +1645,17 @@
+                 this.updateFramebufferSize();
              }
  
-             Display.setFullscreen(this.fullscreen);
+-            Display.setFullscreen(this.fullscreen);
 +            if (!this.fullscreen && (Util.getOSType() == Util.EnumOS.WINDOWS)) //Forge: Fix MC-68754, Screen is not resizeable after exiting fullscreen due to LWJGL bug https://github.com/LWJGL/lwjgl/issues/142 which is fixed, but not in the version MC ships
 +            {
 +                Display.setResizable(false);
@@ -336,7 +376,7 @@
          }
      }
  
-@@ -1701,6 +1717,8 @@
+@@ -1701,6 +1696,8 @@
              this.rightClickDelayTimer--;
          }
  
@@ -345,7 +385,7 @@
          this.profiler.startSection("gui");
  
          if (!this.isGamePaused)
-@@ -1907,6 +1925,7 @@
+@@ -1907,6 +1904,7 @@
          }
  
          this.profiler.endSection();
@@ -353,7 +393,7 @@
          this.systemTime = getSystemTime();
      }
  
-@@ -2012,6 +2031,7 @@
+@@ -2012,6 +2010,7 @@
                      }
                  }
              }
@@ -361,7 +401,7 @@
          }
  
          this.processKeyBinds();
-@@ -2260,6 +2280,8 @@
+@@ -2260,6 +2259,8 @@
      {
          while (Mouse.next())
          {
@@ -370,7 +410,7 @@
              int i = Mouse.getEventButton();
              KeyBinding.setKeyBindState(i - 100, Mouse.getEventButtonState());
  
-@@ -2315,6 +2337,7 @@
+@@ -2315,6 +2316,7 @@
                      this.currentScreen.handleMouseInput();
                  }
              }
@@ -378,7 +418,7 @@
          }
      }
  
-@@ -2332,6 +2355,7 @@
+@@ -2332,6 +2334,7 @@
  
      public void launchIntegratedServer(String folderName, String worldName, @Nullable WorldSettings worldSettingsIn)
      {
@@ -386,7 +426,7 @@
          this.loadWorld(null);
          System.gc();
          ISaveHandler isavehandler = this.saveLoader.getSaveLoader(folderName, false);
-@@ -2378,6 +2402,12 @@
+@@ -2378,6 +2381,12 @@
  
          while (!this.integratedServer.serverIsInRunLoop())
          {
@@ -399,7 +439,7 @@
              String s = this.integratedServer.getUserMessage();
  
              if (s != null)
-@@ -2402,8 +2432,14 @@
+@@ -2402,8 +2411,14 @@
          SocketAddress socketaddress = this.integratedServer.getNetworkSystem().addLocalEndpoint();
          NetworkManager networkmanager = NetworkManager.provideLocalClient(socketaddress);
          networkmanager.setNetHandler(new NetHandlerLoginClient(networkmanager, this, null));
@@ -416,7 +456,7 @@
          this.networkManager = networkmanager;
      }
  
-@@ -2414,6 +2450,8 @@
+@@ -2414,6 +2429,8 @@
  
      public void loadWorld(@Nullable WorldClient worldClientIn, String loadingMessage)
      {
@@ -425,7 +465,7 @@
          if (worldClientIn == null)
          {
              NetHandlerPlayClient nethandlerplayclient = this.getConnection();
-@@ -2426,6 +2464,18 @@
+@@ -2426,6 +2443,18 @@
              if (this.integratedServer != null && this.integratedServer.isAnvilFileSet())
              {
                  this.integratedServer.initiateShutdown();
@@ -444,7 +484,7 @@
              }
  
              this.integratedServer = null;
-@@ -2449,6 +2499,7 @@
+@@ -2449,6 +2478,7 @@
              this.ingameGUI.resetPlayersOverlayFooterHeader();
              this.setServerData(null);
              this.integratedServerIsRunning = false;
@@ -452,7 +492,7 @@
          }
  
          this.soundHandler.stopSounds();
-@@ -2465,6 +2516,7 @@
+@@ -2465,6 +2495,7 @@
          }
  
          TileEntityRendererDispatcher.instance.setWorld(worldClientIn);
@@ -460,7 +500,7 @@
  
          if (worldClientIn != null)
          {
-@@ -2526,6 +2578,7 @@
+@@ -2526,6 +2557,7 @@
                                   this.player == null ? new RecipeBook() : this.player.getRecipeBook()
                               );
          this.player.getDataManager().setEntryValues(entityplayersp.getDataManager().getAll());
@@ -468,7 +508,7 @@
          this.player.dimension = dimension;
          this.renderViewEntity = this.player;
          this.player.preparePlayerToSpawn();
-@@ -2573,159 +2626,8 @@
+@@ -2573,159 +2605,8 @@
      {
          if (this.objectMouseOver != null && this.objectMouseOver.typeOfHit != RayTraceResult.Type.MISS)
          {
@@ -630,7 +670,7 @@
          }
      }
  
-@@ -2773,7 +2675,14 @@
+@@ -2773,7 +2654,14 @@
          {
              public String call()
              {
@@ -646,7 +686,7 @@
              }
          });
          theCrash.getCategory().addDetail("GL Caps", new ICrashReportDetail<String>()
-@@ -2878,6 +2787,7 @@
+@@ -2878,6 +2766,7 @@
          return instance;
      }
  
@@ -654,7 +694,7 @@
      public ListenableFuture<Object> scheduleResourcesRefresh()
      {
          return this.addScheduledTask(new Runnable()
-@@ -3056,18 +2966,8 @@
+@@ -3056,18 +2945,8 @@
  
      public static int getGLMaximumTextureSize()
      {
@@ -675,7 +715,7 @@
      }
  
      @Override
-@@ -3200,6 +3100,9 @@
+@@ -3200,6 +3079,9 @@
          }
          else if (this.player != null)
          {
@@ -685,7 +725,7 @@
              if (this.player.world.provider instanceof WorldProviderHell)
              {
                  return MusicTicker.MusicType.NETHER;
-@@ -3231,11 +3134,11 @@
+@@ -3231,11 +3113,11 @@
              {
                  if (Keyboard.getEventKeyState())
                  {
@@ -699,7 +739,7 @@
                      {
                          this.ingameGUI
                          .getChatGUI()
-@@ -3253,6 +3156,7 @@
+@@ -3253,6 +3135,7 @@
                          }
                      }
                  }
@@ -707,7 +747,7 @@
              }
          }
      }
-@@ -3291,7 +3195,7 @@
+@@ -3291,7 +3174,7 @@
              }
              catch (Exception exception)
              {
@@ -716,7 +756,7 @@
              }
          }
          else
-@@ -3384,6 +3288,12 @@
+@@ -3384,6 +3267,12 @@
          return this.blockColors;
      }
  
@@ -729,7 +769,7 @@
      public boolean isReducedDebug()
      {
          return this.player != null && this.player.hasReducedDebug() || this.gameSettings.reducedDebugInfo;
-@@ -3397,5 +3307,10 @@
+@@ -3397,5 +3286,10 @@
      public Tutorial getTutorial()
      {
          return this.tutorial;

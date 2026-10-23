@@ -34,6 +34,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowPosition;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSize;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSizeInPixels;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowTitle;
+import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowAlwaysOnTop;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowBordered;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowFullscreen;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowIcon;
@@ -110,7 +111,17 @@ public class Display {
     private static boolean displayDirty = false;
     private static boolean displayResizable = true;
     private static boolean displayCloseRequested = false;
-    private static boolean borderlessInsteadOfFullscreen = true;
+    /** Mirrors what {@link #setBorderless} last applied; the window's own flags stay authoritative. */
+    private static boolean borderlessInsteadOfFullscreen = false;
+
+    /**
+     * Extra pixels added to the display bounds in borderless mode.
+     * <p>
+     * A window matching the display exactly is treated as exclusive fullscreen by the desktop compositor:
+     * the taskbar hides and other top-level windows - the IME candidate window among them - are suppressed.
+     * Overshooting by a pixel keeps the window out of that state while still covering the display.
+     */
+    private static final int BORDERLESS_OVERSCAN = 1;
 
     private static DisplayMode mode = new DisplayMode(854, 480);
     private static DisplayMode desktopDisplayMode = new DisplayMode(854, 480);
@@ -257,12 +268,30 @@ public class Display {
         if (pendingBorderless) {
             pendingBorderless = false;
             borderlessInsteadOfFullscreen = true;
-            Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
-            final Rectangle bounds = currentDisplayBounds();
-            Sys.checkSdl(SDL_SetWindowPosition(sdlWindow, bounds.getX(), bounds.getY()));
-            Sys.checkSdl(SDL_SetWindowSize(sdlWindow, bounds.getWidth(), bounds.getHeight()));
+            applyBorderlessGeometry();
             Sys.checkSdl(SDL_SyncWindow(sdlWindow));
         }
+    }
+
+    /**
+     * Stretches the window one pixel past the display on every side and pins it on top.
+     * <p>
+     * Matching the display exactly would make the compositor treat the window as exclusive fullscreen: the
+     * taskbar hides and other top-level windows, including the IME candidate window, are suppressed. The
+     * overscan keeps the window out of that state; always-on-top then covers the taskbar instead.
+     */
+    private static void applyBorderlessGeometry() {
+        Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
+        final Rectangle bounds = currentDisplayBounds();
+        Sys.checkSdl(SDL_SetWindowPosition(
+            sdlWindow,
+            bounds.getX() - BORDERLESS_OVERSCAN,
+            bounds.getY() - BORDERLESS_OVERSCAN));
+        Sys.checkSdl(SDL_SetWindowSize(
+            sdlWindow,
+            bounds.getWidth() + BORDERLESS_OVERSCAN * 2,
+            bounds.getHeight() + BORDERLESS_OVERSCAN * 2));
+        Sys.checkSdl(SDL_SetWindowAlwaysOnTop(sdlWindow, true));
     }
 
     private static int resolveContextMajor() {
@@ -938,7 +967,9 @@ public class Display {
     }
 
     public static void toggleBorderless() {
-        setBorderless(!isBorderless());
+        // Ask the window rather than the cached flag: the flag starts out describing the intended
+        // default, while the window may have been created decorated.
+        setBorderless(!isBorderlessActive());
     }
 
     public static void setBorderless(boolean toBorderless) {
@@ -952,11 +983,9 @@ public class Display {
                 if ((SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_FULLSCREEN) != 0) {
                     Sys.checkSdl(SDL_SetWindowFullscreen(sdlWindow, false));
                 }
-                Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
-                final Rectangle bounds = currentDisplayBounds();
-                Sys.checkSdl(SDL_SetWindowPosition(sdlWindow, bounds.getX(), bounds.getY()));
-                Sys.checkSdl(SDL_SetWindowSize(sdlWindow, bounds.getWidth(), bounds.getHeight()));
+                applyBorderlessGeometry();
             } else {
+                Sys.checkSdl(SDL_SetWindowAlwaysOnTop(sdlWindow, false));
                 Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, true));
                 Sys.checkSdl(SDL_SetWindowSize(sdlWindow, mode.getWidth(), mode.getHeight()));
                 Sys.checkSdl(SDL_SetWindowPosition(
@@ -965,6 +994,9 @@ public class Display {
                     SDL_WINDOWPOS_CENTERED));
             }
             Sys.checkSdl(SDL_SyncWindow(sdlWindow));
+            // The cached sizes still describe the previous geometry; Minecraft reads them back right
+            // after toggling, so they have to match the window that now exists.
+            updateWindowDimensions();
         });
     }
 
@@ -984,6 +1016,13 @@ public class Display {
 
     public static boolean isBorderless() {
         return borderlessInsteadOfFullscreen;
+    }
+
+    /** True when the window is actually undecorated and covering the display, read from SDL. */
+    private static boolean isBorderlessActive() {
+        return displayCreated
+            && (SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_BORDERLESS) != 0
+            && (SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_FULLSCREEN) == 0;
     }
 
     public static boolean isFullscreen() {

@@ -27,9 +27,6 @@ public class ForgeEarlyConfig {
     @Config.Comment("Should the window have decorations (titlebar, border, close button)")
     public static boolean WINDOW_DECORATED = true;
 
-    @Config.Comment("Should exclusive fullscreen mode replaced with borderless fullscreen mode")
-    public static boolean WINDOW_BORDERLESS_REPLACES_FULLSCREEN = true;
-
     @Config.Comment("Windows-only - should borderless window have height increased by 1 to solve flickering on un-focusing")
     public static boolean WINDOW_BORDERLESS_WINDOWS_COMPATIBILITY = true;
 
