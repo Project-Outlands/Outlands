@@ -3,9 +3,19 @@ def lwjglLibraries = project.lwjglLibraries
 def lwjglArch = project.lwjglArch
 
 configurations {
-    configureEach { // LWJGL2 isn't friendly with us, so pye pye
+    // 1.12.2 ships modules that were later renamed instead of upgraded, so Gradle cannot arbitrate them and both
+    // copies reach the classpath. Their replacements are on the 'installer' list; see installer.gradle's
+    // verifyNoStaleLibraries.
+    configureEach {
         exclude group: 'org.lwjgl.lwjgl'
         exclude group: 'com.ibm.icu', module: 'icu4j-core-mojang'
+        // fat jar holding netty 4.1.9 next to the split 4.2 modules: NoSuchMethodError in Bootstrap.init
+        exclude group: 'io.netty', module: 'netty-all'
+        exclude group: 'com.mojang', module: 'patchy'
+        exclude group: 'oshi-project', module: 'oshi-core'
+        exclude group: 'net.java.dev.jna', module: 'platform'
+        exclude group: 'net.java.jinput', module: 'jinput-platform'
+        exclude group: 'net.java.jutils', module: 'jutils'
     }
 
     // Don't pull all libraries, if we're missing something, add it to the installer list so the installer knows to download it.

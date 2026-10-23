@@ -207,7 +207,10 @@ tasks.register('verifyNoStaleLibraries') {
     dependsOn 'installerArtifacts', 'launcherJson'
     def artifactsFile = tasks.named('installerArtifacts').flatMap { it.outputs.files.elements.map { it.first().asFile } }
     def versionJsonFile = layout.buildDirectory.file('version.json')
-    inputs.files(artifactsFile, versionJsonFile)
+    // The dev runs launch from the resolved runtime classpath, not from version.json: 'mcpbaseLibraries' drags in
+    // 1.12.2's own library set transitively, which can reintroduce a module the packaged artifacts already exclude.
+    def runtimeConfiguration = configurations.runtimeClasspath
+    inputs.files(artifactsFile, versionJsonFile, runtimeConfiguration)
 
     doLast {
         def problems = []
@@ -220,12 +223,19 @@ tasks.register('verifyNoStaleLibraries') {
         def fromJson = launchLibraries.findAll { it in staleVanillaModules }
         if (fromJson) problems << "version.json: ${fromJson.sort()}"
 
+        // Match on resolved coordinates: jar names alone would report our own 'lwjgl-3.4.3.jar' as LWJGL2
+        def fromRuntime = runtimeConfiguration.resolvedConfiguration.resolvedArtifacts
+            .collect { "${it.moduleVersion.id.group}:${it.name}".toString() }
+            .findAll { it in staleVanillaModules }
+            .unique()
+        if (fromRuntime) problems << "dev runtime classpath: ${fromRuntime.sort()}"
+
         if (!problems.isEmpty()) {
             throw new GradleException("1.12.2-only libraries leaked onto the launch/dev classpath (>"
                 + "replaced by upgraded modules, module names differ so Gradle cannot arbitrate):\n  "
                 + problems.join('\n  '))
         }
-        logger.lifecycle("verifyNoStaleLibraries: launch classpath is free of the ${staleVanillaModules.size()} 1.12.2-only modules")
+        logger.lifecycle("verifyNoStaleLibraries: launch and dev classpaths are free of the ${staleVanillaModules.size()} 1.12.2-only modules")
     }
 }
 // endregion
