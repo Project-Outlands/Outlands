@@ -181,9 +181,12 @@ def assetIndex = providers.provider {
         zip.close()
     }
 }
-// Assets/natives caches are shared with the old ForgeGradle setup until :outlands provisions its own
+// Assets/natives caches are shared with the old ForgeGradle setup until :outlands provisions its own.
+// Resolve against gradle's own user home: it moves to D:/gradle on this setup, and hardcoding
+// ~/.gradle points the launcher at a directory that does not exist.
+def gradleUserHome = gradle.gradleUserHomeDir.absolutePath
 def assetsDir = providers.gradleProperty('assetDirectory').getOrElse(
-    new File(System.getProperty('user.home'), '.gradle/caches/forge_gradle/assets').absolutePath)
+    new File(gradleUserHome, 'caches/forge_gradle/assets').absolutePath)
 def nativesDir = providers.gradleProperty('nativesDirectory').getOrElse(
     layout.buildDirectory.dir('natives').get().asFile.absolutePath)
 
