@@ -31,9 +31,6 @@ public class Sys {
 
     private static boolean initialized = false;
 
-    /** Kept alive for the process lifetime; SDL holds the underlying pointers. */
-    private static SDLAllocator sdlAllocator;
-
     /**
      * Brings up the SDL subsystems. Idempotent; must be reached from the main thread.
      */
@@ -45,16 +42,6 @@ public class Sys {
         // so the function pointers would resolve against nothing. Display.create() drives it instead.
         Configuration.OPENGL_EXPLICIT_INIT.set(true);
         MainThread.runOnMainThread(() -> {
-            // SDL must share LWJGL's heap: buffers it returns are released by PointerBuffer with
-            // MemoryUtil.nmemFree, and a mismatch corrupts the heap. The callbacks are held in a field
-            // because SDL keeps the pointers for the process lifetime.
-            sdlAllocator = SDLAllocator.create();
-            SDLStdinc.SDL_SetMemoryFunctions(
-                sdlAllocator.malloc(),
-                sdlAllocator.calloc(),
-                sdlAllocator.realloc(),
-                sdlAllocator.free());
-
             if (Platform.get() == Platform.MACOSX) {
                 Configuration.HARFBUZZ_LIBRARY_NAME.set("freetype");
             }

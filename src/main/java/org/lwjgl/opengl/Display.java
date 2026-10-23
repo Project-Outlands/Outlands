@@ -91,6 +91,7 @@ import org.lwjgl.sdl.SDLError;
 import org.lwjgl.sdl.SDLEvents;
 import org.lwjgl.sdl.SDLKeyboard;
 import org.lwjgl.sdl.SDLPixels;
+import org.lwjgl.sdl.SDLStdinc;
 import org.lwjgl.sdl.SDLSurface;
 import org.lwjgl.sdl.SDLVideo;
 import org.lwjgl.system.MemoryStack;
@@ -761,7 +762,9 @@ public class Display {
                         .bits_per_pixel(),
                     Math.round(reader.refresh_rate()));
             }
-            modes.free();
+            // SDL allocated this array itself, so it must go back through SDL_free; PointerBuffer.free()
+            // would hand it to LWJGL's allocator and corrupt the heap.
+            SDLStdinc.SDL_free(modes);
             return result;
         });
     }
