@@ -28,6 +28,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_GetDesktopDisplayMode;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetFullscreenDisplayModes;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetDisplayBounds;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetDisplayForWindow;
+import static org.lwjgl.sdl.SDLVideo.SDL_GetDisplays;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetPrimaryDisplay;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowFlags;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowPosition;
@@ -265,20 +266,53 @@ public class Display {
         }
     }
 
+    /** Oversizes the window past the display; an exact match reads as exclusive fullscreen. */
     private static void applyBorderlessGeometry() {
         Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
         final Rectangle bounds = currentDisplayBounds();
-        Sys.checkSdl(SDL_SetWindowPosition(
-            sdlWindow,
-            bounds.getX() - BORDERLESS_OVERSCAN,
-            bounds.getY() - BORDERLESS_OVERSCAN));
+
+        boolean left = false;
+        boolean right = false;
+        boolean up = false;
+        boolean down = false;
+        for (final Rectangle other : displayBounds()) {
+            if (other.getX() == bounds.getX() && other.getY() == bounds.getY()) {
+                continue;
+            }
+            left |= other.getX() < bounds.getX();
+            right |= other.getX() > bounds.getX();
+            up |= other.getY() < bounds.getY();
+            down |= other.getY() > bounds.getY();
+        }
+
+        // Push the spare pixels into directions with no neighbour display, so none of them are visible.
+        final int insetX = left ? 0 : (right ? -BORDERLESS_OVERSCAN * 2 : -BORDERLESS_OVERSCAN);
+        final int insetY = up ? 0 : (down ? -BORDERLESS_OVERSCAN * 2 : -BORDERLESS_OVERSCAN);
+        final int spareX = left && right ? 0 : BORDERLESS_OVERSCAN * 2;
+        final int spareY = up && down ? 0 : BORDERLESS_OVERSCAN * 2;
+
+        Sys.checkSdl(SDL_SetWindowPosition(sdlWindow, bounds.getX() + insetX, bounds.getY() + insetY));
         Sys.checkSdl(SDL_SetWindowSize(
             sdlWindow,
-            bounds.getWidth() + BORDERLESS_OVERSCAN * 2,
-            bounds.getHeight() + BORDERLESS_OVERSCAN * 2));
+            bounds.getWidth() + spareX,
+            bounds.getHeight() + spareY));
         Sys.checkSdl(SDL_SetWindowAlwaysOnTop(sdlWindow, true));
     }
 
+    /** Desktop bounds of every connected display. */
+    private static List<Rectangle> displayBounds() {
+        final IntBuffer ids = Sys.checkSdl(SDL_GetDisplays());
+        final List<Rectangle> result = new ArrayList<>(ids.remaining());
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            final SDL_Rect rect = SDL_Rect.malloc(stack);
+            for (int i = 0; i < ids.remaining(); i++) {
+                if (SDL_GetDisplayBounds(ids.get(i), rect)) {
+                    result.add(new Rectangle(rect.x(), rect.y(), rect.w(), rect.h()));
+                }
+            }
+        }
+        return result;
+    }
     private static int resolveContextMajor() {
         int major = ForgeEarlyConfig.OPENGL_VERSION_MAJOR;
         int minor = ForgeEarlyConfig.OPENGL_VERSION_MINOR;

@@ -306,7 +306,7 @@
                      if (!itemstack.isEmpty() && this.playerController.processRightClick(this.player, this.world, enumhand) == EnumActionResult.SUCCESS
                         )
                      {
-@@ -1607,43 +1614,27 @@
+@@ -1607,43 +1614,17 @@
  
      public void toggleFullscreen()
      {
@@ -316,13 +316,12 @@
          {
              this.fullscreen = !this.fullscreen;
              this.gameSettings.fullScreen = this.fullscreen;
-+            Display.toggleBorderless();
- 
-             if (this.fullscreen)
-             {
+-
+-            if (this.fullscreen)
+-            {
 -                this.updateDisplayMode();
-                 this.displayWidth = Display.getDisplayMode().getWidth();
-                 this.displayHeight = Display.getDisplayMode().getHeight();
+-                this.displayWidth = Display.getDisplayMode().getWidth();
+-                this.displayHeight = Display.getDisplayMode().getHeight();
 -
 -                if (this.displayWidth <= 0)
 -                {
@@ -333,12 +332,12 @@
 -                {
 -                    this.displayHeight = 1;
 -                }
-             }
-             else
-             {
+-            }
+-            else
+-            {
 -                Display.setDisplayMode(new DisplayMode(this.tempDisplayWidth, this.tempDisplayHeight));
-                 this.displayWidth = this.tempDisplayWidth;
-                 this.displayHeight = this.tempDisplayHeight;
+-                this.displayWidth = this.tempDisplayWidth;
+-                this.displayHeight = this.tempDisplayHeight;
 -
 -                if (this.displayWidth <= 0)
 -                {
@@ -349,14 +348,16 @@
 -                {
 -                    this.displayHeight = 1;
 -                }
-             }
+-            }
++            Display.toggleBorderless();
 +
-+            this.displayWidth = Math.max(1, this.displayWidth);
-+            this.displayHeight = Math.max(1, this.displayHeight);
++            // The display mode still describes the window as created; the real size comes from the window.
++            this.displayWidth = Math.max(1, Display.getWidth());
++            this.displayHeight = Math.max(1, Display.getHeight());
  
              if (this.currentScreen != null)
              {
-@@ -1654,13 +1645,17 @@
+@@ -1654,13 +1635,17 @@
                  this.updateFramebufferSize();
              }
  
@@ -376,7 +377,7 @@
          }
      }
  
-@@ -1701,6 +1696,8 @@
+@@ -1701,6 +1686,8 @@
              this.rightClickDelayTimer--;
          }
  
@@ -385,7 +386,7 @@
          this.profiler.startSection("gui");
  
          if (!this.isGamePaused)
-@@ -1907,6 +1904,7 @@
+@@ -1907,6 +1894,7 @@
          }
  
          this.profiler.endSection();
@@ -393,7 +394,7 @@
          this.systemTime = getSystemTime();
      }
  
-@@ -2012,6 +2010,7 @@
+@@ -2012,6 +2000,7 @@
                      }
                  }
              }
@@ -401,7 +402,7 @@
          }
  
          this.processKeyBinds();
-@@ -2260,6 +2259,8 @@
+@@ -2260,6 +2249,8 @@
      {
          while (Mouse.next())
          {
@@ -410,7 +411,7 @@
              int i = Mouse.getEventButton();
              KeyBinding.setKeyBindState(i - 100, Mouse.getEventButtonState());
  
-@@ -2315,6 +2316,7 @@
+@@ -2315,6 +2306,7 @@
                      this.currentScreen.handleMouseInput();
                  }
              }
@@ -418,7 +419,7 @@
          }
      }
  
-@@ -2332,6 +2334,7 @@
+@@ -2332,6 +2324,7 @@
  
      public void launchIntegratedServer(String folderName, String worldName, @Nullable WorldSettings worldSettingsIn)
      {
@@ -426,7 +427,7 @@
          this.loadWorld(null);
          System.gc();
          ISaveHandler isavehandler = this.saveLoader.getSaveLoader(folderName, false);
-@@ -2378,6 +2381,12 @@
+@@ -2378,6 +2371,12 @@
  
          while (!this.integratedServer.serverIsInRunLoop())
          {
@@ -439,7 +440,7 @@
              String s = this.integratedServer.getUserMessage();
  
              if (s != null)
-@@ -2402,8 +2411,14 @@
+@@ -2402,8 +2401,14 @@
          SocketAddress socketaddress = this.integratedServer.getNetworkSystem().addLocalEndpoint();
          NetworkManager networkmanager = NetworkManager.provideLocalClient(socketaddress);
          networkmanager.setNetHandler(new NetHandlerLoginClient(networkmanager, this, null));
@@ -456,7 +457,7 @@
          this.networkManager = networkmanager;
      }
  
-@@ -2414,6 +2429,8 @@
+@@ -2414,6 +2419,8 @@
  
      public void loadWorld(@Nullable WorldClient worldClientIn, String loadingMessage)
      {
@@ -465,7 +466,7 @@
          if (worldClientIn == null)
          {
              NetHandlerPlayClient nethandlerplayclient = this.getConnection();
-@@ -2426,6 +2443,18 @@
+@@ -2426,6 +2433,18 @@
              if (this.integratedServer != null && this.integratedServer.isAnvilFileSet())
              {
                  this.integratedServer.initiateShutdown();
@@ -484,7 +485,7 @@
              }
  
              this.integratedServer = null;
-@@ -2449,6 +2478,7 @@
+@@ -2449,6 +2468,7 @@
              this.ingameGUI.resetPlayersOverlayFooterHeader();
              this.setServerData(null);
              this.integratedServerIsRunning = false;
@@ -492,7 +493,7 @@
          }
  
          this.soundHandler.stopSounds();
-@@ -2465,6 +2495,7 @@
+@@ -2465,6 +2485,7 @@
          }
  
          TileEntityRendererDispatcher.instance.setWorld(worldClientIn);
@@ -500,7 +501,7 @@
  
          if (worldClientIn != null)
          {
-@@ -2526,6 +2557,7 @@
+@@ -2526,6 +2547,7 @@
                                   this.player == null ? new RecipeBook() : this.player.getRecipeBook()
                               );
          this.player.getDataManager().setEntryValues(entityplayersp.getDataManager().getAll());
@@ -508,7 +509,7 @@
          this.player.dimension = dimension;
          this.renderViewEntity = this.player;
          this.player.preparePlayerToSpawn();
-@@ -2573,159 +2605,8 @@
+@@ -2573,159 +2595,8 @@
      {
          if (this.objectMouseOver != null && this.objectMouseOver.typeOfHit != RayTraceResult.Type.MISS)
          {
@@ -670,7 +671,7 @@
          }
      }
  
-@@ -2773,7 +2654,14 @@
+@@ -2773,7 +2644,14 @@
          {
              public String call()
              {
@@ -686,7 +687,7 @@
              }
          });
          theCrash.getCategory().addDetail("GL Caps", new ICrashReportDetail<String>()
-@@ -2878,6 +2766,7 @@
+@@ -2878,6 +2756,7 @@
          return instance;
      }
  
@@ -694,7 +695,7 @@
      public ListenableFuture<Object> scheduleResourcesRefresh()
      {
          return this.addScheduledTask(new Runnable()
-@@ -3056,18 +2945,8 @@
+@@ -3056,18 +2935,8 @@
  
      public static int getGLMaximumTextureSize()
      {
@@ -715,7 +716,7 @@
      }
  
      @Override
-@@ -3200,6 +3079,9 @@
+@@ -3200,6 +3069,9 @@
          }
          else if (this.player != null)
          {
@@ -725,7 +726,7 @@
              if (this.player.world.provider instanceof WorldProviderHell)
              {
                  return MusicTicker.MusicType.NETHER;
-@@ -3231,11 +3113,11 @@
+@@ -3231,11 +3103,11 @@
              {
                  if (Keyboard.getEventKeyState())
                  {
@@ -739,7 +740,7 @@
                      {
                          this.ingameGUI
                          .getChatGUI()
-@@ -3253,6 +3135,7 @@
+@@ -3253,6 +3125,7 @@
                          }
                      }
                  }
@@ -747,7 +748,7 @@
              }
          }
      }
-@@ -3291,7 +3174,7 @@
+@@ -3291,7 +3164,7 @@
              }
              catch (Exception exception)
              {
@@ -756,7 +757,7 @@
              }
          }
          else
-@@ -3384,6 +3267,12 @@
+@@ -3384,6 +3257,12 @@
          return this.blockColors;
      }
  
@@ -769,7 +770,7 @@
      public boolean isReducedDebug()
      {
          return this.player != null && this.player.hasReducedDebug() || this.gameSettings.reducedDebugInfo;
-@@ -3397,5 +3286,10 @@
+@@ -3397,5 +3276,10 @@
      public Tutorial getTutorial()
      {
          return this.tutorial;
