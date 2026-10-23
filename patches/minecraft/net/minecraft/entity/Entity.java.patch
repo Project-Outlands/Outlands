@@ -29,23 +29,22 @@
          }
  
          this.dataManager = new EntityDataManager(this);
-@@ -211,8 +215,16 @@
+@@ -211,7 +215,15 @@
          this.dataManager.register(SILENT, false);
          this.dataManager.register(NO_GRAVITY, false);
          this.entityInit();
 +        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(new net.minecraftforge.event.entity.EntityEvent.EntityConstructing(this));
 +        capabilities = net.minecraftforge.event.ForgeEventFactory.gatherCapabilities(this);
      }
- 
++
 +    /** Forge: Used to store custom data for each entity. */
 +    private NBTTagCompound customEntityData;
 +    public boolean captureDrops = false;
 +    public java.util.ArrayList<EntityItem> capturedDrops = new java.util.ArrayList<EntityItem>();
 +    private net.minecraftforge.common.capabilities.CapabilityDispatcher capabilities;
-+
+ 
      public int getEntityId()
      {
-         return this.entityId;
 @@ -357,6 +369,7 @@
          this.posX = x;
          this.posY = y;

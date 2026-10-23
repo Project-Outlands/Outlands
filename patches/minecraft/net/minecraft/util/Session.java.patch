@@ -41,7 +41,7 @@
 +            return new GameProfile(net.minecraft.entity.player.EntityPlayer.getUUID(new GameProfile((UUID)null, this.getUsername())), this.getUsername());
          }
      }
- 
++
 +    /* ======================================== FORGE START ===================================== */
 +    //For internal use only. Modders should never need to use this.
 +    public void setProperties(com.mojang.authlib.properties.PropertyMap properties)
@@ -54,7 +54,7 @@
 +        return properties != null;
 +    }
 +    /* ========================================= FORGE END ====================================== */
-+
+ 
      @SideOnly(Side.CLIENT)
 -    public enum Type
 +    public static enum Type

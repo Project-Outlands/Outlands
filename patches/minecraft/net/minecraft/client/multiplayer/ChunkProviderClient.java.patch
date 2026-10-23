@@ -1,6 +1,6 @@
 --- before/net/minecraft/client/multiplayer/ChunkProviderClient.java
 +++ after/net/minecraft/client/multiplayer/ChunkProviderClient.java
-@@ -61,7 +61,8 @@
+@@ -61,6 +61,7 @@
      {
          Chunk chunk = new Chunk(this.world, chunkX, chunkZ);
          this.loadedChunks.put(ChunkPos.asLong(chunkX, chunkZ), chunk);
@@ -8,4 +8,3 @@
          chunk.markLoaded(true);
          return chunk;
      }
- 

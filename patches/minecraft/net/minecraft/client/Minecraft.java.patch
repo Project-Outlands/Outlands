@@ -113,8 +113,7 @@
      {
          Display.setResizable(true);
 -        Display.setTitle("Minecraft 1.12.2");
-+        Display.setTitle("Cleanroom");
- 
+-
 -        try
 -        {
 -            Display.create(new PixelFormat().withDepthBits(24));
@@ -138,6 +137,8 @@
 -
 -            Display.create();
 -        }
++        Display.setTitle("Cleanroom");
++
 +        Display.create((new PixelFormat()).withDepthBits(24));
 +        net.minecraftforge.client.ForgeHooksClient.initializeWindowsInformation();
 +        net.minecraftforge.client.ForgeHooksClient.setWindowStyle(fullscreen);
@@ -728,13 +729,14 @@
      public boolean isReducedDebug()
      {
          return this.player != null && this.player.hasReducedDebug() || this.gameSettings.reducedDebugInfo;
-@@ -3398,4 +3308,9 @@
+@@ -3397,5 +3307,10 @@
+     public Tutorial getTutorial()
      {
          return this.tutorial;
-     }
++    }
 +
 +    public SearchTreeManager getSearchTreeManager()
 +    {
 +        return this.searchTreeManager;
-+    }
+     }
  }

@@ -26,12 +26,13 @@
          }
  
          return metadataSerializer.parseMetadataSection(sectionName, jsonobject);
-@@ -101,4 +102,8 @@
+@@ -100,5 +101,9 @@
+     public String getPackName()
      {
          return this.resourcePackFile.getName();
-     }
++    }
 +    
 +    public File getResourcePackFile() {
 +        return resourcePackFile;
-+    }
+     }
  }

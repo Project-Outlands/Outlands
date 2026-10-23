@@ -287,20 +287,15 @@
 -        String s = fileIn.getAbsolutePath();
 -
 -        if (Util.getOSType() == Util.EnumOS.OSX)
-+        try
-         {
+-        {
 -            try
-+            if (!java.awt.Desktop.isDesktopSupported())
-             {
+-            {
 -                LOGGER.info(s);
 -                Runtime.getRuntime().exec(new String[] {"/usr/bin/open", s});
-+                LOGGER.warn("Desktop API is not supported");
-                 return;
-             }
+-                return;
+-            }
 -            catch (IOException ioexception1)
-+            java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
-+            if (!desktop.isSupported(java.awt.Desktop.Action.OPEN))
-             {
+-            {
 -                LOGGER.error("Couldn't open file", ioexception1);
 -            }
 -        }
@@ -311,9 +306,8 @@
 -            try
 -            {
 -                Runtime.getRuntime().exec(s1);
-+                LOGGER.warn("Opening files is not supported.");
-                 return;
-             }
+-                return;
+-            }
 -            catch (IOException ioexception)
 -            {
 -                LOGGER.error("Couldn't open file", ioexception);
@@ -322,8 +316,8 @@
 -
 -        boolean flag = false;
 -
--        try
--        {
+         try
+         {
 -            Class<?> oclass = Class.forName("java.awt.Desktop");
 -            Object object = oclass.getMethod("getDesktop").invoke(null);
 -            oclass.getMethod("browse", URI.class).invoke(object, fileIn.toURI());
@@ -335,11 +329,23 @@
 -        }
 -
 -        if (flag)
-+            desktop.open(fileIn);
-+        } catch (IOException e)
-         {
+-        {
 -            LOGGER.info("Opening via system class!");
 -            Sys.openURL("file://" + s);
++            if (!java.awt.Desktop.isDesktopSupported())
++            {
++                LOGGER.warn("Desktop API is not supported");
++                return;
++            }
++            java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
++            if (!desktop.isSupported(java.awt.Desktop.Action.OPEN))
++            {
++                LOGGER.warn("Opening files is not supported.");
++                return;
++            }
++            desktop.open(fileIn);
++        } catch (IOException e)
++        {
 +            LOGGER.error("Could not open: " + fileIn.getAbsolutePath(), e);
          }
      }

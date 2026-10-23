@@ -222,13 +222,14 @@
      }
  
      @Nullable
-@@ -585,4 +675,9 @@
+@@ -584,5 +674,10 @@
+ 
              return entity;
          }
-     }
++    }
 +
 +    public int getPendingSaveCount()
 +    {
 +        return this.chunksToSave.size();
-+    }
+     }
  }

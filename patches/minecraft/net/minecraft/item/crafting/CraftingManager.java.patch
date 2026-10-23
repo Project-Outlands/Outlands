@@ -32,54 +32,35 @@
              else
              {
 -                if (!"jar".equals(uri.getScheme()))
-+                URI uri = url.toURI();
-+                Path path;
-+
-+                if ("file".equals(uri.getScheme()))
-                 {
+-                {
 -                    LOGGER.error("Unsupported scheme " + uri + " trying to list all recipes");
 -                    return false;
-+                    path = Paths.get(CraftingManager.class.getResource("/assets/minecraft/recipes").toURI());
-                 }
-+                else
-+                {
-+                    if (!"jar".equals(uri.getScheme()))
-+                    {
-+                        LOGGER.error("Unsupported scheme " + uri + " trying to list all recipes");
-+                        return false;
-+                    }
- 
+-                }
+-
 -                filesystem = FileSystems.newFileSystem(uri, Collections.emptyMap());
 -                path = filesystem.getPath("/assets/minecraft/recipes");
 -            }
-+                    filesystem = FileSystems.newFileSystem(uri, Collections.emptyMap());
-+                    path = filesystem.getPath("/assets/minecraft/recipes");
-+                }
- 
+-
 -            Iterator<Path> iterator = Files.walk(path).iterator();
-+                Iterator<Path> iterator = Files.walk(path).iterator();
- 
+-
 -            while (iterator.hasNext())
 -            {
 -                Path path1 = iterator.next();
 -
 -                if ("json".equals(FilenameUtils.getExtension(path1.toString())))
-+                while (iterator.hasNext())
-                 {
+-                {
 -                    Path path2 = path.relativize(path1);
 -                    String s = FilenameUtils.removeExtension(path2.toString()).replaceAll("\\\\", "/");
 -                    ResourceLocation resourcelocation = new ResourceLocation(s);
 -                    BufferedReader bufferedreader = null;
-+                    Path path1 = iterator.next();
- 
+-
 -                    try
 -                    {
 -                        bufferedreader = Files.newBufferedReader(path1);
 -                        register(s, parseRecipeJson(JsonUtils.fromJson(gson, bufferedreader, JsonObject.class)));
 -                    }
 -                    catch (JsonParseException jsonparseexception)
-+                    if ("json".equals(FilenameUtils.getExtension(path1.toString())))
-                     {
+-                    {
 -                        LOGGER.error("Parsing error loading recipe " + resourcelocation, jsonparseexception);
 -                        return false;
 -                    }
@@ -91,6 +72,35 @@
 -                    finally
 -                    {
 -                        IOUtils.closeQuietly(bufferedreader);
+-                    }
+-                }
++                URI uri = url.toURI();
++                Path path;
++
++                if ("file".equals(uri.getScheme()))
++                {
++                    path = Paths.get(CraftingManager.class.getResource("/assets/minecraft/recipes").toURI());
++                }
++                else
++                {
++                    if (!"jar".equals(uri.getScheme()))
++                    {
++                        LOGGER.error("Unsupported scheme " + uri + " trying to list all recipes");
++                        return false;
++                    }
++
++                    filesystem = FileSystems.newFileSystem(uri, Collections.emptyMap());
++                    path = filesystem.getPath("/assets/minecraft/recipes");
++                }
++
++                Iterator<Path> iterator = Files.walk(path).iterator();
++
++                while (iterator.hasNext())
++                {
++                    Path path1 = iterator.next();
++
++                    if ("json".equals(FilenameUtils.getExtension(path1.toString())))
++                    {
 +                        Path path2 = path.relativize(path1);
 +                        String s = FilenameUtils.removeExtension(path2.toString()).replaceAll("\\\\", "/");
 +                        ResourceLocation resourcelocation = new ResourceLocation(s);
@@ -115,8 +125,8 @@
 +                        {
 +                            IOUtils.closeQuietly((Reader)bufferedreader);
 +                        }
-                     }
-                 }
++                    }
++                }
 +
 +                return true;
              }

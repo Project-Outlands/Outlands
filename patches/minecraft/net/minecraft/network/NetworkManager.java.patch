@@ -64,15 +64,15 @@
          final NetworkManager networkmanager = new NetworkManager(EnumPacketDirection.CLIENTBOUND);
          Class <? extends SocketChannel > oclass;
          LazyLoadBase <? extends EventLoopGroup > lazyloadbase;
-@@ -478,6 +483,11 @@
+@@ -476,6 +481,11 @@
+                 }
+             }
          }
-     }
- 
++    }
++
 +    public Channel channel()
 +    {
 +        return channel;
-+    }
-+
+     }
+ 
      static class InboundHandlerTuplePacketListener
-         {
-             private final Packet<?> packet;

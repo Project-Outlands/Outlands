@@ -247,10 +247,12 @@
          }
  
          return k != i && l != -1 && l < k ? l : k;
-@@ -843,6 +930,26 @@
+@@ -841,6 +928,26 @@
+     public boolean getBidiFlag()
+     {
          return this.bidiFlag;
-     }
- 
++    }
++
 +    protected void setColor(float r, float g, float b, float a)
 +    {
 +        GlStateManager.color(r,g,b,a);
@@ -269,8 +271,6 @@
 +    protected IResource getResource(ResourceLocation location) throws IOException
 +    {
 +        return Minecraft.getMinecraft().getResourceManager().getResource(location);
-+    }
-+
+     }
+ 
      public int getColorCode(char character)
-     {
-         int i = "0123456789abcdef".indexOf(character);

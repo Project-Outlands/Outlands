@@ -101,6 +101,10 @@ apply from: 'installer.gradle'
 dependencies {
     // Minecraft libraries (including the vanilla assets jars) straight from the mcp config
     api project(path: ':mcpbase', configuration: 'mcpbaseLibraries')
+    // In a dev run the client reads its vanilla assets (textures, sounds, font/glyph_sizes.bin) off the classpath,
+    // the way ForgeGradle put the 'extra' jar on the runtime classpath. Only the run needs it, so it must not leak
+    // into the published jar.
+    runtimeOnly files(mcpBase.extra)
 }
 
 // The loader reports its own version at runtime (crash reports, mod metadata, isCleanroom checks), so the class has

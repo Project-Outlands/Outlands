@@ -258,22 +258,21 @@
          if (tileentity == null)
          {
              if (creationMode == Chunk.EnumCreateEntityType.IMMEDIATE)
-@@ -790,14 +796,9 @@
+@@ -790,13 +796,8 @@
              }
              else if (creationMode == Chunk.EnumCreateEntityType.QUEUED)
              {
 -                this.tileEntityPosQueue.add(pos);
 +                this.tileEntityPosQueue.add(pos.toImmutable());
              }
-         }
+-        }
 -        else if (tileentity.isInvalid())
 -        {
 -            this.tileEntities.remove(pos);
 -            return null;
--        }
+         }
  
          return tileentity;
-     }
 @@ -814,10 +815,11 @@
  
      public void addTileEntity(BlockPos pos, TileEntity tileEntityIn)
@@ -466,7 +465,7 @@
          IMMEDIATE,
          QUEUED,
          CHECK;
-     }
++    }
 +
 +    /* ======================================== FORGE START =====================================*/
 +    /**
@@ -517,5 +516,5 @@
 +    public <T> T getCapability(net.minecraftforge.common.capabilities.Capability<T> capability, @Nullable EnumFacing facing)
 +    {
 +        return capabilities == null ? null : capabilities.getCapability(capability, facing);
-+    }
+     }
  }

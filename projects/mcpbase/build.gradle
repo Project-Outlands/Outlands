@@ -50,13 +50,20 @@ forgedev {
         patches.set(file("$rootDir/patches/minecraft"))
         patched.set(layout.buildDirectory.dir('patched'))
     }
-    // Patches are authored in SRG names: MCP names may not be redistributed, and srg is what Forge's own 1.12
-    // userdev ships. ForgeDev defaults both tasks to the MCP-named tree, so point them at the srg one.
+    // The patch set is maintained in MCP names and applied to the MCP-named base (that is what ForgeDev's patcher
+    // consumes); the SRG-named copies that ship with userdev are produced separately.
+    // Prefixes are kept at before/after and --auto-header is off so the files stay `git apply`/`patch -p1` compatible:
+    // ForgeDev defaults to '@@ -a,b +_,c @@' headers, which git's patch parser rejects.
     patches.apply {
         basePathPrefix.set('before')
         modifiedPathPrefix.set('after')
         // Keep going on rejects so the report lists every failing file instead of stopping at the first one
         failOnError.set(false)
+    }
+    patches.make {
+        basePathPrefix.set('before')
+        modifiedPathPrefix.set('after')
+        autoHeader.set(false)
     }
 }
 

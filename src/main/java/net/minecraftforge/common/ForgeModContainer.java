@@ -706,7 +706,28 @@ public class ForgeModContainer extends DummyModContainer implements WorldAccessC
         File mainSource = FMLForgePlugin.forgeLocation;
         if (mainSource.isDirectory())
         {
-            return new File(System.getProperty("java.class.path").split(File.pathSeparator)[1]);
+            // Development environments keep classes and resources in separate output directories, and the launcher
+            // is free to order them however it likes - it is not guaranteed that the resources directory is the
+            // second classpath entry. Search for the entry that actually carries our assets instead.
+            String classpath = System.getProperty("java.class.path", "");
+            String[] entries = classpath.split(File.pathSeparator);
+
+            for (String entry : entries)
+            {
+                File candidate = new File(entry);
+                if (candidate.isDirectory() && new File(candidate, "assets" + File.separator + "forge").isDirectory())
+                {
+                    return candidate;
+                }
+            }
+
+            // Fall back to the classic ForgeGradle layout: [classes, resources, ...]
+            if (entries.length > 1)
+            {
+                return new File(entries[1]);
+            }
+
+            return new File(entries[0]);
         }
         else
         {

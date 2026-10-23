@@ -104,10 +104,11 @@
      }
  
      protected double getDistanceSq()
-@@ -435,6 +445,26 @@
+@@ -434,6 +444,26 @@
+     {
          return this.needsUpdate && this.needsImmediateUpdate;
      }
- 
++
 +    /* ======================================== FORGE START =====================================*/
 +    /**
 +     * Creates a new RegionRenderCache instance.<br>
@@ -127,7 +128,6 @@
 +        return new ChunkCache(world, from, to, subtract);
 +    }
 +    /* ========================================= FORGE END ======================================*/
-+
+ 
      public BlockPos getBlockPosOffset16(EnumFacing facing)
      {
-         return this.mapEnumFacing[facing.ordinal()];

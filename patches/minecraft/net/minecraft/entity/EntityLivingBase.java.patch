@@ -260,19 +260,17 @@
 -            float f = damageAmount;
 -            damageAmount = Math.max(damageAmount - this.getAbsorptionAmount(), 0.0F);
 -            this.setAbsorptionAmount(this.getAbsorptionAmount() - (f - damageAmount));
--
++            float f1 = Math.max(damageAmount - this.getAbsorptionAmount(), 0.0F);
++            this.setAbsorptionAmount(this.getAbsorptionAmount() - (damageAmount - f1));
++            f1 = net.minecraftforge.common.ForgeHooks.onLivingDamage(this, damageSrc, f1);
+ 
 -            if (damageAmount != 0.0F)
--            {
++            if (f1 != 0.0F)
+             {
 -                float f1 = this.getHealth();
 -                this.setHealth(f1 - damageAmount);
 -                this.getCombatTracker().trackDamage(damageSrc, f1, damageAmount);
 -                this.setAbsorptionAmount(this.getAbsorptionAmount() - damageAmount);
-+            float f1 = Math.max(damageAmount - this.getAbsorptionAmount(), 0.0F);
-+            this.setAbsorptionAmount(this.getAbsorptionAmount() - (damageAmount - f1));
-+            f1 = net.minecraftforge.common.ForgeHooks.onLivingDamage(this, damageSrc, f1);
-+
-+            if (f1 != 0.0F)
-+            {
 +                float f = this.getHealth();
 +                this.getCombatTracker().trackDamage(damageSrc, f, f1);
 +                this.setHealth(f - f1); // Forge: moved to fix MC-121048
@@ -518,10 +516,11 @@
      public boolean attackable()
      {
          return true;
-@@ -2988,4 +3109,30 @@
+@@ -2987,5 +3108,31 @@
+     @SideOnly(Side.CLIENT)
      public void setPartying(BlockPos pos, boolean isPartying)
      {
-     }
++    }
 +    
 +    @Override
 +    public void moveRelative(float strafe, float up, float forward, float friction)
@@ -547,5 +546,5 @@
 +            this.motionY += (double)up;
 +            this.motionZ += (double)(forward * f2 + strafe * f1);
 +        }
-+    }
+     }
  }

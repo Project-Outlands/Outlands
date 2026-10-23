@@ -85,10 +85,12 @@
      }
  
      @SideOnly(Side.CLIENT)
-@@ -243,6 +209,371 @@
+@@ -241,6 +207,371 @@
+     public WorldBorder createWorldBorder()
+     {
          return new WorldBorder();
-     }
- 
++    }
++
 +    /*======================================= Forge Start =========================================*/
 +    private net.minecraftforge.client.IRenderHandler skyRenderer = null;
 +    private net.minecraftforge.client.IRenderHandler cloudRenderer = null;
@@ -452,8 +454,6 @@
 +    public boolean canDoRainSnowIce(net.minecraft.world.chunk.Chunk chunk)
 +    {
 +        return true;
-+    }
-+
-     public void onPlayerAdded(EntityPlayerMP player)
-     {
      }
+ 
+     public void onPlayerAdded(EntityPlayerMP player)

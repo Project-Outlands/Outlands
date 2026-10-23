@@ -85,15 +85,15 @@
          Matcher matcher = TOKEN_PATTERN.matcher(selectorStr);
  
          if (!matcher.matches())
-@@ -821,6 +830,11 @@
+@@ -820,6 +829,11 @@
+     }
  
      public static boolean isSelector(String selectorStr)
-     {
++    {
 +        return net.minecraftforge.common.command.SelectorHandlerManager.isSelector(selectorStr);
 +    }
 +
 +    public static boolean isSelectorDefault(String selectorStr)
-+    {
+     {
          return TOKEN_PATTERN.matcher(selectorStr).matches();
      }
- 

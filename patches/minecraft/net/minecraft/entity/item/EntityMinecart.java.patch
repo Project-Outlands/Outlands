@@ -264,6 +264,8 @@
      {
          this.getDataManager().set(SHOW_BLOCK, showBlock);
      }
+-
+-    public enum Type
 +    
 +    @Override
 +    public boolean processInitialInteract(EntityPlayer player, net.minecraft.util.EnumHand hand)
@@ -494,8 +496,7 @@
 +    }
 +
 +    /* =================================== FORGE END ===========================================*/
- 
--    public enum Type
++
 +    public static enum Type
      {
          RIDEABLE(0, "MinecartRideable"),

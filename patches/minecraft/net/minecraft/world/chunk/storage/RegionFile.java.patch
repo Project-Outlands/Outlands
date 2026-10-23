@@ -15,10 +15,11 @@
                  this.offsets[j1] = k;
  
 -                if (k != 0 && (k >> 8) + (k & 0xFF) <= this.sectorFree.size())
+-                {
+-                    for (int l = 0; l < (k & 0xFF); l++)
 +                int length = k & 255;
 +                if (length == 255)
-                 {
--                    for (int l = 0; l < (k & 0xFF); l++)
++                {
 +                    if ((k >> 8) <= this.sectorFree.size())
 +                    { // We're maxed out, so we need to read the proper length from the section
 +                        this.dataFile.seek((k >> 8) * 4096);

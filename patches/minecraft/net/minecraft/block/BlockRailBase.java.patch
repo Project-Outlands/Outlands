@@ -37,37 +37,54 @@
              boolean flag = false;
  
 -            if (!worldIn.getBlockState(pos.down()).isTopSolid())
-+            if (!worldIn.getBlockState(pos.down()).isSideSolid(worldIn, pos.down(), EnumFacing.UP))
-             {
-                 flag = true;
-             }
- 
+-            {
+-                flag = true;
+-            }
+-
 -            if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_EAST
 -                    && !worldIn.getBlockState(pos.east()).isTopSolid())
-+            if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_EAST && !worldIn.getBlockState(pos.east()).isSideSolid(worldIn, pos.east(), EnumFacing.UP))
-             {
-                 flag = true;
-             }
+-            {
+-                flag = true;
+-            }
 -            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_WEST
 -                     && !worldIn.getBlockState(pos.west()).isTopSolid())
-+            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_WEST && !worldIn.getBlockState(pos.west()).isSideSolid(worldIn, pos.west(), EnumFacing.UP))
-             {
-                 flag = true;
-             }
+-            {
+-                flag = true;
+-            }
 -            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_NORTH
 -                     && !worldIn.getBlockState(pos.north()).isTopSolid())
-+            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_NORTH && !worldIn.getBlockState(pos.north()).isSideSolid(worldIn, pos.north(), EnumFacing.UP))
-             {
-                 flag = true;
-             }
+-            {
+-                flag = true;
+-            }
 -            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_SOUTH
 -                     && !worldIn.getBlockState(pos.south()).isTopSolid())
-+            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_SOUTH && !worldIn.getBlockState(pos.south()).isSideSolid(worldIn, pos.south(), EnumFacing.UP))
-             {
-                 flag = true;
-             }
- 
+-            {
+-                flag = true;
+-            }
+-
 -            if (flag && !worldIn.isAirBlock(pos))
++            if (!worldIn.getBlockState(pos.down()).isSideSolid(worldIn, pos.down(), EnumFacing.UP))
++            {
++                flag = true;
++            }
++
++            if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_EAST && !worldIn.getBlockState(pos.east()).isSideSolid(worldIn, pos.east(), EnumFacing.UP))
++            {
++                flag = true;
++            }
++            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_WEST && !worldIn.getBlockState(pos.west()).isSideSolid(worldIn, pos.west(), EnumFacing.UP))
++            {
++                flag = true;
++            }
++            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_NORTH && !worldIn.getBlockState(pos.north()).isSideSolid(worldIn, pos.north(), EnumFacing.UP))
++            {
++                flag = true;
++            }
++            else if (blockrailbase$enumraildirection == BlockRailBase.EnumRailDirection.ASCENDING_SOUTH && !worldIn.getBlockState(pos.south()).isSideSolid(worldIn, pos.south(), EnumFacing.UP))
++            {
++                flag = true;
++            }
++
 +            if (flag && !currentState.getBlock().isAir(currentState, worldIn, pos))
              {
                  this.dropBlockAsItem(worldIn, pos, state, 0);

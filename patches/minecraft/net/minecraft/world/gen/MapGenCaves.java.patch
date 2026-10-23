@@ -67,10 +67,13 @@
          }
      }
  
-@@ -368,4 +342,66 @@
-             }
-         }
-     }
+@@ -365,6 +339,68 @@
+                 }
+ 
+                 this.addTunnel(this.rand.nextLong(), originalX, originalZ, chunkPrimerIn, d0, d1, d2, f2, f, f1, 0, 0, 1.0);
++            }
++        }
++    }
 +
 +    protected boolean isOceanBlock(ChunkPrimer data, int x, int y, int z, int chunkX, int chunkZ)
 +    {
@@ -130,7 +133,6 @@
 +                {
 +                    data.setBlockState(x, y - 1, z, top.getBlock().getDefaultState());
 +                }
-+            }
-+        }
-+    }
- }
+             }
+         }
+     }

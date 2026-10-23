@@ -53,10 +53,11 @@
          public Item getRepairItem()
          {
              if (this == LEATHER)
-@@ -327,5 +345,21 @@
+@@ -326,6 +344,22 @@
+         public float getToughness()
          {
              return this.toughness;
-         }
++        }
 +
 +        public ArmorMaterial setRepairItem(ItemStack stack)
 +        {
@@ -72,6 +73,6 @@
 +            Item ret = this.getRepairItem();
 +            if (ret != null) repairMaterial = new ItemStack(ret,1,net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE);
 +            return repairMaterial;
-+        }
+         }
      }
  }

@@ -135,10 +135,11 @@
                                  Vec3d vec3d10 = vec3d4.add(vec3d6);
                                  List<AxisAlignedBB> list = this.world.getCollisionBoxes(this, axisalignedbb);
  
-@@ -1245,4 +1268,17 @@
+@@ -1244,5 +1267,18 @@
+                 }
              }
          }
-     }
++    }
 +
 +    public void updateSyncFields(EntityPlayerSP old)
 +    {
@@ -151,5 +152,5 @@
 +        this.serverSneakState = old.serverSneakState;
 +        this.serverSprintState = old.serverSprintState;
 +        this.positionUpdateTicks = old.positionUpdateTicks;
-+    }
+     }
  }

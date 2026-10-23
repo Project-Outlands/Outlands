@@ -95,15 +95,15 @@
      }
  
      @Nullable
-@@ -259,6 +280,11 @@
+@@ -257,6 +278,11 @@
+     public void setListener(EntityPlayer player, float p_147691_2_)
+     {
          this.sndManager.setListener(player, p_147691_2_);
-     }
- 
++    }
++
 +    public void setListener(net.minecraft.entity.Entity entity, float partialTicks)
 +    {
 +        this.sndManager.setListener(entity, partialTicks);
-+    }
-+
+     }
+ 
      public void pauseSounds()
-     {
-         this.sndManager.pauseAllSounds();

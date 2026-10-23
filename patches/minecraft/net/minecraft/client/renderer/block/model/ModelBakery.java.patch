@@ -238,10 +238,11 @@
      }
  
      private void loadModelsCheck()
-@@ -1178,4 +1198,23 @@
+@@ -1177,5 +1197,24 @@
+         BUILT_IN_MODELS.put("missing", MISSING_MODEL_MESH);
          MODEL_GENERATED.name = "generation marker";
          MODEL_ENTITY.name = "block entity marker";
-     }
++    }
 +
 +    protected void registerMultipartVariant(ModelBlockDefinition definition, Collection<ModelResourceLocation> locations)
 +    {
@@ -260,5 +261,5 @@
 +        {
 +            customVariantNames.get(item.delegate).add(name.toString());
 +        }
-+    }
+     }
  }

@@ -152,46 +152,49 @@
 -        for (int j8 = 0; j8 < 4; j8++)
 +        for (int i8 = 0; i8 < 4; i8++)
          {
--            for (int i9 = 0; i9 < 4; i9++)
 +            for (int l8 = 0; l8 < 4; l8++)
-             {
--                for (int i10 = -1; i10 < 4; i10++)
++            {
 +                for (int l9 = -1; l9 < 4; l9++)
-                 {
--                    int i11 = j6 + (i9 - 1) * i7;
--                    int i12 = k2 + i10;
--                    int l12 = l6 + (i9 - 1) * i3;
--                    boolean flag1 = i9 == 0 || i9 == 3 || i10 == -1 || i10 == 3;
--                    this.world.setBlockState(new BlockPos(i11, i12, l12), flag1 ? Blocks.OBSIDIAN.getDefaultState() : iblockstate, 2);
++                {
 +                    int l10 = i6 + (l8 - 1) * l6;
 +                    int l11 = k2 + l9;
 +                    int k12 = k6 + (l8 - 1) * i3;
 +                    boolean flag1 = l8 == 0 || l8 == 3 || l9 == -1 || l9 == 3;
 +                    this.world.setBlockState(new BlockPos(l10, l11, k12), flag1 ? Blocks.OBSIDIAN.getDefaultState() : iblockstate, 2);
-                 }
-             }
- 
--            for (int j9 = 0; j9 < 4; j9++)
-+            for (int i9 = 0; i9 < 4; i9++)
++                }
++            }
++
+             for (int i9 = 0; i9 < 4; i9++)
              {
--                for (int j10 = -1; j10 < 4; j10++)
-+                for (int i10 = -1; i10 < 4; i10++)
+                 for (int i10 = -1; i10 < 4; i10++)
                  {
+-                    int i11 = j6 + (i9 - 1) * i7;
++                    int i11 = i6 + (i9 - 1) * l6;
+                     int i12 = k2 + i10;
+-                    int l12 = l6 + (i9 - 1) * i3;
+-                    boolean flag1 = i9 == 0 || i9 == 3 || i10 == -1 || i10 == 3;
+-                    this.world.setBlockState(new BlockPos(i11, i12, l12), flag1 ? Blocks.OBSIDIAN.getDefaultState() : iblockstate, 2);
+-                }
+-            }
+-
+-            for (int j9 = 0; j9 < 4; j9++)
+-            {
+-                for (int j10 = -1; j10 < 4; j10++)
+-                {
 -                    int j11 = j6 + (j9 - 1) * i7;
 -                    int j12 = k2 + j10;
 -                    int i13 = l6 + (j9 - 1) * i3;
 -                    BlockPos blockpos = new BlockPos(j11, j12, i13);
-+                    int i11 = i6 + (i9 - 1) * l6;
-+                    int i12 = k2 + i10;
 +                    int l12 = k6 + (i9 - 1) * i3;
 +                    BlockPos blockpos = new BlockPos(i11, i12, l12);
                      this.world.notifyNeighborsOfStateChange(blockpos, this.world.getBlockState(blockpos).getBlock(), false);
                  }
              }
-@@ -451,4 +450,13 @@
+@@ -450,5 +449,14 @@
+             super(pos.getX(), pos.getY(), pos.getZ());
              this.lastUpdateTime = lastUpdate;
          }
-     }
++    }
 +
 +    @Override
 +    public void placeEntity(World world, Entity entity, float yaw)
@@ -200,5 +203,5 @@
 +            placeInPortal(entity, yaw);
 +        else
 +            placeInExistingPortal(entity, yaw);
-+    }
+     }
  }

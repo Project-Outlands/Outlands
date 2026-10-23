@@ -6,7 +6,7 @@
      private final Class <? extends WorldProvider > clazz;
 +    private boolean shouldLoadSpawn = false;
  
-     private DimensionType(int idIn, String nameIn, String suffixIn, Class <? extends WorldProvider > clazzIn)
+     DimensionType(int idIn, String nameIn, String suffixIn, Class <? extends WorldProvider > clazzIn)
      {
 @@ -20,6 +21,7 @@
          this.name = nameIn;
