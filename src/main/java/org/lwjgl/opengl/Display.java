@@ -35,7 +35,6 @@ import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowPosition;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSize;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSizeInPixels;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowTitle;
-import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowAlwaysOnTop;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowBordered;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowFullscreen;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowIcon;
@@ -296,7 +295,6 @@ public class Display {
             sdlWindow,
             bounds.getWidth() + spareX,
             bounds.getHeight() + spareY));
-        Sys.checkSdl(SDL_SetWindowAlwaysOnTop(sdlWindow, true));
     }
 
     /** Desktop bounds of every connected display. */
@@ -996,7 +994,6 @@ public class Display {
                 }
                 applyBorderlessGeometry();
             } else {
-                Sys.checkSdl(SDL_SetWindowAlwaysOnTop(sdlWindow, false));
                 Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, true));
                 Sys.checkSdl(SDL_SetWindowSize(sdlWindow, mode.getWidth(), mode.getHeight()));
                 Sys.checkSdl(SDL_SetWindowPosition(
