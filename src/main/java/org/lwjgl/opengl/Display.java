@@ -493,9 +493,11 @@ public class Display {
     }
 
     public static void processMessages() {
-        // Queued main-thread tasks land here; must precede the window calls so they apply this frame.
-        MainThread.drain();
-        MainThread.runOnMainThread(Display::pumpSdlEvents);
+        if (MainThread.isMainThread()) {
+            // Queued tasks land here; must precede the window calls so they apply this frame.
+            MainThread.drain();
+            pumpSdlEvents();
+        }
         Mouse.poll();
         Keyboard.poll();
 
@@ -706,7 +708,9 @@ public class Display {
         if (!displayCreated) {
             return;
         }
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_SwapWindow(sdlWindow)));
+        // Runs on the caller thread: the splash renderer swaps its own frames and would deadlock waiting
+        // for the client thread to drain a queued swap.
+        Sys.checkSdl(SDLVideo.SDL_GL_SwapWindow(sdlWindow));
     }
 
     public static void destroy() {
