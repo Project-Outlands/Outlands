@@ -139,9 +139,11 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 processResources {
-    // Minecraft locates the asset root through this marker resource (Bootstrap/CraftingManager)
+    // The extra artifact carries the vanilla assets. DefaultResourcePack resolves textures through the
+    // classpath (/assets/minecraft/...) and only falls back to the asset index for the rest, so the
+    // dev run needs the whole tree here, not just the marker file.
     from(mcpBase.extra.map { project.zipTree(it) }) {
-        include 'assets/.mcassetsroot'
+        include 'assets/**'
     }
     // FML reads '/deobf_data-<mc>.tsrg' from the classpath in a deobfuscated environment
     from(mcpBase.obf2Srg) {
