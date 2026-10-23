@@ -25,12 +25,15 @@ import static org.lwjgl.sdl.SDLVideo.SDL_CreateWindowWithProperties;
 import static org.lwjgl.sdl.SDLVideo.SDL_DestroyWindow;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetDesktopDisplayMode;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetFullscreenDisplayModes;
+import static org.lwjgl.sdl.SDLVideo.SDL_GetDisplayBounds;
+import static org.lwjgl.sdl.SDLVideo.SDL_GetDisplayForWindow;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetPrimaryDisplay;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowFlags;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowPosition;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSize;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowSizeInPixels;
 import static org.lwjgl.sdl.SDLVideo.SDL_GetWindowTitle;
+import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowBordered;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowFullscreen;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowIcon;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowPosition;
@@ -39,6 +42,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowSize;
 import static org.lwjgl.sdl.SDLVideo.SDL_SetWindowTitle;
 import static org.lwjgl.sdl.SDLVideo.SDL_ShowWindow;
 import static org.lwjgl.sdl.SDLVideo.SDL_SyncWindow;
+import static org.lwjgl.sdl.SDLVideo.SDL_WINDOWPOS_CENTERED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_BORDERLESS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_HIDDEN;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
@@ -58,6 +62,7 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
 
+import com.cleanroommc.client.TextFieldHandler;
 import net.minecraftforge.common.ForgeEarlyConfig;
 
 import org.lwjgl.LWJGLException;
@@ -242,6 +247,17 @@ public class Display {
         }
 
         displayCreated = true;
+
+        // Minecraft asks for fullscreen before the window exists; apply it once there is one to resize.
+        if (pendingBorderless) {
+            pendingBorderless = false;
+            borderlessInsteadOfFullscreen = true;
+            Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
+            final Rectangle bounds = currentDisplayBounds();
+            Sys.checkSdl(SDL_SetWindowPosition(sdlWindow, bounds.getX(), bounds.getY()));
+            Sys.checkSdl(SDL_SetWindowSize(sdlWindow, bounds.getWidth(), bounds.getHeight()));
+            Sys.checkSdl(SDL_SyncWindow(sdlWindow));
+        }
     }
 
     private static int resolveContextMajor() {
@@ -633,8 +649,8 @@ public class Display {
         final int rawKeycode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) 0, false);
         final char character = rawKeycode >= 32 && rawKeycode < 0xFFFF ? (char) rawKeycode : '\0';
 
-        if (keycode > org.lwjgl.sdl.SDLKeycode.SDLK_SPACE
-            && keycode <= org.lwjgl.sdl.SDLKeycode.SDLK_TILDE) {
+        if (rawKeycode >= org.lwjgl.sdl.SDLKeycode.SDLK_SPACE
+            && rawKeycode <= org.lwjgl.sdl.SDLKeycode.SDLK_TILDE) {
             // AltGr sends ALT|CTRL, so disambiguate text input from combos by the last pressed Alt side.
             final boolean isAlt = (mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_ALT) != 0;
             final boolean isAltGr = lastAltIsRightAlt;
@@ -670,6 +686,7 @@ public class Display {
         if (text == null || text.isEmpty()) {
             return;
         }
+        TextFieldHandler.onTextInput(text);
         // Key events are queued by handleKeyEvent; text input only contributes the characters on top of them.
         text.chars().forEachOrdered(c -> Keyboard.addCharEvent(Keyboard.KEY_NONE, (char) c));
     }
@@ -888,17 +905,20 @@ public class Display {
     /** A display with its desktop-relative bounds. */
     public record PositionedDisplayMode(int x, int y, Rectangle bounds, long displayId, DisplayMode mode) {}
 
+    /**
+     * Set when {@link #setFullscreen} is called before the window exists, which is what
+     * {@code Minecraft.setInitialDisplayMode} does when the game starts in fullscreen.
+     */
+    private static boolean pendingBorderless = false;
+
     public static void setFullscreen(boolean fullscreen) {
         if (!displayCreated) {
+            pendingBorderless = fullscreen;
             return;
         }
-        MainThread.runOnMainThread(() -> {
-            Sys.checkSdl(SDL_SetWindowFullscreen(sdlWindow, fullscreen));
-            if (!fullscreen) {
-                Sys.checkSdl(SDL_SetWindowSize(sdlWindow, mode.getWidth(), mode.getHeight()));
-            }
-            Sys.checkSdl(SDL_SyncWindow(sdlWindow));
-        });
+        // Exclusive mode switches the display resolution, which blacks out and remodes the monitor. A borderless
+        // window covering the display looks the same to the player and keeps the desktop resolution.
+        setBorderless(fullscreen);
     }
 
     public static void toggleBorderless() {
@@ -911,9 +931,39 @@ public class Display {
             return;
         }
         MainThread.runOnMainThread(() -> {
-            Sys.checkSdl(SDL_SetWindowFullscreen(sdlWindow, toBorderless));
+            if (toBorderless) {
+                // Leave SDL's exclusive fullscreen if it was entered some other way.
+                if ((SDL_GetWindowFlags(sdlWindow) & SDLVideo.SDL_WINDOW_FULLSCREEN) != 0) {
+                    Sys.checkSdl(SDL_SetWindowFullscreen(sdlWindow, false));
+                }
+                Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, false));
+                final Rectangle bounds = currentDisplayBounds();
+                Sys.checkSdl(SDL_SetWindowPosition(sdlWindow, bounds.getX(), bounds.getY()));
+                Sys.checkSdl(SDL_SetWindowSize(sdlWindow, bounds.getWidth(), bounds.getHeight()));
+            } else {
+                Sys.checkSdl(SDL_SetWindowBordered(sdlWindow, true));
+                Sys.checkSdl(SDL_SetWindowSize(sdlWindow, mode.getWidth(), mode.getHeight()));
+                Sys.checkSdl(SDL_SetWindowPosition(
+                    sdlWindow,
+                    SDL_WINDOWPOS_CENTERED,
+                    SDL_WINDOWPOS_CENTERED));
+            }
             Sys.checkSdl(SDL_SyncWindow(sdlWindow));
         });
+    }
+
+    /** Desktop bounds of the display the window currently sits on. */
+    private static Rectangle currentDisplayBounds() {
+        // Both getters return a display id, not a success flag, so neither may go through checkSdl.
+        int display = SDL_GetDisplayForWindow(sdlWindow);
+        if (display == 0) {
+            display = SDL_GetPrimaryDisplay();
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            final SDL_Rect rect = SDL_Rect.malloc(stack);
+            Sys.checkSdl(SDL_GetDisplayBounds(display, rect));
+            return new Rectangle(rect.x(), rect.y(), rect.w(), rect.h());
+        }
     }
 
     public static boolean isBorderless() {
