@@ -38,7 +38,9 @@ public final class ContextGL implements Context {
     public long sdlWindow;
     public long sdlContext;
     public final boolean shared;
-    private GLCapabilitiesHolder capabilities = new GLCapabilitiesHolder();
+
+    /** Capability table built on the first bind; reused afterwards. */
+    private GLCapabilities glCaps = null;
 
     public ContextGL(long sdlWindow, long sdlContext, boolean shared) {
         this.sdlWindow = sdlWindow;
@@ -47,8 +49,13 @@ public final class ContextGL implements Context {
     }
 
     public void releaseCurrent() throws LWJGLException {
-        capabilities.release();
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL)));
+        Display.glContextMutex.lock();
+        try {
+            GL.setCapabilities(null);
+            SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL);
+        } finally {
+            Display.glContextMutex.unlock();
+        }
     }
 
     public synchronized void releaseDrawable() throws LWJGLException {}
@@ -60,8 +67,20 @@ public final class ContextGL implements Context {
     }
 
     public synchronized void makeCurrent() throws LWJGLException {
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlContext)));
-        capabilities.ensure();
+        Display.glContextMutex.lock();
+        try {
+            // SDL_GL_MakeCurrent may run off the main thread; only the event pump is restricted. The
+            // splash render thread relies on this when it binds the drawable for its own frames.
+            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlContext));
+            // Capabilities are thread-local, so each thread builds its own on first bind.
+            if (glCaps == null) {
+                glCaps = GL.createCapabilities();
+            } else {
+                GL.setCapabilities(glCaps);
+            }
+        } finally {
+            Display.glContextMutex.unlock();
+        }
     }
 
     public synchronized boolean isCurrent() throws LWJGLException {
@@ -91,23 +110,4 @@ public final class ContextGL implements Context {
     }
 
     public synchronized void setCLSharingProperties(final PointerBuffer properties) throws LWJGLException {}
-
-    /** Lazily installs the GL capability table for the active context. */
-    private static final class GLCapabilitiesHolder {
-
-        private boolean initialized = false;
-
-        void ensure() {
-            if (!initialized) {
-                GL.createCapabilities();
-                initialized = true;
-            } else {
-                GL.setCapabilities(GL.getCapabilities());
-            }
-        }
-
-        void release() {
-            GL.setCapabilities(null);
-        }
-    }
 }

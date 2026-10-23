@@ -55,6 +55,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
 
 import net.minecraftforge.common.ForgeEarlyConfig;
@@ -129,6 +130,12 @@ public class Display {
     private static ContextAttribs attachmentContextAttribs = null;
     private static boolean hasDrawable = false;
     private static Drawable attachmentDrawable = null;
+
+    /**
+     * Serialises context switches between the client thread and the splash render thread. SDL's GL
+     * binding is process-global, so concurrent swaps would leave a thread with the wrong context.
+     */
+    public static final ReentrantLock glContextMutex = new ReentrantLock();
 
     /** SDL window handle, or NULL before {@link #create()}. */
     private static long sdlWindow = NULL;
