@@ -10,6 +10,7 @@ import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_WHEEL;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_QUIT;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_TEXT_INPUT;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_TEXT_EDITING;
+import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_CLOSE_REQUESTED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_EXPOSED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_FOCUS_GAINED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_FOCUS_LOST;
@@ -257,6 +258,10 @@ public class Display {
         }
 
         displayCreated = true;
+
+        // Rebuild after the context is current: the table is cached in a static initializer, and
+        // OpenGlHelper reads it right after create().
+        GLContext.refreshCapabilities();
 
         if (pendingBorderless) {
             pendingBorderless = false;
@@ -588,6 +593,15 @@ public class Display {
     private static boolean handleSdlEvent() {
         return switch (sdlEvent.type()) {
             case SDL_EVENT_QUIT -> {
+                displayCloseRequested = true;
+                yield true;
+            }
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED -> {
+                // SDL only emits SDL_EVENT_QUIT when the last visible window closes; take the window
+                // event too so a close request is not lost while other windows are alive.
+                if (sdlWindowEvent.windowID() != sdlWindowId) {
+                    yield true;
+                }
                 displayCloseRequested = true;
                 yield true;
             }
