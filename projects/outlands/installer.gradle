@@ -4,7 +4,7 @@
 // the installer jar) consume. Ported from the ForgeGradle build, with the loader/universal jar now coming from
 // this project instead of the FG patcher.
 
-import com.cleanroommc.gradle.helpers.tasks.Util
+import top.outlands.gradle.helpers.tasks.Util
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
 
@@ -50,11 +50,9 @@ tasks.register('launcherJson') {
         def vanilla = new JsonSlurper().parse(mmcVanilla)
         def jarFile = loaderJar.get().asFile
         def timestamp = Util.iso8601Now()
+        def loaderPath = "${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/${base.archivesName.get()}-${project.version}.jar"
         def json = [
-            _comment_             : [
-                'Please do not automate the download and installation of Outlands.',
-                'Our efforts are supported by ads from the download page.'
-            ],
+            _comment_             : ['Outlands launcher version json'],
             id                    : "1.12.2-Outlands-${project.version}",
             time                  : timestamp,
             releaseTime           : timestamp,
@@ -85,8 +83,10 @@ tasks.register('launcherJson') {
             name     : loaderCoords,
             downloads: [
                 artifact: [
-                    path: "${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/${base.archivesName.get()}-${project.version}.jar",
-                    url : '',
+                    path: loaderPath,
+                    // A published build is fetchable by any launcher; a local one exists only in this workspace,
+                    // where the pack carries the jar itself ('MMC-hint: local'), so it keeps the empty url.
+                    url : project.hasProperty('release') ? Util.MIRROR_MAVEN_URL + loaderPath : '',
                     sha1: Util.sha1(jarFile),
                     size: jarFile.length()
                 ]
@@ -125,14 +125,14 @@ tasks.register('installerJson') {
 
     doLast {
         def jarFile = loaderJar.get().asFile
+        def loaderPath = "${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/${base.archivesName.get()}-${project.version}.jar"
         def libs = [
             (loaderCoords): [
                 name     : loaderCoords,
                 downloads: [
                     artifact: [
-                        path: "${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/${base.archivesName.get()}-${project.version}.jar",
-                        // No URL on purpose: the launcher must fetch it from the version json
-                        url : '',
+                        path: loaderPath,
+                        url : project.hasProperty('release') ? Util.MIRROR_MAVEN_URL + loaderPath : '',
                         sha1: Util.sha1(jarFile),
                         size: jarFile.length()
                     ]

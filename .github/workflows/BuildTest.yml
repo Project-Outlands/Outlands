@@ -1,10 +1,3 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-# This workflow will build a Java project with Gradle and cache/restore any dependencies to improve the workflow execution time
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-java-with-gradle
-
 name: Build and Upload Test Artifact
 
 on:
@@ -13,10 +6,13 @@ on:
       - 'src/**'
       - 'buildSrc/**'
       - 'patches/**'
-      - 'projects/**/build.gradle'
+      - 'projects/**/*.gradle'
+      - 'templates/**'
+      - 'mmcpack-template/**'
       - 'build.gradle'
+      - 'settings.gradle'
       - 'gradle.properties'
-      - 'script/**'
+      - 'tools/**'
       - '.github/**'
   workflow_dispatch:
 
@@ -32,9 +28,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-tags: true
-          fetch-depth: 0
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -53,31 +46,33 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Setup Forge env
-        run: ./gradlew setup -Prun_number=${{ github.run_number }}
-        
+        run: ./gradlew setup
+
       - name: Stop Gradle daemon
         run: ./gradlew --stop
 
       - name: Build Jars
-        run: ./gradlew build -Prun_number=${{ github.run_number }}
+        run: ./gradlew build
 
+      # Test builds are not released, so they carry no same-day suffix: the version is just today's date and the
+      # artifact names say 'local' through the MMC pack.
       - name: Get version
-        run: echo "CLEANROOM_VERSION=$(cat version.txt)" >> $GITHUB_ENV
+        run: echo "OUTLANDS_VERSION=$(cat version.txt)" >> "$GITHUB_ENV"
 
       - name: Upload Universal Jar
         uses: actions/upload-artifact@v7
         with:
-          path: projects/cleanroom/build/libs/*-universal.jar
+          path: projects/outlands/build/libs/outlands-${{ env.OUTLANDS_VERSION }}.jar
           archive: false
 
       - name: Upload Installer Jar
         uses: actions/upload-artifact@v7
         with:
-          path: projects/cleanroom/build/libs/*-installer.jar
+          path: projects/outlands/build/libs/outlands-${{ env.OUTLANDS_VERSION }}-installer.jar
           archive: false
 
       - name: Upload MMC pack zip
         uses: actions/upload-artifact@v7
         with:
-          path: projects/cleanroom/build/libs/*.zip
+          path: projects/outlands/build/libs/outlands-${{ env.OUTLANDS_VERSION }}-local.zip
           archive: false

@@ -1,15 +1,37 @@
-name: Auto Releases
+name: Release
+
+# Triggered by a tag, or dispatched by './gradlew release'. Either way the version is fixed before anything is built:
+# it comes from the tag name, or from the input the local task computed with the same code this workflow uses to
+# validate it.
+#
+# The tag is created at the very end, only after the artifacts are on maven. A failed release therefore leaves no tag
+# behind and the version number stays free for the next attempt. Every step is idempotent - the upload is skipped when
+# all artifacts are already present, the tag is only created when it is missing, and the GitHub release is updated in
+# place - so a half finished release can be completed with './gradlew release -PreleaseVersion=<version>'.
 
 on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CalVer version to publish (2026.10.23 or 2026.10.23-2); normally computed by './gradlew release'"
+        required: true
+      commit:
+        description: "Commit the version was computed for; the run refuses to publish any other commit"
+        required: true
+      resume:
+        description: "Finish an already started release (skips the 'version is still free' check)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,58 +51,205 @@ jobs:
       - name: Fix Gradle permission
         run: chmod +x ./gradlew
 
-      - name: Setup Forge env
-        run: ./gradlew setup -Prun_number=${{ github.run_number }} -Prelease=true
+      - name: Resolve the version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="$GITHUB_REF_NAME"
+            RESUME=false
+          else
+            VERSION="${{ inputs.version }}"
+            RESUME="${{ inputs.resume }}"
+          fi
+          if [[ ! "$VERSION" =~ ^([0-9]{4}\.[0-9]{2}\.[0-9]{2})(-([0-9]+))?$ ]]; then
+            echo "::error::'$VERSION' is not a CalVer version (YYYY.MM.DD or YYYY.MM.DD-N)"
+            exit 1
+          fi
+          DATE="${BASH_REMATCH[1]}"
+          NUMBER="${BASH_REMATCH[3]}"
+          if [ -n "$NUMBER" ] && [ "$NUMBER" -lt 2 ]; then
+            echo "::error::'$VERSION': the first release of a day has no suffix, same-day releases are -2, -3, ..."
+            exit 1
+          fi
+          {
+            echo "version=$VERSION"
+            echo "date=$DATE"
+            echo "calver_args=-PcalverDate=$DATE${NUMBER:+ -PcalverSuffix=-$NUMBER}"
+            echo "resume=$RESUME"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
 
-      - name: Get version
-        run: echo "CLEANROOM_VERSION=$(cat version.txt)" >> $GITHUB_ENV
+      - name: Check the commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          ACTUAL=$(git rev-parse HEAD)
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::the branch moved since the release was prepared (expected $EXPECTED, got $ACTUAL); run './gradlew release' again"
+            exit 1
+          fi
+
+      - name: Check the version is still free
+        if: steps.version.outputs.resume != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DATE: ${{ steps.version.outputs.date }}
+        # The same task the local build used, asked to confirm this exact version. That catches a stale version, a
+        # version of another day, and a version that someone else released in the meantime.
+        run: ./gradlew releaseVersion -q -PcalverDate="$DATE" -Pexpect="$VERSION"
+
+      - name: Check credentials and what is already published
+        id: maven
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TOKEN: ${{ secrets.OUTLANDS_MAVEN_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE="https://maven.outlands.top/releases/top/outlands/outlands/$VERSION"
+          # Only the token is a secret; 'fg' is a shared publishing account, so it stays visible in the logs.
+          AUTH=(-u "fg:$TOKEN")
+          missing=0
+          present=0
+          missing_list=""
+          for classifier in "" "-sources" "-userdev" "-installer" "-srg"; do
+            file="outlands-$VERSION$classifier.jar"
+            code=$(curl -sS -L --max-time 30 --retry 2 --retry-delay 2 -o /dev/null -w '%{http_code}' "${AUTH[@]}" -I "$BASE/$file")
+            case "$code" in
+              200) present=$((present + 1)) ;;
+              404) missing=$((missing + 1)); missing_list="$missing_list $file" ;;
+              401|403) echo "::error::maven rejected the token (HTTP $code); check the OUTLANDS_MAVEN_TOKEN secret"; exit 1 ;;
+              *) echo "::error::maven answered HTTP $code for $file"; exit 1 ;;
+            esac
+          done
+          if [ "$missing" -eq 0 ]; then
+            echo "$VERSION is already on maven; the upload will be skipped"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif [ "$present" -gt 0 ]; then
+            echo "::error::$VERSION is partially published (missing:$missing_list) - delete that version from maven and re-run"
+            exit 1
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Forge env
+        run: ./gradlew setup ${{ steps.version.outputs.calver_args }} -Prelease
 
       - name: Stop Gradle daemon
         run: ./gradlew --stop
 
-      - name: Build Jars
-        run: ./gradlew build -Prun_number=${{ github.run_number }} -Prelease=true
+      - name: Build
+        run: ./gradlew build ${{ steps.version.outputs.calver_args }} -Prelease
 
       - name: Stop Gradle daemon again
         run: ./gradlew --stop
+
+      - name: Publish to maven
+        if: steps.maven.outputs.publish == 'true'
+        env:
+          TOKEN: ${{ secrets.OUTLANDS_MAVEN_TOKEN }}
+          CALVER_ARGS: ${{ steps.version.outputs.calver_args }}
+        run: ./gradlew publish $CALVER_ARGS -Prelease -PoutlandsUsername=fg -PoutlandsToken="$TOKEN"
+
+      - name: Warm the download mirror
+        # The pack and the installer hand players mirror URLs for everything that is not central or Mojang's, and
+        # the mirror pulls an artifact from maven.outlands.top on its first request. Fetch the artifacts once here
+        # so the first players after a release do not hit that cold path. Never fails the release.
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          for classifier in '' '-sources' '-srg' '-userdev' '-installer'; do
+            url="https://nexus.jsdu.cn/repository/top/outlands/outlands/${VERSION}/outlands-${VERSION}${classifier}.jar"
+            printf '%-95s %s\n' "outlands-${VERSION}${classifier}.jar" \
+              "$(curl -sS -o /dev/null -w '%{http_code} %{time_total}s' --max-time 300 --retry 2 "$url" || echo failed)"
+          done
+
+      - name: Tag the release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "outlands-release-bot"
+          git config user.email "release@outlands.top"
+          if git ls-remote --tags --refs origin "refs/tags/$VERSION" | grep -q .; then
+            echo "tag $VERSION already exists"
+          else
+            git tag -a "$VERSION" -m "Outlands $VERSION"
+            git push origin "refs/tags/$VERSION"
+          fi
 
       - name: Update CHANGELOG
         id: changelog
         uses: requarks/changelog-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ github.ref_name }}
+          tag: ${{ steps.version.outputs.version }}
           useGitmojis: false
           includeInvalidCommits: true
           reverseOrder: true
           excludeTypes: style,build,docs
         continue-on-error: true
 
-      - name: Publish to maven for mod development
-        run: ./gradlew publish -PcleanroomUsername=${{ secrets.CLEANROOM_MAVEN_USERNAME }} -PcleanroomPassword="${{ secrets.CLEANROOM_MAVEN_PASSWORD }}" -Prun_number=${{ github.run_number }} -Prelease=true
-
-      - name: Remove userdev jars
+      - name: Collect release artifacts
+        # What a user installs: the loader jar, the installer and the launcher pack. Sources, userdev and the
+        # srg/reobf intermediates are published to maven only.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          rm projects/cleanroom/build/libs/cleanroom-${{ env.CLEANROOM_VERSION }}-userdev.jar
-          rm projects/cleanroom/build/libs/cleanroom-${{ env.CLEANROOM_VERSION }}-userdev-temp.jar
+          set -euo pipefail
+          mkdir -p /tmp/release
+          cp "projects/outlands/build/libs/outlands-${VERSION}.jar" \
+             "projects/outlands/build/libs/outlands-${VERSION}-installer.jar" \
+             "projects/outlands/build/libs/outlands-${VERSION}.zip" \
+             /tmp/release/
+          ls -l /tmp/release
 
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "projects/cleanroom/build/libs/*"
+          artifacts: "/tmp/release/*"
+          # The tag already exists at this point (created after the upload), so this only attaches the files to it.
+          tag: ${{ steps.version.outputs.version }}
           makeLatest: true
           allowUpdates: true
           body: ${{ steps.changelog.outputs.changes }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Commit CHANGELOG.md
+        # Documentation only: the release notes are already on the GitHub release, so a push that branch protection
+        # refuses must not turn a successful release red.
+        continue-on-error: true
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: main
-          commit_message: 'docs: update CHANGELOG.md for ${{ github.ref_name }} [skip ci]'
+          commit_message: 'docs: update CHANGELOG.md for ${{ steps.version.outputs.version }} [skip ci]'
           file_pattern: CHANGELOG.md
 
-      - name: Trigger download server update
+      - name: Verify
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TOKEN: ${{ github.token }}
         run: |
-          curl -X POST "http://download.cleanroommc.com/api/webhook" \
-            -H "Content-Type: application/json" \
-            -d "{\"secret\":\"${{ secrets.DOWNLOAD_UPDATE_TOKEN }}\",\"count\":10,\"token\":\"${{ secrets.DOWNLOAD_UPDATE_GITHUB_TOKEN }}\"}"
+          set -euo pipefail
+          # Authenticated: this repository is private, and the unauthenticated API answers 404 for everything.
+          code=$(curl -sS --max-time 30 --retry 2 --retry-delay 2 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/$VERSION")
+          if [ "$code" != "200" ]; then
+            echo "::error::GitHub has no release for $VERSION (HTTP $code)"
+            exit 1
+          fi
+          if ! curl -sS --max-time 30 --retry 2 --retry-delay 2 "https://maven.outlands.top/releases/top/outlands/outlands/maven-metadata.xml" \
+            | grep -q "<version>$VERSION</version>"; then
+            echo "::error::maven does not list $VERSION"
+            exit 1
+          fi
+          {
+            echo "### Outlands $VERSION"
+            echo
+            echo "- https://github.com/${GITHUB_REPOSITORY}/releases/tag/$VERSION"
+            echo "- https://maven.outlands.top/releases/top/outlands/outlands/$VERSION/"
+          } >> "$GITHUB_STEP_SUMMARY"

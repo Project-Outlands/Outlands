@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers.tasks
+package top.outlands.gradle.helpers.tasks
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.Input

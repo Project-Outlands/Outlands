@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers.tasks
+package top.outlands.gradle.helpers.tasks
 
 import groovy.transform.EqualsAndHashCode
 

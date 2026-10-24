@@ -14,7 +14,7 @@ plugins {
     id 'top.outlands.forgedev' version '7.0.0-beta.59-cr1'
 }
 
-import com.cleanroommc.gradle.helpers.ProjectConstants
+import top.outlands.gradle.helpers.ProjectConstants
 
 repositories {
     maven {
@@ -23,6 +23,7 @@ repositories {
     }
     mavenLocal()
     mavenCentral()
+    maven { url = 'https://libraries.minecraft.net/' }
 }
 
 def props = project.properties
@@ -102,6 +103,7 @@ configurations {
     }
 }
 dependencies {
+    // published to maven.outlands.top; the 'cr' builds are local snapshots, only the latest one is published
     renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr5'
 }
 

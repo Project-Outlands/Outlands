@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers.tasks
+package top.outlands.gradle.helpers.tasks
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.Input
@@ -10,21 +10,19 @@ import org.gradle.api.tasks.TaskAction
  * Turns {@code templates/CleanroomVersion.java} into the {@code CleanroomVersion} class that the loader reports at
  * runtime.
  *
- * The version used to be read from the palantir git-version plugin's extra properties, which made the task depend on a
- * plugin being applied to the root project and on an undocumented extra-property closure. Everything needed is already
- * in {@code rootProject.version} (the root build computes it as {@code <lastTag>+build.<commitDistance>}), so the task
- * derives both placeholders from that instead:
+ * The version comes from {@code rootProject.version}, which the root build derives from the date (CalVer):
  *
  * <pre>
- *   %VERSION%        -> the tag part         0.6.13-alpha
- *   %BUILD_VERSION%  -> the full version     0.6.13-alpha+build.20
+ *   %VERSION%        -> the release part     2026.10.23
+ *   %BUILD_VERSION%  -> the full version     2026.10.23-2
  * </pre>
  *
- * With {@code -Prelease} the root version is the bare tag, in which case both placeholders carry the same value.
+ * The two only differ for the 2nd, 3rd, ... release of a day. A plain build of that day carries no suffix, so both
+ * placeholders are equal there as well.
  */
 abstract class GenVersionTask extends DefaultTask {
 
-    /** Full project version, e.g. {@code 0.6.13-alpha+build.20}. */
+    /** Full project version, e.g. {@code 2026.10.23} or {@code 2026.10.23-2}. */
     @Input
     String version = project.rootProject.version.toString()
 
@@ -44,7 +42,9 @@ abstract class GenVersionTask extends DefaultTask {
 
     @TaskAction
     void action() {
-        String tag = version.contains('+') ? version.substring(0, version.indexOf('+')) : version
+        // '2026.10.23-2' -> '2026.10.23'; anything that does not look like a CalVer version is reported as-is
+        def calver = version =~ /^(\d{4}\.\d{2}\.\d{2})(-\d+)?$/
+        String tag = calver ? calver.group(1) : version
         File output = getVersionClass()
         output.parentFile.mkdirs()
         output.withWriter { writer ->

@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.lwjgl2;
+package top.outlands.gradle.lwjgl2;
 
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;

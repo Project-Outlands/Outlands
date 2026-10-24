@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers.tasks
+package top.outlands.gradle.helpers.tasks
 
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
@@ -23,7 +23,7 @@ abstract class CreateMMCPackTask extends DefaultTask {
     abstract RegularFileProperty getUniversalJarFile()
 
     @Input
-    abstract Property<String> getCleanroomVersion()
+    abstract Property<String> getLoaderVersion()
 
     @Input
     abstract Property<Boolean> getIsRelease()
@@ -44,7 +44,7 @@ abstract class CreateMMCPackTask extends DefaultTask {
         def versionJsonFile = getVersionJson().get().asFile
         def templateDir = getTemplateDir().get().asFile
         def jarFile = getUniversalJarFile().get().asFile
-        def version = getCleanroomVersion().get()
+        def version = getLoaderVersion().get()
         def isRelease = getIsRelease().get()
         def loaderGroup = getLoaderCoords().get().split(':')[0]
         def loaderName = getLoaderCoords().get().split(':')[1]

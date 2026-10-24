@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers
+package top.outlands.gradle.helpers
 
 interface ProjectConstants {
     List<String> JVM_ARGUMENTS = [

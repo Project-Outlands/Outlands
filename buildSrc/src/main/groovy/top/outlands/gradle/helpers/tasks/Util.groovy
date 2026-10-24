@@ -1,4 +1,4 @@
-package com.cleanroommc.gradle.helpers.tasks
+package top.outlands.gradle.helpers.tasks
 
 import groovy.json.JsonSlurper
 import org.gradle.api.GradleException
@@ -144,26 +144,52 @@ class Util {
 		return ret
 	}
 
-	// TODO: Change to standard maven
+	/** Aliyun's mirror of Maven Central - where players download central artifacts from. */
+	static final String CENTRAL_MAVEN_URL = 'https://maven.aliyun.com/repository/central/'
+
+	/** Mojang's own library host, the only place a handful of vanilla artifacts exist. */
+	static final String MOJANG_MAVEN_URL = 'https://libraries.minecraft.net/'
+
+	/**
+	 * The mirror behind {@code repo.cleanroommc.com} (Aliyun-accelerated), hit directly so launchers do not have to
+	 * follow the 307 that {@code repo.cleanroommc.com} answers with. It carries forge, mcp_config, cleanroom's own
+	 * artifacts and {@code maven.outlands.top}, i.e. everything that is neither central nor Mojang's.
+	 */
+	static final String MIRROR_MAVEN_URL = 'https://nexus.jsdu.cn/repository/'
+
+	/**
+	 * Where the launcher-facing JSON (version.json, install_profile.json, the MMC pack) points players at, in
+	 * probing order: central -> Aliyun, Mojang's -> its own host, everything else -> the mirror. The three hosts
+	 * after the mirror are only reached for artifacts the mirror does not carry, so a broken mirror degrades into
+	 * the previous behaviour instead of breaking the pack.
+	 */
+	static final List<String> LAUNCHER_REPOSITORIES = [
+			CENTRAL_MAVEN_URL,
+			MOJANG_MAVEN_URL,
+			MIRROR_MAVEN_URL,
+			'https://maven.outlands.top/releases/',
+			'https://maven.minecraftforge.net/',
+			'https://repo.cleanroommc.com/releases/',
+			'https://maven.arcseekers.com/releases/',
+	]
+
+	/** path -> the base url that answered for it, so one build probes each artifact once. */
+	private static final Map<String, String> nativeUrls = [:]
+
 	static def getNativeURL(path, filename) {
-		def urlList = [
-				"https://repo.maven.apache.org/maven2/",
-				"https://libraries.minecraft.net/",
-                "https://nexus.jsdu.cn/repository",
-                "https://maven.arcseekers.com/releases/",
-                "https://maven.minecraftforge.net/",
-				"https://repo.cleanroommc.com/releases/",
-		]
-		try {
-			return urlList.stream().map(original -> original + path)
-					.filter((String it) -> this::checkExists(it)).findFirst().get()
-		} catch (NoSuchElementException ignored) {
-			throw new GradleException("Can't find " + filename + " from defined repositories.\n"
-					+ "Please check and make sure all repositories are setup properly.\n"
-					+ "At: com.cleanroommc.gradle.helpers.tasks.Util#getNativeURL(String, String)\n"
-					+ "Current defined repositories: (Sort by order)\n"
-					+ String.join("\n" , urlList) as String)
+		String known = nativeUrls.get(path)
+		if (known != null) return known + path
+		for (String base : LAUNCHER_REPOSITORIES) {
+			if (checkExists(base + path)) {
+				nativeUrls.put(path, base)
+				return base + path
+			}
 		}
+		throw new GradleException("Can't find " + filename + " from defined repositories.\n"
+				+ "Please check and make sure all repositories are setup properly.\n"
+				+ "At: top.outlands.gradle.helpers.tasks.Util#getNativeURL(String, String)\n"
+				+ "Current defined repositories: (Sort by order)\n"
+				+ String.join("\n" , LAUNCHER_REPOSITORIES) as String)
 	}
 
 	static def getOSName(nativeClassifier) {
@@ -218,18 +244,25 @@ class Util {
 	}
 	
 	private static boolean checkExists(String url) {
-		try {
-			def code = new URI(url).toURL().openConnection().with {
-				requestMethod = 'HEAD'
-				connect()
-				responseCode
+		// The mirror occasionally drops a connection instead of answering (SSL EOF), which would silently move the
+		// artifact to a fallback host - so a transport failure is retried once. A 404 is an answer and not retried.
+		for (int attempt = 0; attempt < 2; attempt++) {
+			try {
+				def code = new URI(url).toURL().openConnection().with {
+					requestMethod = 'HEAD'
+					connectTimeout = 15_000
+					readTimeout = 30_000
+					connect()
+					responseCode
+				}
+				return code == 200
+			} catch (Exception e) {
+				if (e.toString().contains('unable to find valid certification path to requested target'))
+					throw new RuntimeException('Failed to connect to ' + url + ': Missing certificate root authority, try updating java')
 			}
-			return code == 200
-		} catch (Exception e) {
-			if (e.toString().contains('unable to find valid certification path to requested target'))
-				throw new RuntimeException('Failed to connect to ' + url + ': Missing certificate root authority, try updating java')
-			throw e
 		}
+		// Not there, as far as this host is concerned: let the caller try the next one.
+		return false
 	}
 
 }

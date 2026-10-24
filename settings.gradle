@@ -13,7 +13,7 @@ pluginManagement {
     }
 }
 
-rootProject.name = 'Cleanroom'
+rootProject.name = 'Outlands'
 
 // MCP layer: decompile -> access transformers -> mcpcleanup -> rename, plus the patch application
 include ':mcpbase'

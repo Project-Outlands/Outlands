@@ -17,35 +17,46 @@ buildscript {
 
 plugins {
     id "org.jetbrains.gradle.plugin.idea-ext" version "1.4.1"
-    //id "com.palantir.git-version" version "4.2.0"
 }
-apply plugin: 'com.palantir.git-version' // Declared in buildSrc/build.gradle
 
-import com.cleanroommc.gradle.helpers.ProjectConstants
-import com.cleanroommc.gradle.helpers.tasks.Util
-import com.palantir.gradle.gitversion.VersionDetails
+import top.outlands.gradle.helpers.ProjectConstants
+import top.outlands.gradle.helpers.tasks.Util
 
-
-def props = project.properties
 def sysProps = System.getProperties()
-VersionDetails details = versionDetails()
 
-group = 'com.cleanroommc'
+group = 'top.outlands'
 
-if (project.hasProperty("release")) {
-    version = details.lastTag
-} else if (!project.hasProperty("run_number")) {
-    version = "${details.lastTag}+build.${details.commitDistance}"
-} else {
-    version = "${details.lastTag}+build.${details.commitDistance}.run.${props.run_number}"
-}
+// region version -------------------------------------------------------------
+// CalVer, YYYY.MM.DD, in UTC so that a build on two different machines on the same day agrees. Nothing else goes
+// into the version: no commit distance, no dirty flag, no CI run number. A build is therefore not identifiable by
+// its version alone, and repeated builds on one day produce the same file names on purpose (they overwrite rather
+// than accumulate).
+//
+// Same-day releases are only ever numbered at publish time: the first one of the day is 'YYYY.MM.DD', the next ones
+// are 'YYYY.MM.DD-2', 'YYYY.MM.DD-3', ... CalVer's RELEASE modifier starts at 2 for the second build, and Maven's
+// ComparableVersion ranks '2026.10.23-2' above '2026.10.23', so 'latest'/'release' keep resolving forwards.
+//
+// CI never invents a suffix of its own: 'Prepare Release' computes it, creates the matching tag, and the tag then
+// feeds both values back into the release build (-PcalverDate/-PcalverSuffix), so the published version and the tag
+// can not drift apart.
+def calverFormat = java.time.format.DateTimeFormatter.ofPattern('yyyy.MM.dd')
+def calverDate = (findProperty('calverDate')
+        ?: java.time.LocalDate.now(java.time.ZoneOffset.UTC).format(calverFormat)).toString()
+def calverSuffix = (findProperty('calverSuffix') ?: '').toString()
+if (calverSuffix.startsWith('-')) calverSuffix = calverSuffix.substring(1)
+if (!(calverDate ==~ /\d{4}\.\d{2}\.\d{2}/))
+    throw new GradleException("calverDate must be YYYY.MM.DD, got '${calverDate}'")
+if (calverSuffix && (!(calverSuffix ==~ /\d+/) || calverSuffix.toInteger() < 2))
+    throw new GradleException("calverSuffix must be omitted or 2, 3, 4, ... (the CalVer release modifier), got '${calverSuffix}'")
+
+version = calverDate + (calverSuffix ? "-${calverSuffix}" : '')
 
 def version_txt = new File(project.projectDir, "version.txt")
 version_txt.write(version.toString())
 
-println "Setting up Cleanroom $version"
-if (project.hasProperty('run_number')) println("On GitHub runs #${props.run_number}")
+println "Setting up Outlands ${version}"
 println "Java: ${ -> sysProps['java.version']} | JVM: ${ -> sysProps['java.vm.version']} | Vendor: ${ -> sysProps['java.vendor']} | Architecture: ${ -> sysProps['os.arch']}"
+// endregion
 
 // Initialize buildSrc
 Util.init()
@@ -56,6 +67,45 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 idea.project.settings.compiler.javac.javacAdditionalOptions = ProjectConstants.COMPILER_JVM_ARGUMENTS.join(' ')
+
+// region release -------------------------------------------------------------
+// Maintainer entry point: './gradlew release'. It never builds or publishes locally; it verifies the repository
+// state, computes the version, and asks CI to do the work (see .github/workflows/Release.yml). The version
+// arithmetic lives in one place - ReleaseVersionTask - which CI also runs to check that the version it was asked to
+// publish is still the next free one.
+def releaseRepository = 'Project-Outlands/Outlands'
+def releaseMavenMetadataUrl = 'https://maven.outlands.top/releases/top/outlands/outlands/maven-metadata.xml'
+def releaseBranch = 'main'
+// 'origin' unless overridden: handy for testing against a mirror or a local clone (-PgitRemote=<name|path>)
+def releaseGitRemote = providers.gradleProperty('gitRemote').getOrElse('origin')
+
+tasks.register('releaseVersion', top.outlands.gradle.helpers.tasks.ReleaseVersionTask) { task ->
+    task.group = 'release'
+    task.description = 'Prints the CalVer version a release started now would use.'
+    task.rootDir = layout.projectDirectory
+    task.mavenMetadataUrl.set(releaseMavenMetadataUrl)
+    task.gitRemote.set(releaseGitRemote)
+    task.calverDate.set(calverDate)
+    task.expect.set(providers.gradleProperty('expect').getOrElse(''))
+}
+
+tasks.register('release', top.outlands.gradle.helpers.tasks.ReleaseTask) { task ->
+    task.group = 'release'
+    task.description = "Releases the current ${releaseBranch} through CI and waits for the result."
+    task.rootDir = layout.projectDirectory
+    task.mavenMetadataUrl.set(releaseMavenMetadataUrl)
+    task.repository.set(releaseRepository)
+    task.gitRemote.set(releaseGitRemote)
+    task.defaultBranch.set(releaseBranch)
+    task.workflowFile.set('Release.yml')
+    task.calverDate.set(calverDate)
+    task.token.set(providers.gradleProperty('releaseToken').getOrElse(''))
+    task.dryRun.set(providers.gradleProperty('dryRun').isPresent())
+    task.noWait.set(providers.gradleProperty('noWait').isPresent())
+    task.resumeVersion.set(providers.gradleProperty('releaseVersion').getOrElse(''))
+    task.timeoutMinutes.set(providers.gradleProperty('releaseTimeout').map { it as int }.orElse(20))
+}
+// endregion
 
 tasks.register('setup') {
     group = 'setup'

@@ -1,4 +1,4 @@
-// Outlands: the patched Minecraft + Cleanroom loader project.
+// Outlands: the patched Minecraft + loader project.
 //
 // This replaces the old ForgeGradle 6 chain (:mcp -> :minecraft -> :cleanroom patcher). The MCP layer
 // (decompile -> mcpcleanup -> rename, access transformers included) and the patch application live in
@@ -20,8 +20,8 @@ import java.util.jar.JarInputStream
 import java.util.jar.JarOutputStream
 import org.apache.commons.compress.compressors.lzma.LZMACompressorInputStream
 import org.apache.commons.compress.compressors.lzma.LZMACompressorOutputStream
-import com.cleanroommc.gradle.helpers.ProjectConstants
-import com.cleanroommc.gradle.helpers.tasks.Util
+import top.outlands.gradle.helpers.ProjectConstants
+import top.outlands.gradle.helpers.tasks.Util
 
 def props = project.properties
 
@@ -69,6 +69,14 @@ repositories {
         name = 'Outlands'
         url = 'https://maven.outlands.top/releases/'
     }
+    // Vanilla's own library host. 1.12.2 needs a few artifacts that exist nowhere else - java3d:vecmath is the one
+    // the loader compiles against (javax.vecmath in Forge's model API), lzma is carried over from vanilla's list.
+    // Without this repository they only resolve from a warm Gradle cache or through the cleanroom maven, which is
+    // a redirect to a third-party host - that is exactly how a local build succeeds where CI fails.
+    maven {
+        name = 'Mojang libraries'
+        url = 'https://libraries.minecraft.net/'
+    }
     maven {
         url = 'https://maven.arcseekers.com/releases/'
     }
@@ -107,9 +115,9 @@ dependencies {
     runtimeOnly files(mcpBase.extra)
 }
 
-// The loader reports its own version at runtime (crash reports, mod metadata, isCleanroom checks), so the class has
+// The loader reports its own version at runtime (crash reports, mod metadata), so the class has
 // to be generated from the current project version instead of being a stale checked-out file.
-def genVersion = tasks.register('genVersion', com.cleanroommc.gradle.helpers.tasks.GenVersionTask)
+def genVersion = tasks.register('genVersion', top.outlands.gradle.helpers.tasks.GenVersionTask)
 
 sourceSets {
     main {
@@ -220,7 +228,7 @@ forgedev.runs {
         run.metadata(mcpBase.metadata)
     }
 
-    cleanroomClient {
+    outlandsClient {
         options {
             mainClass = 'com.cleanroommc.boot.MainClient'
             workingDir = file('run')
@@ -229,7 +237,7 @@ forgedev.runs {
         }
     }
 
-    cleanroomServer {
+    outlandsServer {
         options {
             mainClass = 'com.cleanroommc.boot.MainServer'
             workingDir = file('run')
@@ -242,7 +250,7 @@ forgedev.runs {
 
 // the run configs need the plain text mappings file on disk
 tasks.configureEach {
-    if (name == 'runCleanroomClient' || name == 'runCleanroomServer')
+    if (name == 'runOutlandsClient' || name == 'runOutlandsServer')
         dependsOn(mcpToSrg)
 }
 
@@ -393,7 +401,23 @@ tasks.register('outlandsInfo') {
 
 // region publishing ---------------------------------------------------------
 // top.outlands:outlands (universal), :userdev and :installer are the three artifacts consumers resolve.
+// Only the token is a secret: 'fg' is a shared publishing account, so it can stay visible in the logs (masking it
+// would turn every two-letter occurrence in the log into '***' anyway). Same flags locally and in CI:
+//   ./gradlew publish -PoutlandsToken=... [-PoutlandsUsername=fg] [-Prelease]
 publishing {
+    repositories {
+        maven {
+            name = 'outlands'
+            url = 'https://maven.outlands.top/releases'
+            credentials {
+                username = project.findProperty('outlandsUsername') ?: 'fg'
+                password = project.findProperty('outlandsToken') ?: ''
+            }
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
     publications {
         outlands(MavenPublication) {
             groupId = project.group
@@ -415,7 +439,7 @@ publishing {
 // region MMC/Prism pack -----------------------------------------------------
 // The launcher-facing distribution: mmc-pack.json + the per-component patch JSONs (forge slot carries the loader,
 // lwjgl3 slot carries our LWJGL build) + the loader jar for local (non-release) builds.
-tasks.register('createMMCPack', com.cleanroommc.gradle.helpers.tasks.CreateMMCPackTask) {
+tasks.register('createMMCPack', top.outlands.gradle.helpers.tasks.CreateMMCPackTask) {
     group = 'build'
     description = 'Creates a MultiMC/Prism instance package for Outlands'
     dependsOn 'launcherJson', 'jar'
@@ -423,11 +447,15 @@ tasks.register('createMMCPack', com.cleanroommc.gradle.helpers.tasks.CreateMMCPa
     versionJson = tasks.named('launcherJson').get().ext.output
     templateDir = rootProject.layout.projectDirectory.dir('mmcpack-template')
     universalJarFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
-    cleanroomVersion = project.version.toString()
+    loaderVersion = project.version.toString()
     loaderCoords = "${project.group}:${base.archivesName.get()}".toString()
-    releaseBaseUrl = 'https://maven.outlands.top/releases'
-    isRelease = !project.version.toString().contains('+')
-    outputZip = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}${project.version.toString().contains('+') ? '-local' : ''}.zip")
+    // Players take everything that is not central or Mojang's from the mirror that backs repo.cleanroommc.com.
+    releaseBaseUrl = Util.MIRROR_MAVEN_URL
+    // 'release' is what CI passes when publishing. A plain build keeps the 'local' pack (it carries the loader jar,
+    // a release pack points at the maven URL instead), so the flag - not the version string - decides this.
+    def releaseBuild = project.hasProperty('release')
+    isRelease = releaseBuild
+    outputZip = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}${releaseBuild ? '' : '-local'}.zip")
 }
 
 tasks.named('assemble') { dependsOn 'createMMCPack' }
