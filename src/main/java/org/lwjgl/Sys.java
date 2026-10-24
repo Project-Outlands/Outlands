@@ -22,6 +22,8 @@ import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.Platform;
 import org.lwjgl.system.Pointer;
 
+import com.cleanroommc.common.AppMetadata;
+import com.cleanroommc.common.CleanroomVersion;
 import net.minecraftforge.common.ForgeEarlyConfig;
 
 /**
@@ -46,6 +48,7 @@ public class Sys {
                 Configuration.HARFBUZZ_LIBRARY_NAME.set("freetype");
             }
             applyPlatformHints();
+            applyAppMetadata();
             if (!SDL_Init(
                 SDL_INIT_VIDEO | SDL_INIT_EVENTS
                     | SDL_INIT_JOYSTICK
@@ -54,6 +57,7 @@ public class Sys {
                     | SDL_INIT_SENSOR)) {
                 throw new SDLException("Could not initialize SDL");
             }
+            AppMetadata.applyDefaultIcon();
             initialized = true;
         });
     }
@@ -83,6 +87,14 @@ public class Sys {
         return Objects.requireNonNullElse(System.getenv("XDG_SESSION_TYPE"), "")
             .toLowerCase()
             .startsWith("wayland");
+    }
+
+    /** Publishes the loader's default identity; packs may override it through {@link AppMetadata}. */
+    private static void applyAppMetadata() {
+        AppMetadata.set("Outlands", CleanroomVersion.getBuildVersion(), "top.outlands.outlands");
+        AppMetadata.set(AppMetadata.URL, "https://outlands.top");
+        AppMetadata.set(AppMetadata.CREATOR, "Outlands contributors");
+        AppMetadata.set(AppMetadata.TYPE, "game");
     }
 
     /** Returns the LWJGL version. */

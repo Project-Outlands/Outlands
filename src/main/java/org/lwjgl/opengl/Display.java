@@ -104,7 +104,8 @@ import org.lwjgl.util.Rectangle;
  */
 public class Display {
 
-    private static String windowTitle = "Minecraft";
+    /** Fallback title used until Minecraft calls {@link #setTitle}; packs may also set it directly. */
+    private static String windowTitle = "Outlands 1.12.2";
 
     private static boolean displayCreated = false;
     private static boolean displayFocused = true;
@@ -889,7 +890,9 @@ public class Display {
         if (icons == null || icons.length == 0) {
             return 0;
         }
-        if (!displayCreated) {
+        // Test the handle rather than displayCreated: the window exists once createWindow runs, while that
+        // flag is only set later by create().
+        if (sdlWindow == 0L) {
             savedIcons = new ByteBuffer[icons.length];
             for (int i = 0; i < icons.length; i++) {
                 final ByteBuffer icon = icons[i];
