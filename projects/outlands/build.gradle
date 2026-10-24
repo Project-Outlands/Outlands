@@ -15,6 +15,11 @@ plugins {
     id 'top.outlands.forgedev' version '7.0.0-beta.59-cr1'
 }
 
+
+import net.minecraftforge.forgedev.tasks.Reobf
+import net.minecraftforge.srgutils.IMappingFile
+import top.outlands.gradle.helpers.tasks.CreateMMCPackTask
+
 import java.util.jar.JarEntry
 import java.util.jar.JarInputStream
 import java.util.jar.JarOutputStream
@@ -22,6 +27,12 @@ import org.apache.commons.compress.compressors.lzma.LZMACompressorInputStream
 import org.apache.commons.compress.compressors.lzma.LZMACompressorOutputStream
 import top.outlands.gradle.helpers.ProjectConstants
 import top.outlands.gradle.helpers.tasks.Util
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.util.zip.GZIPInputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 
 def props = project.properties
 
@@ -51,13 +62,13 @@ def mcpToSrg = tasks.register('mcpToSrgMappings') {
     inputs.file(src)
     outputs.files(mcpToSrgSrg, plain)
     doLast {
-        new java.util.zip.GZIPInputStream(new FileInputStream(src.get())).withCloseable { ins ->
+        new GZIPInputStream(new FileInputStream(src.get() as File)).withCloseable { ins ->
             plain.get().asFile.withOutputStream { os -> os << ins }
         }
         // The loader wants SRG -> MCP (it translates the SRG names used by FML's reflection helper
         // into the MCP names our sources/classes are compiled against)
-        def mapping = net.minecraftforge.srgutils.IMappingFile.load(plain.get().asFile)
-        mapping.reverse().write(mcpToSrgSrg.get().asFile.toPath(), net.minecraftforge.srgutils.IMappingFile.Format.TSRG, false)
+        def mapping = IMappingFile.load(plain.get().asFile)
+        mapping.reverse().write(mcpToSrgSrg.get().asFile.toPath(), IMappingFile.Format.TSRG, false)
     }
 }
 
@@ -186,10 +197,10 @@ def mcpVersion = props.mcp_version
 
 // The asset index id comes from the version json inside the mcp metadata zip
 def assetIndex = providers.provider {
-    def zip = new java.util.zip.ZipFile(mcpBase.metadata.get())
+    def zip = new ZipFile(mcpBase.metadata.get())
     try {
         def entry = zip.entries().find { !it.directory && it.name.endsWith('.json') }
-        def json = new groovy.json.JsonSlurper().parse(zip.getInputStream(entry))
+        def json = new JsonSlurper().parse(zip.getInputStream(entry as ZipEntry))
         json.get('assetIndex')?.get('id')
     } finally {
         zip.close()
@@ -263,7 +274,7 @@ def jarForReobf = tasks.register('jarForReobf', Jar) {
     from sourceSets.main.output
 }
 
-def reobf = tasks.register('reobf', net.minecraftforge.forgedev.tasks.Reobf) {
+def reobf = tasks.register('reobf', Reobf) {
     input.from(jarForReobf)
     mappings.set(layout.file(providers.provider { mcpBase.map2Srg.get() }))
     output.set(layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}-srg.jar"))
@@ -328,6 +339,70 @@ tasks.named('jar', Jar) {
     }
 }
 
+
+// region materialized dev environment --------------------------------------
+// ForgeDev 7 has no patch-application step for mod projects: its mcp artifact *is* the dev target (classes, srg
+// classes, sources, mappings, metadata, extra). 'outlands' can play that role because this build already materializes
+// the whole chain (mcp_config -> our patches -> loader), so no decompile happens on the consumer side.
+//
+// The userdev set is not enough for it: userdev's 'sources' is the patch target, i.e. the loader only, because its
+// consumer gets the Minecraft sources from mcp_config - ForgeDev has no such second source provider.
+//
+// What cannot be provided: 'sources.srg'. Renaming mcp -> srg on sources needs ast level analysis; the mavenizer's
+// RenameSourcesCli is srg -> mcp only, and it says the reverse is unsupported by the whole stack. The key is left out
+// instead of pointing it at the mcp named jar (which would be a lie that only shows up in SRG-level tools).
+def devenvDir = layout.buildDirectory.dir('devenv')
+
+def devenvJson = tasks.register('devenvJson') {
+    // The launcher library set is the dev classpath: vanilla's libraries plus what the loader adds.
+    dependsOn 'installerArtifacts'
+    def artifactsFile = tasks.named('installerArtifacts').flatMap { it.outputs.files.elements.map { it.first().asFile } }
+    def output = devenvDir.map { it.file('devenv.json') }
+    inputs.file(artifactsFile)
+    outputs.file(output)
+    doLast {
+        def libraries = new JsonSlurper().parse(artifactsFile.get()).artifacts.values().collect { it.name }
+        def json = [
+            config            : "${project.group}:${base.archivesName.get()}:${project.version}".toString(),
+            pipeline          : 'joined',
+            'mc.version'      : props.minecraft_version,
+            'mappings.channel': props.mapping_channel,
+            'mappings.version': props.mapping_version,
+            dependencies      : libraries.sort().join(','),
+            'loader.version'  : project.version.toString()
+        ]
+        def file = output.get().asFile
+        file.parentFile.mkdirs()
+        file.text = JsonOutput.prettyPrint(JsonOutput.toJson(json))
+    }
+}
+
+// The Minecraft sources are the ones the loader is compiled against: patched, mcp named. They are shipped as a
+// separate classifier because '-sources' must stay loader-only (userdev applies patches to it).
+tasks.register('devSourcesJar', Jar) {
+    archiveClassifier = 'dev-sources'
+    // the patched tree belongs to :mcpbase, and wiring its directory in directly hides the producer from Gradle
+    dependsOn ':mcpbase:applyPatches'
+    from(patches.patched)
+    from("$rootDir/src/main/java") {
+        exclude 'net/minecraft/**'
+    }
+}
+
+// Everything ForgeDev reads besides the three big jars, in the shape it expects: the mcp config's own metadata/extra
+// and mappings are forwarded as-is (they describe the base this artifact was materialized from).
+tasks.register('devenvZip', Zip) {
+    archiveClassifier = 'devenv'
+    archiveExtension = 'zip'
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    from(devenvJson)
+    from(mcpBase.mappingZip) { rename { 'mappings/mappings.zip' } }
+    from(mcpBase.map2Srg) { rename { 'mappings/map2srg.tsrg.gz' } }
+    from(mcpBase.obf2Srg) { rename { 'mappings/obf2srg.tsrg' } }
+    from(mcpBase.metadata) { rename { 'metadata.zip' } }
+    from(mcpBase.extra) { rename { 'extra.jar' } }
+}
+// endregion
 
 // region userdev ------------------------------------------------------------
 // Classic userdev artifact (spec 2): config.json + joined.lzma + patches/ + ats/ + sources.
@@ -427,6 +502,9 @@ publishing {
             artifact(tasks.named('loaderSourcesJar')) { extension = 'jar' }
             artifact(tasks.named('userdevJar')) { classifier = 'userdev'; extension = 'jar' }
             artifact(tasks.named('installerJar')) { classifier = 'installer'; extension = 'jar' }
+            // ForgeDev 7 dev target: sources that include patched Minecraft, and the mappings/metadata it reads
+            artifact(tasks.named('devSourcesJar')) { classifier = 'dev-sources'; extension = 'jar' }
+            artifact(tasks.named('devenvZip')) { classifier = 'devenv'; extension = 'zip' }
             // srg-named classes: FG7's MCPBase.getClasses() prefers 'classes.srg'
             artifact(layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}-srg.jar")) {
                 classifier = 'srg'; extension = 'jar'; builtBy tasks.named('reobf')
@@ -439,7 +517,7 @@ publishing {
 // region MMC/Prism pack -----------------------------------------------------
 // The launcher-facing distribution: mmc-pack.json + the per-component patch JSONs (forge slot carries the loader,
 // lwjgl3 slot carries our LWJGL build) + the loader jar for local (non-release) builds.
-tasks.register('createMMCPack', top.outlands.gradle.helpers.tasks.CreateMMCPackTask) {
+tasks.register('createMMCPack', CreateMMCPackTask) {
     group = 'build'
     description = 'Creates a MultiMC/Prism instance package for Outlands'
     dependsOn 'launcherJson', 'jar'

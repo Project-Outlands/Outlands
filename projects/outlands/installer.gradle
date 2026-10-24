@@ -178,7 +178,7 @@ tasks.register('installerJar', Zip) {
 }
 
 tasks.named('assemble') {
-    dependsOn 'installerJar', 'userdevJar'
+    dependsOn 'installerJar', 'userdevJar', 'devenvZip', 'devSourcesJar'
 }
 // endregion
 
