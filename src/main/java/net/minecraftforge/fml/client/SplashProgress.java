@@ -445,14 +445,11 @@ public class SplashProgress
                     glDisable(GL_TEXTURE_2D);
                     }
 
-                    // We use mutex to indicate safely to the main thread that we're taking the display global lock
-                    // So the main thread can skip processing messages while we're updating.
-                    // There are system setups where this call can pause for a while, because the GL implementation
-                    // is trying to impose a framerate or other thing is occurring. Without the mutex, the main
-                    // thread would delay waiting for the same global display lock
+                    // Only the buffer swap belongs to this thread. SDL's event pump is main-thread only,
+                    // so the loading thread owns it and this loop must not call processMessages().
                     mutex.acquireUninterruptibly();
                     long updateStart = System.nanoTime();
-                    Display.update();
+                    Display.update(false);
                     // As soon as we're done, we release the mutex. The other thread can now ping the processmessages
                     // call as often as it wants until we get get back here again
                     long dur = System.nanoTime() - updateStart;
