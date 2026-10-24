@@ -415,8 +415,7 @@ public class Display {
 
         updateWindowDimensions();
         if (savedIcons != null) {
-            setIcon(savedIcons);
-            savedIcons = null;
+            applySavedIcons();
         }
     }
 
@@ -865,9 +864,11 @@ public class Display {
     }
 
     public static void setTitle(String title) {
-        windowTitle = title;
+        // LWJGL2 maps null to an empty title rather than forwarding it to the backend.
+        final String newTitle = title == null ? "" : title;
+        windowTitle = newTitle;
         if (displayCreated) {
-            MainThread.runOnMainThread(() -> Sys.checkSdl(SDL_SetWindowTitle(sdlWindow, title)));
+            MainThread.runOnMainThread(() -> Sys.checkSdl(SDL_SetWindowTitle(sdlWindow, newTitle)));
         }
     }
 
@@ -889,23 +890,30 @@ public class Display {
         if (icons == null || icons.length == 0) {
             return 0;
         }
+        // Copy first: callers may reuse or release their buffers once this returns.
+        savedIcons = new ByteBuffer[icons.length];
+        for (int i = 0; i < icons.length; i++) {
+            final ByteBuffer icon = icons[i];
+            savedIcons[i] = ByteBuffer.allocate(icon.remaining())
+                .order(ByteOrder.nativeOrder());
+            final int oldPos = icon.position();
+            savedIcons[i].put(icon);
+            icon.position(oldPos);
+            savedIcons[i].flip();
+        }
         // Test the handle rather than displayCreated: the window exists once createWindow runs, while that
         // flag is only set later by create().
         if (sdlWindow == 0L) {
-            savedIcons = new ByteBuffer[icons.length];
-            for (int i = 0; i < icons.length; i++) {
-                final ByteBuffer icon = icons[i];
-                savedIcons[i] = ByteBuffer.allocate(icon.remaining())
-                    .order(ByteOrder.nativeOrder());
-                final int oldPos = icon.position();
-                savedIcons[i].put(icon);
-                icon.position(oldPos);
-                savedIcons[i].flip();
-            }
-            return icons.length;
+            // LWJGL2 reports 0 for an uncreated Display and replays the cached icons from create().
+            return 0;
         }
+        applySavedIcons();
+        return icons.length;
+    }
 
-        final ByteBuffer[] sortedIcons = Arrays.copyOf(icons, icons.length);
+    /** Uploads {@link #savedIcons} as the window icon. Main-thread only. */
+    private static void applySavedIcons() {
+        final ByteBuffer[] sortedIcons = Arrays.copyOf(savedIcons, savedIcons.length);
         Arrays.sort(sortedIcons, Comparator.comparingInt(bb -> -bb.remaining()));
         // SDL_SetWindowIcon is main-thread only, so the surfaces live entirely inside the marshalled task.
         MainThread.runOnMainThread(() -> {
@@ -933,7 +941,6 @@ public class Display {
             Sys.checkSdl(SDL_SetWindowIcon(sdlWindow, iconSet));
             SDLSurface.SDL_DestroySurface(iconSet);
         });
-        return icons.length;
     }
 
     public static void setResizable(boolean resizable) {
