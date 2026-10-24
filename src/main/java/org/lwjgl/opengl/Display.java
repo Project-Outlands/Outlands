@@ -2,6 +2,7 @@ package org.lwjgl.opengl;
 
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_KEY_DOWN;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_KEY_UP;
+import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_KEYMAP_CHANGED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_BUTTON_DOWN;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_BUTTON_UP;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_MOUSE_MOTION;
@@ -673,6 +674,10 @@ public class Display {
             }
             case SDL_EVENT_TEXT_EDITING -> {
                 handleTextEditingEvent();
+                yield true;
+            }
+            case SDL_EVENT_KEYMAP_CHANGED -> {
+                Keyboard.populateKeyLookupTables();
                 yield true;
             }
             default -> false;
