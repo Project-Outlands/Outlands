@@ -7,6 +7,11 @@ import static org.lwjgl.sdl.SDLInit.SDL_INIT_JOYSTICK;
 import static org.lwjgl.sdl.SDLInit.SDL_INIT_SENSOR;
 import static org.lwjgl.sdl.SDLInit.SDL_INIT_VIDEO;
 import static org.lwjgl.sdl.SDLInit.SDL_Init;
+import static org.lwjgl.sdl.SDLInit.SDL_PROP_APP_METADATA_CREATOR_STRING;
+import static org.lwjgl.sdl.SDLInit.SDL_PROP_APP_METADATA_TYPE_STRING;
+import static org.lwjgl.sdl.SDLInit.SDL_PROP_APP_METADATA_URL_STRING;
+import static org.lwjgl.sdl.SDLInit.SDL_SetAppMetadata;
+import static org.lwjgl.sdl.SDLInit.SDL_SetAppMetadataProperty;
 
 import java.net.URI;
 import java.util.Objects;
@@ -22,7 +27,6 @@ import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.Platform;
 import org.lwjgl.system.Pointer;
 
-import com.cleanroommc.common.AppMetadata;
 import com.cleanroommc.common.CleanroomVersion;
 import net.minecraftforge.common.ForgeEarlyConfig;
 
@@ -57,7 +61,6 @@ public class Sys {
                     | SDL_INIT_SENSOR)) {
                 throw new SDLException("Could not initialize SDL");
             }
-            AppMetadata.applyDefaultIcon();
             initialized = true;
         });
     }
@@ -89,12 +92,12 @@ public class Sys {
             .startsWith("wayland");
     }
 
-    /** Publishes the loader's default identity; packs may override it through {@link AppMetadata}. */
+    /** Publishes the loader identity to SDL; packs override the title and icon through Display. */
     private static void applyAppMetadata() {
-        AppMetadata.set("Outlands", CleanroomVersion.getBuildVersion(), "top.outlands.outlands");
-        AppMetadata.set(AppMetadata.URL, "https://outlands.top");
-        AppMetadata.set(AppMetadata.CREATOR, "Outlands contributors");
-        AppMetadata.set(AppMetadata.TYPE, "game");
+        SDL_SetAppMetadata("Outlands", CleanroomVersion.getBuildVersion(), "top.outlands.outlands");
+        SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_URL_STRING, "https://outlands.top");
+        SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_CREATOR_STRING, "Outlands contributors");
+        SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
     }
 
     /** Returns the LWJGL version. */

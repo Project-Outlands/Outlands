@@ -104,8 +104,7 @@ import org.lwjgl.util.Rectangle;
  */
 public class Display {
 
-    /** Fallback title used until Minecraft calls {@link #setTitle}; packs may also set it directly. */
-    private static String windowTitle = "Outlands 1.12.2";
+    private static String windowTitle = "Minecraft";
 
     private static boolean displayCreated = false;
     private static boolean displayFocused = true;
@@ -908,29 +907,32 @@ public class Display {
 
         final ByteBuffer[] sortedIcons = Arrays.copyOf(icons, icons.length);
         Arrays.sort(sortedIcons, Comparator.comparingInt(bb -> -bb.remaining()));
-        SDL_Surface iconSet = null;
-        for (final ByteBuffer iconRgba : sortedIcons) {
-            final int dimension = (int) Math.sqrt(iconRgba.remaining() / 4D);
-            if (dimension * dimension * 4 != iconRgba.remaining()) {
-                throw new IllegalStateException(
-                    "Could not determine icon size from a buffer length of " + iconRgba.remaining());
+        // SDL_SetWindowIcon is main-thread only, so the surfaces live entirely inside the marshalled task.
+        MainThread.runOnMainThread(() -> {
+            SDL_Surface iconSet = null;
+            for (final ByteBuffer iconRgba : sortedIcons) {
+                final int dimension = (int) Math.sqrt(iconRgba.remaining() / 4D);
+                if (dimension * dimension * 4 != iconRgba.remaining()) {
+                    throw new IllegalStateException(
+                        "Could not determine icon size from a buffer length of " + iconRgba.remaining());
+                }
+                final SDL_Surface surface = Sys
+                    .checkSdl(SDLSurface.SDL_CreateSurface(dimension, dimension, SDLPixels.SDL_PIXELFORMAT_RGBA32));
+                Sys.checkSdl(SDLSurface.SDL_LockSurface(surface));
+                final ByteBuffer pixels = Objects.requireNonNull(surface.pixels());
+                final int oldPos = iconRgba.position();
+                pixels.put(iconRgba);
+                iconRgba.position(oldPos);
+                SDLSurface.SDL_UnlockSurface(surface);
+                if (iconSet == null) {
+                    iconSet = surface;
+                } else {
+                    Sys.checkSdl(SDLSurface.SDL_AddSurfaceAlternateImage(iconSet, surface));
+                }
             }
-            final SDL_Surface surface = Sys
-                .checkSdl(SDLSurface.SDL_CreateSurface(dimension, dimension, SDLPixels.SDL_PIXELFORMAT_RGBA32));
-            Sys.checkSdl(SDLSurface.SDL_LockSurface(surface));
-            final ByteBuffer pixels = Objects.requireNonNull(surface.pixels());
-            final int oldPos = iconRgba.position();
-            pixels.put(iconRgba);
-            iconRgba.position(oldPos);
-            SDLSurface.SDL_UnlockSurface(surface);
-            if (iconSet == null) {
-                iconSet = surface;
-            } else {
-                Sys.checkSdl(SDLSurface.SDL_AddSurfaceAlternateImage(iconSet, surface));
-            }
-        }
-        Sys.checkSdl(SDL_SetWindowIcon(sdlWindow, iconSet));
-        SDLSurface.SDL_DestroySurface(iconSet);
+            Sys.checkSdl(SDL_SetWindowIcon(sdlWindow, iconSet));
+            SDLSurface.SDL_DestroySurface(iconSet);
+        });
         return icons.length;
     }
 
