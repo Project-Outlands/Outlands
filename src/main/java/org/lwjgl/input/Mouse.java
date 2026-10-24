@@ -60,6 +60,9 @@ public class Mouse {
     
     private static Cursor currentCursor = null;
 
+    /** Lazily created default cursor, used when {@link #setNativeCursor} is called with null. */
+    private static long systemCursor = 0L;
+
     public static void addMoveEvent(double mouseX, double mouseY) {
         if (ignoreNextMove > 0) {
             ignoreNextMove--;
@@ -387,7 +390,7 @@ public class Mouse {
     }
 
     public static int getButtonCount() {
-        return 5;
+        return 8;
     }
 
     public static void setClipMouseCoordinatesToWindow(boolean clip) {
@@ -410,10 +413,27 @@ public class Mouse {
     }
 
     public static Cursor setNativeCursor(Cursor cursor) throws LWJGLException {
-        final long handle = cursor != null ? cursor.getNativeCursor() : 0L;
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLMouse.SDL_SetCursor(handle)));
+        final Cursor prevCursor = currentCursor;
         currentCursor = cursor;
-        return cursor;
+        if (!Display.isCreated()) {
+            return prevCursor;
+        }
+
+        if (cursor == null) {
+            // SDL_SetCursor(null) only redraws the current cursor; restoring the system default needs a
+            // real handle, which is created once and reused.
+            MainThread.runOnMainThread(() -> {
+                if (systemCursor == 0L) {
+                    systemCursor = Sys.checkSdl(SDLMouse.SDL_CreateSystemCursor(SDLMouse.SDL_SYSTEM_CURSOR_DEFAULT));
+                }
+                Sys.checkSdl(SDLMouse.SDL_SetCursor(systemCursor));
+            });
+        } else {
+            final long handle = cursor.getNativeCursor();
+            MainThread.runOnMainThread(() -> Sys.checkSdl(SDLMouse.SDL_SetCursor(handle)));
+        }
+
+        return prevCursor;
     }
 
     public static void destroy() {}
