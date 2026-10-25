@@ -218,9 +218,10 @@ public class CoreModManager {
 
         FMLLog.log.debug("All fundamental core mods are successfully located");
         // Add extra classpath in advanced so fml.coreMods.load works
-        if (System.getProperty("crl.dev.extrapath") != null)
+        String devExtraPath = com.cleanroommc.common.CleanroomEnvironment.getDevExtraPath();
+        if (devExtraPath != null)
         {
-            for (String path : System.getProperty("crl.dev.extrapath").split(File.pathSeparator))
+            for (String path : devExtraPath.split(File.pathSeparator))
             {
                 try 
                 {

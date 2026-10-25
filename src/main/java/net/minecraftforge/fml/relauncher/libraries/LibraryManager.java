@@ -436,7 +436,7 @@ public class LibraryManager
         List<File> list = new ArrayList<>();
         Set<File> seen = new HashSet<>();
 
-        String extrapath = System.getProperty("crl.dev.extrapath");
+        String extrapath = com.cleanroommc.common.CleanroomEnvironment.getDevExtraPath();
         if (extrapath != null) 
         {
             for (String mod : extrapath.split(File.pathSeparator))

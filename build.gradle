@@ -73,6 +73,10 @@ idea.project.settings.compiler.javac.javacAdditionalOptions = ProjectConstants.C
 // state, computes the version, and asks CI to do the work (see .github/workflows/Release.yml). The version
 // arithmetic lives in one place - ReleaseVersionTask - which CI also runs to check that the version it was asked to
 // publish is still the next free one.
+//
+// It also waits for the run and confirms the result, which needs a token that can read releases as well as dispatch
+// workflows (fine-grained PAT: 'Actions: Read and write' + 'Contents: Read'). Without the contents permission the
+// release still succeeds - the workflow verifies itself - the confirmation is just reported as unavailable.
 def releaseRepository = 'Project-Outlands/Outlands'
 def releaseMavenMetadataUrl = 'https://maven.outlands.top/releases/top/outlands/outlands/maven-metadata.xml'
 def releaseBranch = 'main'

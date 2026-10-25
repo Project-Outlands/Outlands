@@ -11,9 +11,16 @@ public final class CleanroomEnvironment {
     // TODO: check obf class name?
     static {
         boolean deobfEnvironment = System.getProperty("net.minecraftforge.gradle.GradleStart.srg.srg-mcp") != null;
-        deobfEnvironment |= System.getProperty("crl.dev.extrapath") != null;
+        deobfEnvironment |= getDevExtraPath() != null;
 
         deobfuscatedEnvironment = deobfEnvironment;
+    }
+
+    /** The property a dev launcher (Unimined) uses to hand extra classpath entries to the loader. */
+    public static final String DEV_EXTRAPATH = "outlands.dev.extrapath";
+
+    public static String getDevExtraPath() {
+        return System.getProperty(DEV_EXTRAPATH);
     }
 
     public static void setSide(Side side) {

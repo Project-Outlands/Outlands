@@ -12,7 +12,7 @@
 plugins {
     id 'java-library'
     id 'maven-publish'
-    id 'top.outlands.forgedev' version '7.0.0-beta.59-cr1'
+    id 'top.outlands.forgedev' version '7.0.0-beta.59-cr4'
 }
 
 
@@ -130,13 +130,49 @@ dependencies {
 // to be generated from the current project version instead of being a stale checked-out file.
 def genVersion = tasks.register('genVersion', top.outlands.gradle.helpers.tasks.GenVersionTask)
 
+// Patched Minecraft and the loader reference each other (the patches call FML, FML calls Minecraft), so they are
+// compiled together. They are separated again when packaging: the universal jar a launcher gets must not contain
+// Minecraft classes. At runtime FML turns the launcher's vanilla (notch named) jar into the patched, srg named
+// classes with the binary patches, and it does that for every class that reaches the class loader - including the
+// ones already sitting in this jar. A Minecraft class inside the loader jar is therefore fetched *first*, fed to
+// the patcher as if it were vanilla and rejected ('There is a binary discrepancy between the expected input class
+// ...'), which is what killed every class whose name is not obfuscated (ClientBrandRetriever and friends).
+//
+// The split is done by name: the loader's own tree is known, everything else in the compiled tree came from the
+// patched Minecraft sources. Names are the same in every name space here (the loader is never obfuscated).
+def patchedMcSources = project(':mcpbase').layout.buildDirectory.dir('patched-mcp/src')
+def generatedVersionSources = genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile }
+
+// Read lazily: a clean checkout has no generated sources before their tasks ran.
+def classNamesIn = { roots ->
+    def names = new HashSet<String>()
+    roots.each { root ->
+        def dir = (root instanceof Provider ? root.get() : root) as File
+        if (!dir.isDirectory()) return
+        dir.eachFileRecurse { f ->
+            if (!f.name.endsWith('.java')) return
+            def rel = dir.toPath().relativize(f.toPath()).toString().replace(File.separatorChar, '/' as char)
+            names.add(rel.substring(0, rel.length() - '.java'.length()))
+        }
+    }
+    return names
+}
+def loaderClassNames = { -> classNamesIn([new File(rootDir, 'src/main/java'), generatedVersionSources]) }
+def isClassOf = { names, entry ->
+    if (!entry.endsWith('.class')) return false
+    def name = entry.substring(0, entry.length() - '.class'.length())
+    if (names.contains(name)) return true
+    def nested = name.indexOf('$')
+    return nested > 0 && names.contains(name.substring(0, nested))
+}
+
 sourceSets {
     main {
         java {
             srcDirs = []
-            // generated: patched Minecraft sources (flatMap keeps the task dependency on applyPatches)
+            // generated: flatMap keeps the task dependency on applyPatches
             // patched sources are srg named (the pipeline runs with 'stable' mappings); the loader is written in mcp
-            srcDir(project(':mcpbase').layout.buildDirectory.dir('patched-mcp/src'))
+            srcDir(patchedMcSources)
             srcDir(genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile })
             srcDir("$rootDir/src/main/java")
         }
@@ -267,10 +303,15 @@ tasks.configureEach {
 
 
 // region Reobf + binary patches --------------------------------------------
-// Legacy FML needs a 'reobfuscated' (MCP -> SRG) jar to diff against vanilla when generating binary patches.
-// Intermediate jar for reobf: everything the final jar has except the binary patches themselves
+// Legacy FML needs a 'reobfuscated' (MCP -> SRG) jar to diff against vanilla when generating binary patches. The
+// whole tree (patched Minecraft + loader) is renamed in one go; the two class sets are split again afterwards,
+// because they end up in different places:
+//   Minecraft  -> the dirty side of the binary patches
+//   loader     -> the universal jar a launcher gets
+//   both       -> the '-srg' jar, the 'classes' artifact ForgeDev 7 hands to mod projects
 def jarForReobf = tasks.register('jarForReobf', Jar) {
     archiveClassifier = 'reobf-input'
+    destinationDirectory = layout.buildDirectory.dir('reobf-input')
     from sourceSets.main.output
 }
 
@@ -281,24 +322,121 @@ def reobf = tasks.register('reobf', Reobf) {
     disableAbstractParams.set(false)
 }
 
-def srgClean = providers.provider { mcpBase.classes.get() }
+// The patcher diffs two jars that have to be in the *same* name space, so the dirty side is reobfuscated to notch
+// (the clean side is the launcher's vanilla jar) and '--srg' bakes the notch -> srg renames into the patch. Renaming
+// the dirty side to srg instead makes binarypatcher emit empty patches for every class (it cannot line the two up).
+def reobfObf = tasks.register('reobfObf', Reobf) {
+    input.from(jarForReobf)
+    // MCP -> notch. The mavenizer publishes it next to the metadata, but ForgeDev's MCPBase does not expose a
+    // provider for it yet (MCPData.map2obf exists, PatcherBase only forwards map2srg/obf2srg).
+    mappings.set(layout.file(providers.provider {
+        new File(mcpBase.metadata.get().parentFile, 'mappings.map2obf.tsrg.gz')
+    }))
+    // The loader's own classes are not obfuscated, so they ship with srg names. The renamer resolves members through
+    // the class hierarchy, and without this it would rename a loader member that a game type declares into its notch
+    // name - a name nothing provides: the loader jar has the srg one, and the runtime deobfuscator has no mapping for
+    // a net/minecraftforge/... owner. The patches keep Minecraft's names in notch (coremods see those before
+    // deobfuscation, as they always have) and take loader names in srg, which is the space they are shipped in.
+    loaderSpace.set(layout.file(mcpBase.map2Srg))
+    output.set(layout.buildDirectory.file('reobf-input/minecraft-obf.jar'))
+    disableAbstractParams.set(false)
+}
+
+// Only Minecraft: the patcher must not emit 'this class does not exist in the vanilla jar' entries for the loader's
+// own classes, FML would then try to patch them onto the copies that are already in the universal jar.
+def obfMcJar = tasks.register('obfMcJar', Jar) {
+    archiveClassifier = 'mc-obf'
+    destinationDirectory = layout.buildDirectory.dir('reobf-input')
+    dependsOn reobfObf
+    def loaderNames = []
+    doFirst { loaderNames = loaderClassNames() }
+    from { zipTree(reobfObf.get().output.get().asFile) }
+    include { entry -> !isClassOf(loaderNames, entry.path) }
+}
+
+// The vanilla jars, notch named: FML feeds these exact bytes through the patcher, so every patch checksum has to be
+// taken from them (mcpBase.classes, the patched srg named classes, are the *output* of the patches, not the input).
+def mcFiles = forgedev.minecraftFiles(props.minecraft_version)
+
+// Only classes the source patches touch need a binary patch. Every other Minecraft class still differs from vanilla
+// after a recompile (source file attribute, bytecode version, line numbers, injected annotations - and every constant
+// pool shift drags the instructions along), which used to bloat the pack with a patch per class. Forge and Cleanroom
+// both ship patches for the touched set only; the rest is renamed at runtime by the remapper.
+def mcpPatches = project(':mcpbase').forgedev.patches
+
+// 1.12.2's server download is a fat jar (bundled libraries and all). Patches are only wanted for classes that the
+// loader also has - Minecraft's - because a 'this class does not exist in the target' entry for, say, Guava's
+// annotations would be applied to the real library at runtime.
+def vanillaCleanJar = { String side, Provider<File> vanilla ->
+    tasks.register("vanillaClean${side.capitalize()}", Jar) {
+        archiveClassifier = "vanilla-${side}".toString()
+        destinationDirectory = layout.buildDirectory.dir('reobf-input')
+        inputs.file(vanilla)
+        dependsOn obfMcJar
+        def keep = [] as Set
+        doFirst {
+            keep = new java.util.zip.ZipFile(obfMcJar.get().archiveFile.get().asFile).withCloseable { zip ->
+                zip.entries().collect { it.name } as Set
+            }
+        }
+        from(zipTree(vanilla))
+        include { entry -> keep.contains(entry.path) }
+        includeEmptyDirs = false
+    }
+}
 
 // Side specific patch sets (used by the installer / applyBinPatches), named after the loader's runtime entries
 ['client', 'server'].each { side ->
+    def vanilla = vanillaCleanJar(side, side == 'client' ? mcFiles.getClient() : mcFiles.getServer())
     forgedev.binaryPatches(side) {
-        clean(srgClean)
         create {
             getPrefix().set(["binpatch/${side}".toString()])
-            dirty.from(reobf)
+            getClean().setFrom(vanilla)
+            getDirty().setFrom(obfMcJar.flatMap { it.archiveFile })
+            // notch -> srg, so the patches rename the vanilla classes as they apply
+            getSrg().setFrom(mcpBase.obf2Srg)
+            // 'patches/minecraft', the same set the patched tree was built from
+            getPatches().setFrom(mcpPatches.getPatches())
+        }
+        apply {
+            getClean().setFrom(vanilla)
         }
     }
 }
 
 // endregion
 
+// The universal jar: what a launcher puts on the classpath. Srg named loader classes, the resources (deobf data,
+// cleanmix info) and the binary patches that turn Minecraft into the patched classes at startup.
+// The plain 'jar' task still exists for debugging (MCP named, loader only), it is not published.
+tasks.named('jar') {
+    archiveClassifier = 'mcp'
+}
+
+def universalJar = tasks.register('universalJar', Jar) {
+    archiveClassifier = ''
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    dependsOn reobf
+    def loaderNames = []
+    doFirst { loaderNames = loaderClassNames() }
+    // lazy: the renamed jar only exists once 'reobf' ran
+    from { zipTree(reobf.get().output.get().asFile) }
+    // loader classes only, every Minecraft class comes from the patches at runtime
+    exclude { entry -> entry.path.endsWith('.class') && !isClassOf(loaderNames, entry.path) }
+    from(sourceSets.main.output.resourcesDir)
+    from(binpatchesPack) {
+        rename { 'binpatches.pack.lzma' }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 // FML 1.12.2 reads a single '/binpatches.pack.lzma' resource: an LZMA compressed jar whose entries are
 // 'binpatch/client/<class>.binpatch' and 'binpatch/server/<class>.binpatch'. binarypatcher produces one pack per
 // side, so they get merged here.
+//
+// The entries are stored, not deflated: the jar is compressed as a whole afterwards (that is the LZMA stream FML
+// reads), and deflating first costs about half of the pack - the two sides share almost all of their content, which
+// only a compressor that sees the raw bytes can exploit. binarypatcher stores them for the same reason.
 def binpatchesPack = tasks.register('binpatchesPack') {
     def clientPack = forgedev.binaryPatches('client').create.flatMap { it.output }
     def serverPack = forgedev.binaryPatches('server').create.flatMap { it.output }
@@ -314,8 +452,14 @@ def binpatchesPack = tasks.register('binpatchesPack') {
                 new LZMACompressorInputStream(new FileInputStream(pack)).withCloseable { ins ->
                     new JarInputStream(ins).withCloseable { jis ->
                         for (def entry = jis.nextJarEntry; entry != null; entry = jis.nextJarEntry) {
-                            jos.putNextEntry(new JarEntry(entry.name))
-                            jos.write(jis.readAllBytes())
+                            byte[] data = jis.readAllBytes()
+                            def stored = new JarEntry(entry.name)
+                            stored.method = java.util.zip.ZipEntry.STORED
+                            stored.size = data.length
+                            stored.compressedSize = data.length
+                            stored.crc = new java.util.zip.CRC32().with { update(data); value }
+                            jos.putNextEntry(stored)
+                            jos.write(data)
                             jos.closeEntry()
                         }
                     }
@@ -334,6 +478,8 @@ def binpatchesPack = tasks.register('binpatchesPack') {
 }
 
 tasks.named('jar', Jar) {
+    // installed by the installer? no - the launcher JSON points at the universal jar, this one is only for local
+    // inspection of the pre-rename classes
     from(binpatchesPack) {
         rename { 'binpatches.pack.lzma' }
     }
@@ -424,14 +570,18 @@ forgedev.userDev {
 
     binaryPatches {
         // The final jar carries binpatches.pack.lzma and deobf data, the patches must not
-        dirty.setFrom(tasks.named('jarForReobf'))
+        clean.setFrom(providers.provider { mcpBase.classesRaw.get() })
+        dirty.setFrom(obfMcJar.flatMap { it.archiveFile })
+        srg.setFrom(mcpBase.obf2Srg)
+        // only the classes patched in 'patches/minecraft', the rest of Minecraft is renamed at runtime
+        getPatches().setFrom(mcpPatches.getPatches())
         // FG/Unimined look entries up as 'binpatch/<side>/<class>.binpatch'
         getPrefix().set(['binpatch/joined'])
     }
 
     config {
         sources(tasks.named('loaderSourcesJar'))
-        universal(tasks.named('jar'))
+        universal(tasks.named('universalJar'))
         // Consumers (Unimined/Loom-style integration) read the launch recipe from here; it mirrors the
         // launch command in the installer's version.json.
         runs {
@@ -498,7 +648,7 @@ publishing {
             groupId = project.group
             artifactId = 'outlands'
             version = project.version
-            artifact(tasks.named('jar'))
+            artifact(tasks.named('universalJar'))
             artifact(tasks.named('loaderSourcesJar')) { extension = 'jar' }
             artifact(tasks.named('userdevJar')) { classifier = 'userdev'; extension = 'jar' }
             artifact(tasks.named('installerJar')) { classifier = 'installer'; extension = 'jar' }
@@ -520,11 +670,11 @@ publishing {
 tasks.register('createMMCPack', CreateMMCPackTask) {
     group = 'build'
     description = 'Creates a MultiMC/Prism instance package for Outlands'
-    dependsOn 'launcherJson', 'jar'
+    dependsOn 'launcherJson', 'universalJar'
 
     versionJson = tasks.named('launcherJson').get().ext.output
     templateDir = rootProject.layout.projectDirectory.dir('mmcpack-template')
-    universalJarFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    universalJarFile = tasks.named('universalJar', Jar).flatMap { it.archiveFile }
     loaderVersion = project.version.toString()
     loaderCoords = "${project.group}:${base.archivesName.get()}".toString()
     // Players take everything that is not central or Mojang's from the mirror that backs repo.cleanroommc.com.

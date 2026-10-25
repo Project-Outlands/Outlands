@@ -27,6 +27,10 @@ import java.time.Instant
  * particular it does not 'git pull' - being behind the remote is reported, not fixed.
  *
  * Guards, in order: on the release branch, clean tree, exactly the remote's commit, a free version, a token.
+ *
+ * The token is a fine-grained PAT: 'Actions: Read and write' dispatches the workflow, 'Contents: Read' additionally
+ * lets this task confirm the tag and the GitHub release afterwards. Without it the run still reports success, it just
+ * cannot be double checked here.
  */
 @DisableCachingByDefault(because = 'Talks to the GitHub API and shells out to git')
 abstract class ReleaseTask extends DefaultTask {
@@ -138,7 +142,8 @@ Nothing was dispatched.""")
         token = resolveToken()
         if (!token) {
             fail("""No GitHub token. Dispatching a release needs a fine-grained PAT with 'Actions: Read and write' on
-${getRepository().get()}, kept outside the repository - for example:
+${getRepository().get()} ('Contents: Read' too if this task should also confirm the release afterwards), kept outside
+the repository - for example:
   echo 'releaseToken=github_pat_...' >> ~/.gradle/gradle.properties
       (Windows: %USERPROFILE%\\.gradle\\gradle.properties)
 The token is passed as -PreleaseToken=... or through OUTLANDS_RELEASE_TOKEN as well. See the README for details.""")
@@ -165,7 +170,10 @@ Not waiting (-PnoWait): ${version} is being built and published.
         }
 
         def finished = awaitCompletion(run.id as long)
-        boolean published = verify(version)
+        def verification = verify(version)
+        verification.missing.each { println("> missing: ${it}") }
+        verification.unchecked.each { println("> could not check from here: ${it}") }
+        boolean published = verification.missing.isEmpty()
         if (finished.conclusion != 'success') {
             // A red run does not have to mean a failed release: the workflow may have broken after publishing
             // (its own verification step, the CHANGELOG commit, ...). What counts is whether the artifacts and the
@@ -175,6 +183,12 @@ Not waiting (-PnoWait): ${version} is being built and published.
             println(">   ${finished.html_url}")
         } else if (!published) {
             fail("""The run reported success, but ${version} is not where it should be - see ${finished.html_url}""")
+        } else if (!verification.unchecked.isEmpty()) {
+            // The workflow ends with its own verification (with the repository's token, which can always read the
+            // release), so a green run already proved that the tag and the artifacts are there. Being unable to
+            // repeat that here is a limitation of this token, not a reason to call the release failed.
+            println("> warning: the release is confirmed by the run itself, but not by this machine:")
+            println(">   ${finished.html_url}")
         }
         println("""
 released ${version} in ${elapsed()}
@@ -259,17 +273,38 @@ next time. Follow it at:
     }
 
     /** True when the release and the published artifacts are actually there. */
-    private boolean verify(String version) {
-        List<String> problems = []
-        if (Http.get("${apiBase()}/releases/tags/${version}".toString(), Http.github(token)).status != 200) {
-            problems << "GitHub has no release for ${version}"
+    /**
+     * Checks that the release really exists, from this machine. Returns the checks that failed and the ones that could
+     * not be run: a fine-grained token needs 'Contents: Read' to see releases while 'Actions: Write' is enough to
+     * dispatch the workflow, so 'I am not allowed to look' must not read as 'it is not there'.
+     */
+    private Map<String, List<String>> verify(String version) {
+        List<String> missing = []
+        List<String> unchecked = []
+
+        def release = Http.get("${apiBase()}/releases/tags/${version}".toString(), Http.github(token))
+        switch (release.status) {
+            case 200: break
+            // Repository access is refused as a whole (401) or for this endpoint only (403, the usual answer for a
+            // fine-grained PAT without contents permission), so the answer says nothing about the release.
+            case 401:
+            case 403:
+                unchecked << "the token may not read releases (HTTP ${release.status}); 'Contents: Read' fixes this," +
+                        " 'Actions: Write' alone is enough to dispatch"
+                break
+            default:
+                missing << "GitHub has no release for ${version} (HTTP ${release.status})"
         }
+
         def metadata = Http.get(getMavenMetadataUrl().get())
-        if (metadata.status != 200 || !(metadata.body as String).contains("<version>${version}</version>")) {
-            problems << "maven does not list ${version} (${getMavenMetadataUrl().get()})"
+        if (metadata.status == 404) {
+            missing << "maven does not list ${version} (${getMavenMetadataUrl().get()})"
+        } else if (metadata.status != 200) {
+            unchecked << "maven metadata answered HTTP ${metadata.status} (${getMavenMetadataUrl().get()})"
+        } else if (!(metadata.body as String).contains("<version>${version}</version>")) {
+            missing << "maven does not list ${version} (${getMavenMetadataUrl().get()})"
         }
-        problems.each { println("> missing: ${it}") }
-        return problems.isEmpty()
+        return [missing: missing, unchecked: unchecked]
     }
 
     private String dispatchFailure(Map response) {

@@ -11,7 +11,7 @@
 // what 'patches/minecraft' is applied to.
 
 plugins {
-    id 'top.outlands.forgedev' version '7.0.0-beta.59-cr1'
+    id 'top.outlands.forgedev' version '7.0.0-beta.59-cr4'
 }
 
 import top.outlands.gradle.helpers.ProjectConstants
@@ -104,7 +104,7 @@ configurations {
 }
 dependencies {
     // published to maven.outlands.top; the 'cr' builds are local snapshots, only the latest one is published
-    renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr5'
+    renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr6'
 }
 
 tasks.register('renamePatchedSources', JavaExec) {

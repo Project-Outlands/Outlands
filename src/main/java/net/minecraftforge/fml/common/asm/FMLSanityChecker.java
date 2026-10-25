@@ -92,8 +92,17 @@ public class FMLSanityChecker implements IFMLCallHook
         {
             goodFML = true;
         }
-        // Server is not signed, so assume it's good - a deobf env is dev time so it's good too
-        boolean goodMC = FMLLaunchHandler.side() == Side.SERVER || !liveEnv;
+        // Server is not signed, so assume it's good - a deobf env is dev time so it's good too. A pre-patched
+        // client belongs here as well: the bootstrap that installed the patches moved ClientBrandRetriever (and
+        // every other patched class) into an overlay jar of its own, which cannot be signed as Minecraft. The
+        // certificate check below exists to notice a tampered vanilla jar, and with an overlay there is no claim
+        // about the vanilla jar for it to test.
+        final boolean prePatched = ClassPatchManager.prepatchedJar() != null;
+        if (prePatched)
+        {
+            FMLLog.log.info("Minecraft is pre-patched, the minecraft jar certificate check does not apply");
+        }
+        boolean goodMC = FMLLaunchHandler.side() == Side.SERVER || !liveEnv || prePatched;
         int certCount = 0;
         try
         {

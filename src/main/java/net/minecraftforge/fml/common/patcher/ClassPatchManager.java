@@ -19,18 +19,12 @@
 
 package net.minecraftforge.fml.common.patcher;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.jar.JarEntry;
-import java.util.jar.JarInputStream;
-import java.util.jar.JarOutputStream;
-import java.util.regex.Pattern;
 
 import net.minecraft.launchwrapper.LaunchClassLoader;
 import net.minecraftforge.fml.common.FMLLog;
@@ -44,10 +38,8 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.hash.Hashing;
-import com.google.common.io.ByteArrayDataInput;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
-import org.apache.commons.io.IOUtils;
 
 public class ClassPatchManager {
     //Must be ABOVE INSTANCE so they get set in time for the constructor.
@@ -165,68 +157,50 @@ public class ClassPatchManager {
 
     public void setup(Side side)
     {
-        Pattern binpatchMatcher = Pattern.compile(String.format("binpatch/%s/.*.binpatch", side.toString().toLowerCase(Locale.ENGLISH)));
-        JarInputStream jis = null;
+        if (alreadyPatched())
+        {
+            return;
+        }
+        final byte[] decompressed;
+        try (InputStream binpatchesCompressed = getClass().getResourceAsStream("/binpatches.pack.lzma"))
+        {
+            if (binpatchesCompressed == null)
+            {
+                if (!FMLLaunchHandler.isDeobfuscatedEnvironment())
+                {
+                    FMLLog.log.fatal("The binary patch set is missing, things are not going to work!");
+                } else {
+                    FMLLog.log.error("The binary patch set is missing, because you are in a development environment!");
+                }
+                return;
+            }
+            try (LzmaInputStream binpatchesDecompressedLzma = new LzmaInputStream(binpatchesCompressed))
+            {
+                decompressed = ByteStreams.toByteArray(binpatchesDecompressedLzma);
+            }
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException("Error occurred reading binary patches. Expect severe problems!", e);
+        }
+
+        patches = ArrayListMultimap.create();
+        final List<ClassPatch> read;
         try
         {
-            try
-            {
-                InputStream binpatchesCompressed = getClass().getResourceAsStream("/binpatches.pack.lzma");
-                if (binpatchesCompressed==null)
-                {
-                    if (!FMLLaunchHandler.isDeobfuscatedEnvironment())
-                    {
-                        FMLLog.log.fatal("The binary patch set is missing, things are not going to work!");
-                    } else {
-                        FMLLog.log.error("The binary patch set is missing, because you are in a development environment!");
-                    }
-                    return;
-                }
-                try (LzmaInputStream binpatchesDecompressedLzma = new LzmaInputStream(binpatchesCompressed))
-                {
-                    byte[] decompressed = ByteStreams.toByteArray(binpatchesDecompressedLzma);
-                    try (ByteArrayInputStream binpatchesDecompressed = new ByteArrayInputStream(decompressed)){
-                        jis = new JarInputStream(binpatchesDecompressed);
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException("Error occurred reading binary patches. Expect severe problems!", e);
-            }
-
-            patches = ArrayListMultimap.create();
-
-            do
-            {
-                try
-                {
-                    JarEntry entry = jis.getNextJarEntry();
-                    if (entry == null)
-                    {
-                        break;
-                    }
-                    if (binpatchMatcher.matcher(entry.getName()).matches())
-                    {
-                        ClassPatch cp = readPatch(entry, jis);
-                        if (cp != null && cp.patch.length > 0)
-                        {
-                            patches.put(cp.sourceClassName, cp);
-                        }
-                    }
-                    else
-                    {
-                        jis.closeEntry();
-                    }
-                }
-                catch (IOException e)
-                {
-                }
-            } while (true);
+            read = ClassPatchReader.read(decompressed, side.toString().toLowerCase(Locale.ENGLISH),
+                    e -> FMLLog.log.warn(FMLLog.log.getMessageFactory().newMessage("Unable to read a binary patch entry - ignoring"), e));
         }
-        finally
+        catch (IOException e)
         {
-            IOUtils.closeQuietly(jis);
+            throw new RuntimeException("Error occurred reading binary patches. Expect severe problems!", e);
+        }
+        for (ClassPatch cp : read)
+        {
+            if (cp.patch.length > 0)
+            {
+                patches.put(cp.sourceClassName, cp);
+            }
         }
         FMLLog.log.debug("Read {} binary patches", patches.size());
         if (DEBUG)
@@ -234,34 +208,50 @@ public class ClassPatchManager {
         patchedClasses.clear();
     }
 
-    private ClassPatch readPatch(JarEntry patchEntry, JarInputStream jis)
+    /**
+     * The overlay jar the launcher bootstrap ({@code top.outlands.foundation}) installed, or {@code null} when this
+     * is an ordinary run.
+     *
+     * <p>The system property is a hint and is verified here: a path that does not exist is treated as absent, so a
+     * launcher that sets nothing, or sets something stale, still gets the patch pack inside this jar.
+     */
+    public static File prepatchedJar()
     {
-        if (DEBUG)
-            FMLLog.log.trace("Reading patch data from {}", patchEntry.getName());
-        ByteArrayDataInput input;
-        try
+        final String patched = System.getProperty("outlands.patchedJar");
+        if (patched == null || patched.isEmpty())
         {
-            input = ByteStreams.newDataInput(ByteStreams.toByteArray(jis));
-        }
-        catch (IOException e)
-        {
-            FMLLog.log.warn(FMLLog.log.getMessageFactory().newMessage("Unable to read binpatch file {} - ignoring", patchEntry.getName()), e);
             return null;
         }
-        int version = input.readByte(); // Default 1
-        String name = input.readUTF();
-        String sourceClassName = name.replace('/', '.');
-        String targetClassName = input.readUTF().replace('/', '.');
-        boolean exists = input.readBoolean();
-        int inputChecksum = 0;
-        if (exists)
+        final File jar = new File(patched);
+        if (!jar.isFile() || jar.length() <= 0L)
         {
-            inputChecksum = input.readInt();
+            return null;
         }
-        int patchLength = input.readInt();
-        byte[] patchBytes = new byte[patchLength];
-        input.readFully(patchBytes);
+        return jar;
+    }
 
-        return new ClassPatch(name, sourceClassName, targetClassName, exists, inputChecksum, patchBytes);
+    /**
+     * True when the patches are already applied on disk. The classes reaching this class loader then carry the
+     * patch, so patching them again would only trip the input checksum.
+     */
+    private boolean alreadyPatched()
+    {
+        final String requested = System.getProperty("outlands.patchedJar");
+        if (requested == null || requested.isEmpty())
+        {
+            return false;
+        }
+        final File jar = prepatchedJar();
+        if (jar == null)
+        {
+            FMLLog.log.warn("outlands.patchedJar points at {} which is not a usable file, falling back to the binary patch pack", requested);
+            return false;
+        }
+        FMLLog.log.info("Minecraft was pre-patched ({}), the binary patch pack is not used", jar.getAbsolutePath());
+        if (DEBUG)
+            FMLLog.log.debug("Patches already applied on disk, the patch list stays empty");
+        patches = null;
+        patchedClasses.clear();
+        return true;
     }
 }

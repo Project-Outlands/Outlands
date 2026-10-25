@@ -1,4 +1,6 @@
 name: Release
+# Title of the run in the actions list: the version being released, not the commit message.
+run-name: "Release ${{ inputs.version || github.ref_name }}${{ inputs.resume && ' (resume)' || '' }}"
 
 # Triggered by a tag, or dispatched by './gradlew release'. Either way the version is fixed before anything is built:
 # it comes from the tag name, or from the input the local task computed with the same code this workflow uses to

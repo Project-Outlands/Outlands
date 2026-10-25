@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.10.25] - 2026-10-25
+### New Features
+- [`4c84b73`](https://github.com/Project-Outlands/Outlands/commit/4c84b73631921d0fc7125b3d46c61e4078d2a95a) - read outlands.dev.extrapath, keep crl.dev.extrapath working *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### Bug Fixes
+- [`03949b6`](https://github.com/Project-Outlands/Outlands/commit/03949b686063f55a14f8e8e017aa72c56bc7cc4b) - **build**: patch Minecraft out of the vanilla jar, not out of our own copy *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### Refactors
+- [`9ce9d42`](https://github.com/Project-Outlands/Outlands/commit/9ce9d42400ca9baafb36b60a35aa2bec9de1f7cb) - drop the crl.dev.extrapath fallback *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [0.6.13-alpha] - 2026-09-12
 ### Performance Improvements
 - [`381edb2`](https://github.com/CleanroomMC/Cleanroom/commit/381edb20f7c7c86596a3efe129dc9927da67b7f1) - **asm**: Precheck annotation in SideTransformer *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
@@ -267,3 +278,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.6.11-alpha]: https://github.com/CleanroomMC/Cleanroom/compare/0.6.10-alpha...0.6.11-alpha
 [0.6.12-alpha]: https://github.com/CleanroomMC/Cleanroom/compare/0.6.11-alpha...0.6.12-alpha
 [0.6.13-alpha]: https://github.com/CleanroomMC/Cleanroom/compare/0.6.12-alpha...0.6.13-alpha
+[2026.10.25]: https://github.com/Project-Outlands/Outlands/compare/2026.10.23...2026.10.25

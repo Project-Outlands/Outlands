@@ -3,7 +3,7 @@
     "+jvmArgs": ["-Dfile.encoding=UTF-8"],
     "formatVersion": 1,
     "libraries": [],
-    "mainClass": "com.cleanroommc.bouncepad.Bouncepad",
+    "mainClass": "top.outlands.foundation.boot.Foundation",
     "name": "Outlands",
     "releaseTime": "2021-12-13T04:40:03+00:00",
     "requires": [

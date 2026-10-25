@@ -35,9 +35,9 @@ tasks.register('installerArtifacts') {
 
 // region version.json -------------------------------------------------------
 tasks.register('launcherJson') {
-    dependsOn 'installerArtifacts', tasks.named('jar')
+    dependsOn 'installerArtifacts', tasks.named('universalJar')
     def artifactsFile = tasks.named('installerArtifacts').flatMap { it.outputs.files.elements.map { it.first().asFile } }
-    def loaderJar = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    def loaderJar = tasks.named('universalJar', Jar).flatMap { it.archiveFile }
     def mmcVanilla = rootProject.file('mmcpack-template/patches/net.minecraft.json')
     def outputFile = layout.buildDirectory.file('version.json')
     // consumed by createMMCPack
@@ -115,9 +115,9 @@ tasks.register('launcherJson') {
 
 // region install_profile.json ----------------------------------------------
 tasks.register('installerJson') {
-    dependsOn 'launcherJson', tasks.named('jar')
+    dependsOn 'launcherJson', tasks.named('universalJar')
     def artifactsFile = tasks.named('installerArtifacts').flatMap { it.outputs.files.elements.map { it.first().asFile } }
-    def loaderJar = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    def loaderJar = tasks.named('universalJar', Jar).flatMap { it.archiveFile }
     def launcherJson = tasks.named('launcherJson').flatMap { it.outputs.files.elements.map { it.first().asFile } }
     def outputFile = layout.buildDirectory.file('install_profile.json')
     inputs.files(loaderJar, artifactsFile, launcherJson)
@@ -167,7 +167,7 @@ tasks.register('installerJar', Zip) {
     destinationDirectory = layout.buildDirectory.dir('libs')
     from({ tasks.named('installerJson').get().outputs.files })
     from({ tasks.named('launcherJson').get().outputs.files })
-    from(tasks.named('jar')) {
+    from(tasks.named('universalJar')) {
         into "maven/${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/"
         rename { "${base.archivesName.get()}-${project.version}.jar" }
     }
