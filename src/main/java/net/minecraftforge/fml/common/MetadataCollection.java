@@ -60,7 +60,7 @@ public class MetadataCollection
             MetadataCollection collection;
             Gson gson = new GsonBuilder().registerTypeAdapter(ArtifactVersion.class, new ArtifactVersionAdapter()).create();
             JsonElement rootElement = JsonParser.parseReader(reader);
-            if (rootElement.isJsonArray())
+            if (rootElement != null && rootElement.isJsonArray())
             {
                 collection = new MetadataCollection();
                 JsonArray jsonList = rootElement.getAsJsonArray();
@@ -71,9 +71,24 @@ public class MetadataCollection
                     collection.modList[i++]=gson.fromJson(mod, ModMetadata.class);
                 }
             }
+            else if (rootElement != null && rootElement.isJsonObject())
+            {
+                // Object form: an optional "modList" array plus jar level data. The array may be absent, either
+                // because the file only describes the jar itself (library, provider, declarative mod) or because
+                // the file describes a jar that has no @Mod class at all.
+                collection = gson.fromJson(rootElement, MetadataCollection.class);
+                if (collection == null)
+                {
+                    collection = new MetadataCollection();
+                }
+            }
             else
             {
-                collection = gson.fromJson(rootElement, MetadataCollection.class);
+                // An empty file, or a bare string/number. Previously the object branch fed this to gson, which
+                // returned null and the caller then dereferenced it, so an empty mcmod.info took the whole
+                // discovery down instead of being ignored.
+                FMLLog.log.error("The mcmod.info file in {} is neither a mod list array nor an object. It will be ignored", sourceName);
+                return new MetadataCollection();
             }
             collection.parseModMetadataList();
             return collection;
@@ -87,9 +102,19 @@ public class MetadataCollection
 
     private void parseModMetadataList()
     {
+        if (modList == null)
+        {
+            // Object form without "modList", see from().
+            return;
+        }
         for (ModMetadata modMetadata : modList)
         {
-            metadatas.put(modMetadata.modId, modMetadata);
+            // A null element ("[null]") has no id to key on; the id-less and blank-id cases are reported by
+            // the discovery code, which is the only place that knows which jar and entry they came from.
+            if (modMetadata != null)
+            {
+                metadatas.put(modMetadata.modId, modMetadata);
+            }
         }
     }
 
