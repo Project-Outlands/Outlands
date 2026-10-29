@@ -1,0 +1,11 @@
+--- before/net/minecraft/util/BitArray.java
++++ after/net/minecraft/util/BitArray.java
+@@ -22,7 +22,7 @@
+     public void setAt(int index, int value)
+     {
+         Validate.inclusiveBetween(0L, this.arraySize - 1, index);
+-        Validate.inclusiveBetween(0L, this.maxEntryValue, value);
++        Validate.inclusiveBetween(0L, this.maxEntryValue, Integer.toUnsignedLong(value));
+         int i = index * this.bitsPerEntry;
+         int j = i / 64;
+         int k = ((index + 1) * this.bitsPerEntry - 1) / 64;

@@ -223,6 +223,7 @@ processResources {
 
 test {
     maxParallelForks = 1
+    forkEvery = 10
     useJUnitPlatform()
     testLogging {
         events 'passed', 'skipped', 'failed'

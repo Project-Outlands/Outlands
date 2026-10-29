@@ -39,11 +39,11 @@ public class PacketUtil
     {
         if (stack.isEmpty())
         {
-            buffer.writeShort(-1);
+            buffer.writeVarInt(-1);
         }
         else
         {
-            buffer.writeShort(Item.getIdFromItem(stack.getItem()));
+            buffer.writeVarInt(Item.getIdFromItem(stack.getItem()));
             buffer.writeByte(stack.getCount());
             buffer.writeShort(stack.getMetadata());
             NBTTagCompound nbttagcompound = null;

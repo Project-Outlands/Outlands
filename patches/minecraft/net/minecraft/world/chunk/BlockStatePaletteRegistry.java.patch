@@ -1,0 +1,17 @@
+--- before/net/minecraft/world/chunk/BlockStatePaletteRegistry.java
++++ after/net/minecraft/world/chunk/BlockStatePaletteRegistry.java
+@@ -12,8 +12,12 @@
+     @Override
+     public int idFor(IBlockState state)
+     {
+-        int i = Block.BLOCK_STATE_IDS.get(state);
+-        return i == -1 ? 0 : i;
++        int stateId = Block.BLOCK_STATE_IDS.get(state);
++        if (stateId == -1 && Block.BLOCK_STATE_IDS.getByValue(-1) != state)
++        {
++            return 0;
++        }
++        return stateId;
+     }
+ 
+     @Override

@@ -28,20 +28,20 @@
              map2.put(map1, blockstatecontainer$stateimplementation);
              list1.add(blockstatecontainer$stateimplementation);
          }
-@@ -170,6 +178,13 @@
-                 this.block = blockIn;
+@@ -171,6 +179,13 @@
                  this.properties = propertiesIn;
              }
-+            
+ 
 +            protected StateImplementation(Block blockIn, ImmutableMap<IProperty<?>, Comparable<?>> propertiesIn, ImmutableTable<IProperty<?>, Comparable<?>, IBlockState> propertyValueTable)
 +            {
 +                this.block = blockIn;
 +                this.properties = propertiesIn;
 +                this.propertyValueTable = propertyValueTable;
 +            }
- 
++
              @Override
              public Collection < IProperty<? >> getPropertyKeys()
+             {
 @@ -528,5 +543,94 @@
              {
                  return this.block.getBlockFaceShape(worldIn, this, pos, facing);

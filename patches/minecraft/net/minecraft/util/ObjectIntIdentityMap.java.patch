@@ -1,0 +1,63 @@
+--- before/net/minecraft/util/ObjectIntIdentityMap.java
++++ after/net/minecraft/util/ObjectIntIdentityMap.java
+@@ -3,15 +3,18 @@
+ import com.google.common.base.Predicates;
+ import com.google.common.collect.Iterators;
+ import com.google.common.collect.Lists;
++import java.util.HashMap;
+ import java.util.IdentityHashMap;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.Map;
+ import javax.annotation.Nullable;
+ 
+ public class ObjectIntIdentityMap<T> implements IObjectIntIterable<T>
+ {
+     protected final IdentityHashMap<T, Integer> identityMap;
+     protected final List<T> objectList;
++    protected final Map<Integer, T> negativeObjectMap;
+ 
+     public ObjectIntIdentityMap()
+     {
+@@ -22,12 +25,19 @@
+     {
+         this.objectList = Lists.newArrayListWithExpectedSize(expectedSize);
+         this.identityMap = new IdentityHashMap<>(expectedSize);
++        this.negativeObjectMap = new HashMap<>();
+     }
+ 
+     public void put(T key, int value)
+     {
+         this.identityMap.put(key, value);
+ 
++        if (value < 0)
++        {
++            this.negativeObjectMap.put(value, key);
++            return;
++        }
++
+         while (this.objectList.size() <= value)
+         {
+             this.objectList.add(null);
+@@ -45,13 +55,19 @@
+     @Nullable
+     public final T getByValue(int value)
+     {
+-        return value >= 0 && value < this.objectList.size() ? this.objectList.get(value) : null;
++        if (value < 0)
++        {
++            return this.negativeObjectMap.get(value);
++        }
++        return value < this.objectList.size() ? this.objectList.get(value) : null;
+     }
+ 
+     @Override
+     public Iterator<T> iterator()
+     {
+-        return Iterators.filter(this.objectList.iterator(), Predicates.notNull());
++        return Iterators.concat(
++                Iterators.filter(this.objectList.iterator(), Predicates.notNull()),
++                Iterators.filter(this.negativeObjectMap.values().iterator(), Predicates.notNull()));
+     }
+ 
+     public int size()

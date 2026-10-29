@@ -20,6 +20,10 @@
 package net.minecraftforge.fml.common.registry;
 
 import com.google.common.collect.Sets;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
 import org.junit.runner.notification.Failure;
@@ -28,6 +32,10 @@ import org.junit.runners.JUnit4;
 import org.junit.runners.model.InitializationError;
 
 import java.io.File;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -53,10 +61,27 @@ import java.util.Set;
  * tailored for Minecraft use.
  *
  */
-public class ForgeTestRunner extends Runner
+public class ForgeTestRunner extends Runner implements BeforeAllCallback
 {
+    @Target(ElementType.TYPE)
+    @Retention(RetentionPolicy.RUNTIME)
+    @Tag("forge-isolated")
+    @ExtendWith(ForgeTestRunner.class)
+    public @interface Isolated
+    {
+    }
 
-    private final Runner inner;
+    private Runner inner;
+
+    public ForgeTestRunner()
+    {
+    }
+
+    @Override
+    public void beforeAll(ExtensionContext context)
+    {
+        System.setProperty("forge.disableVanillaGameData", "false");
+    }
 
     public ForgeTestRunner(Class<?> testFileClass) throws InitializationError
     {

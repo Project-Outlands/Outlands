@@ -103,14 +103,14 @@ public class GameData
     public static final ResourceLocation PROFESSIONS  = new ResourceLocation("minecraft:villagerprofessions");
     public static final ResourceLocation SERIALIZERS  = new ResourceLocation("minecraft:dataserializers");
 
-    private static final int MAX_BLOCK_ID = 4095;
-    private static final int MIN_ITEM_ID = MAX_BLOCK_ID + 1;
-    private static final int MAX_ITEM_ID = 31999;
-    private static final int MAX_POTION_ID = 255; // SPacketEntityEffect sends bytes, we can only use 255
-    private static final int MAX_BIOME_ID = 255; // Maximum number in a byte in the chunk
+    private static final int MAX_BLOCK_ID = Integer.MAX_VALUE - 1;
+    private static final int MIN_ITEM_ID = 4096;
+    private static final int MAX_ITEM_ID = Integer.MAX_VALUE - 1;
+    private static final int MAX_POTION_ID = Integer.MAX_VALUE - 1;
+    private static final int MAX_BIOME_ID = Integer.MAX_VALUE - 1;
     private static final int MAX_SOUND_ID = Integer.MAX_VALUE >> 5; // Varint (SPacketSoundEffect)
     private static final int MAX_POTIONTYPE_ID = Integer.MAX_VALUE >> 5; // Int (SPacketEffect)
-    private static final int MAX_ENCHANTMENT_ID = Short.MAX_VALUE - 1; // Short - serialized as a short in ItemStack NBTs.
+    private static final int MAX_ENCHANTMENT_ID = Integer.MAX_VALUE - 1;
     private static final int MAX_ENTITY_ID = Integer.MAX_VALUE >> 5; // Varint (SPacketSpawnMob)
     private static final int MAX_RECIPE_ID = Integer.MAX_VALUE >> 5; // Varint CPacketRecipeInfo/SPacketRecipeBook
     private static final int MAX_PROFESSION_ID = 1024; //TODO: Is this serialized anywhere anymore?
@@ -223,6 +223,7 @@ public class GameData
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public static void vanillaSnapshot()
     {
+        BiomeError.register();
         FMLLog.log.debug("Creating vanilla freeze snapshot");
         for (Map.Entry<ResourceLocation, ForgeRegistry<? extends IForgeRegistryEntry<?>>> r : RegistryManager.ACTIVE.registries.entrySet())
         {
@@ -255,7 +256,6 @@ public class GameData
         });
         RegistryManager.ACTIVE.registries.forEach((name, reg) -> reg.freeze());
 
-        // the id mapping is fanilized, no ids actually changed but this is a good place to tell everyone to 'bake' their stuff.
         Loader.instance().fireRemapEvent(ImmutableMap.of(), true);
 
         FMLLog.log.debug("All registries frozen");
@@ -294,13 +294,13 @@ public class GameData
         FMLLog.log.debug("Reverting complete");
     }
 
-    //Lets us clear the map so we can rebuild it.
     static class ClearableObjectIntIdentityMap<I> extends ObjectIntIdentityMap<I>
     {
         void clear()
         {
             this.identityMap.clear();
             this.objectList.clear();
+            this.negativeObjectMap.clear();
         }
 
         void remove(I key)
@@ -308,11 +308,13 @@ public class GameData
             Integer prev = this.identityMap.remove(key);
             if (prev != null)
             {
-                this.objectList.set(prev, null);
+                if (prev < 0)
+                    this.negativeObjectMap.remove(prev);
+                else
+                    this.objectList.set(prev, null);
             }
         }
     }
-
 
     private static class BlockCallbacks implements IForgeRegistry.AddCallback<Block>, IForgeRegistry.ClearCallback<Block>, IForgeRegistry.CreateCallback<Block>, IForgeRegistry.DummyFactory<Block>
     {
@@ -322,6 +324,10 @@ public class GameData
         @Override
         public void onAdd(IForgeRegistryInternal<Block> owner, RegistryManager stage, int id, Block block, @Nullable Block oldBlock)
         {
+            if (id > 0x0FFFFFFF)
+            {
+                throw new IllegalArgumentException("Block " + block.getRegistryName() + " has ID " + id + ", which exceeds the 28-bit state ID limit");
+            }
             @SuppressWarnings("unchecked")
             ClearableObjectIntIdentityMap<IBlockState> blockstateMap = owner.getSlaveMap(BLOCKSTATE_TO_ID, ClearableObjectIntIdentityMap.class);
 
@@ -333,30 +339,26 @@ public class GameData
                 }
             }
 
-            if ("minecraft:tripwire".equals(block.getRegistryName().toString())) //Tripwire is crap so we have to special case whee!
+            if ("minecraft:tripwire".equals(block.getRegistryName().toString()))
             {
                 for (int meta = 0; meta < 15; meta++)
                     blockstateMap.put(block.getStateFromMeta(meta), id << 4 | meta);
             }
 
-            //So, due to blocks having more in-world states then metadata allows, we have to turn the map into a semi-milti-bimap.
-            //We can do this however because the implementation of the map is last set wins. So we can add all states, then fix the meta bimap.
-            //Multiple states -> meta. But meta to CORRECT state.
-
-            final boolean[] usedMeta = new boolean[16]; //Hold a list of known meta from all states.
+            final boolean[] usedMeta = new boolean[16];
             for (IBlockState state : block.getBlockState().getValidStates())
             {
                 final int meta = block.getMetaFromState(state);
-                blockstateMap.put(state, id << 4 | meta); //Add ALL the things!
+                blockstateMap.put(state, id << 4 | meta);
                 usedMeta[meta] = true;
             }
 
             for (int meta = 0; meta < 16; meta++)
             {
                 if (block.getClass() == BlockObserver.class)
-                    continue; //Observers are bad and have non-cyclical states. So we HAVE to use the vanilla logic above.
+                    continue;
                 if (usedMeta[meta])
-                    blockstateMap.put(block.getStateFromMeta(meta), id << 4 | meta); // Put the CORRECT thing!
+                    blockstateMap.put(block.getStateFromMeta(meta), id << 4 | meta);
             }
 
             if (oldBlock != null)
@@ -384,9 +386,7 @@ public class GameData
                 @Override
                 public int get(IBlockState key)
                 {
-                    Integer integer = (Integer)this.identityMap.get(key);
-                    // There are some cases where this map is queried to serialize a state that is valid,
-                    //but somehow not in this list, so attempt to get real metadata. Doing this hear saves us 7 patches
+                    Integer integer = this.identityMap.get(key);
                     if (integer == null && key != null)
                         integer = this.identityMap.get(key.getBlock().getStateFromMeta(key.getBlock().getMetaFromState(key)));
                     return integer == null ? -1 : integer.intValue();

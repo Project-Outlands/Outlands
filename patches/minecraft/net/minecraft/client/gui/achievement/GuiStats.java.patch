@@ -1,0 +1,30 @@
+--- before/net/minecraft/client/gui/achievement/GuiStats.java
++++ after/net/minecraft/client/gui/achievement/GuiStats.java
+@@ -617,11 +617,11 @@
+ 
+                         if (i != j)
+                         {
+-                            return (i - j) * StatsBlock.this.sortOrder;
++                            return Integer.compare(i, j) * StatsBlock.this.sortOrder;
+                         }
+                     }
+ 
+-                    return Item.getIdFromItem(item1) - Item.getIdFromItem(item2);
++                    return Integer.compare(Item.getIdFromItem(item1), Item.getIdFromItem(item2));
+                 }
+             };
+         }
+@@ -862,11 +862,11 @@
+ 
+                         if (k != l)
+                         {
+-                            return (k - l) * StatsItem.this.sortOrder;
++                            return Integer.compare(k, l) * StatsItem.this.sortOrder;
+                         }
+                     }
+ 
+-                    return i - j;
++                    return Integer.compare(i, j);
+                 }
+             };
+         }

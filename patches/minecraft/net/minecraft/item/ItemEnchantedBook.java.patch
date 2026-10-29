@@ -1,0 +1,29 @@
+--- before/net/minecraft/item/ItemEnchantedBook.java
++++ after/net/minecraft/item/ItemEnchantedBook.java
+@@ -51,7 +51,7 @@
+         for (int i = 0; i < nbttaglist.tagCount(); i++)
+         {
+             NBTTagCompound nbttagcompound = nbttaglist.getCompoundTagAt(i);
+-            int j = nbttagcompound.getShort("id");
++            int j = nbttagcompound.getInteger("id");
+             Enchantment enchantment = Enchantment.getEnchantmentByID(j);
+ 
+             if (enchantment != null)
+@@ -70,7 +70,7 @@
+         {
+             NBTTagCompound nbttagcompound = nbttaglist.getCompoundTagAt(i);
+ 
+-            if (Enchantment.getEnchantmentByID(nbttagcompound.getShort("id")) == stack.enchantment)
++            if (Enchantment.getEnchantmentByID(nbttagcompound.getInteger("id")) == stack.enchantment)
+             {
+                 if (nbttagcompound.getShort("lvl") < stack.enchantmentLevel)
+                 {
+@@ -85,7 +85,7 @@
+         if (flag)
+         {
+             NBTTagCompound nbttagcompound1 = new NBTTagCompound();
+-            nbttagcompound1.setShort("id", (short)Enchantment.getEnchantmentID(stack.enchantment));
++            nbttagcompound1.setInteger("id", Enchantment.getEnchantmentID(stack.enchantment));
+             nbttagcompound1.setShort("lvl", (short)stack.enchantmentLevel);
+             nbttaglist.appendTag(nbttagcompound1);
+         }

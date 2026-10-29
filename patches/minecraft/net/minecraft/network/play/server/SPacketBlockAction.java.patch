@@ -1,0 +1,20 @@
+--- before/net/minecraft/network/play/server/SPacketBlockAction.java
++++ after/net/minecraft/network/play/server/SPacketBlockAction.java
+@@ -34,7 +34,7 @@
+         this.blockPosition = buf.readBlockPos();
+         this.instrument = buf.readUnsignedByte();
+         this.pitch = buf.readUnsignedByte();
+-        this.block = Block.getBlockById(buf.readVarInt() & 4095);
++        this.block = Block.getBlockById(buf.readVarInt());
+     }
+ 
+     @Override
+@@ -43,7 +43,7 @@
+         buf.writeBlockPos(this.blockPosition);
+         buf.writeByte(this.instrument);
+         buf.writeByte(this.pitch);
+-        buf.writeVarInt(Block.getIdFromBlock(this.block) & 4095);
++        buf.writeVarInt(Block.getIdFromBlock(this.block));
+     }
+ 
+     public void processPacket(INetHandlerPlayClient handler)

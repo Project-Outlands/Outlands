@@ -20,7 +20,29 @@
              }
          }
      }
-@@ -367,6 +368,7 @@
+@@ -327,13 +328,18 @@
+         return nbttagcompound;
+     }
+ 
+-    private void updateTagCompound(NBTTagCompound nbt, NBTTagCompound playerNbt)
++    static void writeVersion(NBTTagCompound nbt)
+     {
+         NBTTagCompound nbttagcompound = new NBTTagCompound();
+-        nbttagcompound.setString("Name", "1.12.2");
+-        nbttagcompound.setInteger("Id", 1343);
++        nbttagcompound.setString("Name", "1.13-JEID");
++        nbttagcompound.setInteger("Id", Integer.MAX_VALUE / 2);
+         nbttagcompound.setBoolean("Snapshot", false);
+         nbt.setTag("Version", nbttagcompound);
++    }
++
++    private void updateTagCompound(NBTTagCompound nbt, NBTTagCompound playerNbt)
++    {
++        writeVersion(nbt);
+         nbt.setInteger("DataVersion", 1343);
+         nbt.setLong("RandomSeed", this.randomSeed);
+         nbt.setString("generatorName", this.terrainType.getName());
+@@ -367,6 +373,7 @@
          nbt.setDouble("BorderSizeLerpTarget", this.borderSizeLerpTarget);
          nbt.setDouble("BorderWarningBlocks", this.borderWarningDistance);
          nbt.setDouble("BorderWarningTime", this.borderWarningTime);
@@ -28,7 +50,7 @@
  
          if (this.difficulty != null)
          {
-@@ -377,9 +379,10 @@
+@@ -377,9 +384,10 @@
          nbt.setTag("GameRules", this.gameRules.writeToNBT());
          NBTTagCompound nbttagcompound1 = new NBTTagCompound();
  
@@ -41,7 +63,7 @@
          }
  
          nbt.setTag("DimensionData", nbttagcompound1);
-@@ -709,6 +712,7 @@
+@@ -709,6 +717,7 @@
  
      public void setDifficulty(EnumDifficulty newDifficulty)
      {
@@ -49,7 +71,7 @@
          this.difficulty = newDifficulty;
      }
  
-@@ -832,16 +836,47 @@
+@@ -832,16 +841,47 @@
          }
          );
      }

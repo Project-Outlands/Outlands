@@ -1,0 +1,10 @@
+--- before/net/minecraft/world/storage/WorldSummary.java
++++ after/net/minecraft/world/storage/WorldSummary.java
+@@ -100,6 +100,6 @@
+ 
+     public boolean askToOpenWorld()
+     {
+-        return this.versionId > 1343;
++        return this.versionId > 1343 && this.versionId != Integer.MAX_VALUE / 2;
+     }
+ }

@@ -1,5 +1,17 @@
 --- before/net/minecraft/util/ServerRecipeBookHelper.java
 +++ after/net/minecraft/util/ServerRecipeBookHelper.java
+@@ -1,8 +1,8 @@
+ package net.minecraft.util;
+ 
+-import it.unimi.dsi.fastutil.ints.IntArrayList;
+-import it.unimi.dsi.fastutil.ints.IntList;
+-import java.util.Iterator;
++import it.unimi.dsi.fastutil.longs.LongArrayList;
++import it.unimi.dsi.fastutil.longs.LongIterator;
++import it.unimi.dsi.fastutil.longs.LongList;
+ import java.util.List;
+ import javax.annotation.Nullable;
+ import net.minecraft.client.util.RecipeItemHelper;
 @@ -54,6 +54,11 @@
                  this.field_194335_f = ((ContainerPlayer)container).craftResult;
                  this.field_194336_g = ((ContainerPlayer)container).craftMatrix;
@@ -12,6 +24,44 @@
  
              if (this.field_194335_f != null && this.field_194336_g != null)
              {
+@@ -63,7 +68,7 @@
+                     p_194327_1_.inventory.fillStackedContents(this.field_194331_b, false);
+                     this.field_194336_g.fillStackedContents(this.field_194331_b);
+ 
+-                    if (this.field_194331_b.canCraft(p_194327_2_, null))
++                    if (this.field_194331_b.canCraftLong(p_194327_2_, null))
+                     {
+                         this.func_194329_b();
+                     }
+@@ -113,7 +118,7 @@
+     private void func_194329_b()
+     {
+         boolean flag = this.field_194333_d.matches(this.field_194336_g, this.field_194332_c.world);
+-        int i = this.field_194331_b.getBiggestCraftableStack(this.field_194333_d, null);
++        int i = this.field_194331_b.getBiggestCraftableStackLong(this.field_194333_d, null);
+ 
+         if (flag)
+         {
+@@ -136,15 +141,15 @@
+         }
+ 
+         int i1 = this.func_194324_a(i, flag);
+-        IntList intlist = new IntArrayList();
++        LongList longlist = new LongArrayList();
+ 
+-        if (this.field_194331_b.canCraft(this.field_194333_d, intlist, i1))
++        if (this.field_194331_b.canCraftLong(this.field_194333_d, longlist, i1))
+         {
+             int j1 = i1;
+ 
+-            for (int k : intlist)
++            for (long k : longlist)
+             {
+-                int l = RecipeItemHelper.unpack(k).getMaxStackSize();
++                int l = RecipeItemHelper.unpackLong(k).getMaxStackSize();
+ 
+                 if (l < j1)
+                 {
 @@ -152,12 +157,10 @@
                  }
              }
@@ -19,15 +69,21 @@
 -            i1 = j1;
 -
 -            if (this.field_194331_b.canCraft(this.field_194333_d, intlist, i1))
-+            if (this.field_194331_b.canCraft(this.field_194333_d, intlist, j1))
++            if (this.field_194331_b.canCraftLong(this.field_194333_d, longlist, j1))
              {
                  this.func_194326_a();
 -                this.func_194323_a(i1, intlist);
-+                this.func_194323_a(j1, intlist);
++                this.func_194323_a(j1, longlist);
              }
          }
      }
-@@ -198,11 +201,11 @@
+@@ -193,20 +196,20 @@
+         return i;
+     }
+ 
+-    private void func_194323_a(int p_194323_1_, IntList p_194323_2_)
++    private void func_194323_a(int p_194323_1_, LongList p_194323_2_)
+     {
          int i = this.field_194336_g.getWidth();
          int j = this.field_194336_g.getHeight();
  
@@ -43,3 +99,17 @@
          }
  
          int j1 = 1;
+-        Iterator<Integer> iterator = p_194323_2_.iterator();
++        LongIterator iterator = p_194323_2_.iterator();
+ 
+         for (int k = 0; k < this.field_194336_g.getWidth() && j != k; k++)
+         {
+@@ -219,7 +222,7 @@
+                 }
+ 
+                 Slot slot = this.field_194337_h.get(j1);
+-                ItemStack itemstack = RecipeItemHelper.unpack(iterator.next());
++                ItemStack itemstack = RecipeItemHelper.unpackLong(iterator.nextLong());
+ 
+                 if (itemstack.isEmpty())
+                 {

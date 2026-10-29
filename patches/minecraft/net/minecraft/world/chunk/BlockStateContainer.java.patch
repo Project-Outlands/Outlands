@@ -1,7 +1,48 @@
 --- before/net/minecraft/world/chunk/BlockStateContainer.java
 +++ after/net/minecraft/world/chunk/BlockStateContainer.java
-@@ -30,6 +30,10 @@
+@@ -1,12 +1,14 @@
+ package net.minecraft.world.chunk;
  
++import java.util.Arrays;
++import java.util.IdentityHashMap;
++import java.util.Map;
+ import javax.annotation.Nullable;
+ import net.minecraft.block.Block;
+ import net.minecraft.block.state.IBlockState;
+ import net.minecraft.init.Blocks;
+ import net.minecraft.network.PacketBuffer;
+ import net.minecraft.util.BitArray;
+-import net.minecraft.util.math.MathHelper;
+ import net.minecraftforge.fml.relauncher.Side;
+ import net.minecraftforge.fml.relauncher.SideOnly;
+ 
+@@ -17,6 +19,8 @@
+     protected BitArray storage;
+     protected IBlockStatePalette palette;
+     private int bits;
++    private int[] temporaryPalette;
++    private NibbleArray add2;
+ 
+     public BlockStateContainer()
+     {
+@@ -28,8 +32,26 @@
+         return y << 8 | z << 4 | x;
+     }
+ 
++    private static int getGlobalPaletteBits()
++    {
++        int maxStateId = 0;
++        for (IBlockState state : Block.BLOCK_STATE_IDS)
++        {
++            int stateId = Block.BLOCK_STATE_IDS.get(state);
++            if (Integer.compareUnsigned(stateId, maxStateId) > 0)
++            {
++                maxStateId = stateId;
++            }
++        }
++        return 32 - Integer.numberOfLeadingZeros(maxStateId);
++    }
++
      private void setBits(int bitsIn)
      {
 +        setBits(bitsIn, false);
@@ -11,16 +52,18 @@
          if (bitsIn != this.bits)
          {
              this.bits = bitsIn;
-@@ -47,6 +51,8 @@
+@@ -46,7 +68,9 @@
+             else
              {
                  this.palette = REGISTRY_BASED_PALETTE;
-                 this.bits = MathHelper.log2DeBruijn(Block.BLOCK_STATE_IDS.size());
+-                this.bits = MathHelper.log2DeBruijn(Block.BLOCK_STATE_IDS.size());
++                this.bits = getGlobalPaletteBits();
 +                if (forceBits)
 +                    this.bits = bitsIn;
              }
  
              this.palette.idFor(AIR_BLOCK_STATE);
-@@ -103,11 +109,15 @@
+@@ -103,11 +127,15 @@
  
          if (this.bits != i)
          {
@@ -31,9 +74,133 @@
          this.palette.read(buf);
          buf.readLongArray(this.storage.getBackingLongArray());
 +
-+        int regSize = MathHelper.log2DeBruijn(Block.BLOCK_STATE_IDS.size());
++        int regSize = getGlobalPaletteBits();
 +        if (this.palette == REGISTRY_BASED_PALETTE && this.bits != regSize) // Resize bits to fit registry.
 +            this.onResize(regSize, AIR_BLOCK_STATE);
      }
  
      public void write(PacketBuffer buf)
+@@ -118,44 +146,103 @@
+     }
+ 
+     @Nullable
++    public int[] getTemporaryPalette()
++    {
++        return this.temporaryPalette;
++    }
++
++    public void setTemporaryPalette(@Nullable int[] temporaryPalette)
++    {
++        this.temporaryPalette = temporaryPalette;
++    }
++
++    public void setLegacyAdd2(@Nullable NibbleArray add2)
++    {
++        this.add2 = add2;
++    }
++
++    @Nullable
+     public NibbleArray getDataForNBT(byte[] blockIds, NibbleArray data)
+     {
+-        NibbleArray nibblearray = null;
++        Map<IBlockState, Integer> stateIds = new IdentityHashMap<>();
++        int[] palette = new int[4096];
++        int paletteSize = 0;
+ 
+         for (int i = 0; i < 4096; i++)
+         {
+-            int j = Block.BLOCK_STATE_IDS.get(this.get(i));
+-            int k = i & 15;
+-            int l = i >> 8 & 15;
+-            int i1 = i >> 4 & 15;
+-
+-            if ((j >> 12 & 15) != 0)
+-            {
+-                if (nibblearray == null)
++            IBlockState state = this.get(i);
++            Integer paletteId = stateIds.get(state);
++
++            if (paletteId == null)
++            {
++                paletteId = paletteSize++;
++                stateIds.put(state, paletteId);
++                palette[paletteId] = Block.BLOCK_STATE_IDS.get(state);
++            }
++
++            int j = i & 15;
++            int k = i >> 8 & 15;
++            int l = i >> 4 & 15;
++            blockIds[i] = (byte)(paletteId >> 4);
++            data.set(j, k, l, paletteId & 15);
++        }
++
++        this.temporaryPalette = Arrays.copyOf(palette, paletteSize);
++        return null;
++    }
++
++    public void setDataFromNBT(byte[] blockIds, NibbleArray data, @Nullable NibbleArray blockIdExtension)
++    {
++        if (this.temporaryPalette != null)
++        {
++            if (this.temporaryPalette.length == 0 || this.temporaryPalette.length > 4096)
++            {
++                throw new IllegalArgumentException(
++                    "Palette must contain between 1 and 4096 entries, got " + this.temporaryPalette.length
++                );
++            }
++
++            if (blockIds.length != 4096)
++            {
++                throw new IllegalArgumentException("Blocks must contain 4096 bytes, got " + blockIds.length);
++            }
++
++            for (int i = 0; i < 4096; i++)
++            {
++                int j = i & 15;
++                int k = i >> 8 & 15;
++                int l = i >> 4 & 15;
++                int paletteId = (blockIds[i] & 255) << 4 | data.get(j, k, l);
++
++                if (paletteId >= this.temporaryPalette.length)
+                 {
+-                    nibblearray = new NibbleArray();
++                    throw new IllegalArgumentException(
++                        "Palette index " + paletteId + " at block " + i + " is outside palette size " + this.temporaryPalette.length
++                    );
+                 }
+ 
+-                nibblearray.set(k, l, i1, j >> 12 & 15);
++                this.set(i, Block.BLOCK_STATE_IDS.getByValue(this.temporaryPalette[paletteId]));
+             }
+ 
+-            blockIds[i] = (byte)(j >> 4 & 0xFF);
+-            data.set(k, l, i1, j & 15);
++            this.temporaryPalette = null;
++            return;
+         }
+ 
+-        return nibblearray;
+-    }
+-
+-    public void setDataFromNBT(byte[] blockIds, NibbleArray data, @Nullable NibbleArray blockIdExtension)
+-    {
+         for (int i = 0; i < 4096; i++)
+         {
+             int j = i & 15;
+             int k = i >> 8 & 15;
+             int l = i >> 4 & 15;
+             int i1 = blockIdExtension == null ? 0 : blockIdExtension.get(j, k, l);
+-            int j1 = i1 << 12 | (blockIds[i] & 255) << 4 | data.get(j, k, l);
+-            this.set(i, Block.BLOCK_STATE_IDS.getByValue(j1));
++
++            if (this.add2 != null)
++            {
++                i1 |= this.add2.get(j, k, l) << 4;
++            }
++
++            int stateId = i1 << 12 | (blockIds[i] & 255) << 4 | data.get(j, k, l);
++            IBlockState state = stateId == 0 ? AIR_BLOCK_STATE : Block.BLOCK_STATE_IDS.getByValue(stateId);
++            this.set(i, state);
+         }
+     }
+ 

@@ -253,12 +253,40 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +2848,7 @@
+@@ -2593,6 +2619,11 @@
+         }
+     }
  
-                 if (block.getDefaultState().getMaterial() != Material.AIR)
++    static IBlockState getBlockEventState(int data)
++    {
++        return Block.getStateById(data);
++    }
++
+     @Override
+     public void playEvent(EntityPlayer player, int type, BlockPos blockPosIn, int data)
+     {
+@@ -2818,11 +2849,12 @@
+ 
+                 break;
+             case 2001:
+-                Block block = Block.getBlockById(data & 4095);
++                IBlockState state = getBlockEventState(data);
++                Block block = state.getBlock();
+ 
+-                if (block.getDefaultState().getMaterial() != Material.AIR)
++                if (state.getMaterial() != Material.AIR)
                  {
 -                    SoundType soundtype = block.getSoundType();
-+                    SoundType soundtype = block.getSoundType(Block.getStateById(data), this.world, blockPosIn, null);
++                    SoundType soundtype = block.getSoundType(state, this.world, blockPosIn, null);
                      this.world
                      .playSound(
                          blockPosIn,
+@@ -2834,7 +2866,7 @@
+                     );
+                 }
+ 
+-                this.mc.effectRenderer.addBlockDestroyEffects(blockPosIn, block.getStateFromMeta(data >> 12 & 0xFF));
++                this.mc.effectRenderer.addBlockDestroyEffects(blockPosIn, state);
+                 break;
+             case 2002:
+             case 2007:

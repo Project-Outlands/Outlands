@@ -60,7 +60,36 @@
          return chunk;
      }
  
-@@ -222,6 +252,11 @@
+@@ -122,6 +152,28 @@
+                 throw new ReportedException(crashreport);
+             }
+ 
++            int[] biomeIds = chunk.getBiomeIds();
++            boolean initializeBiomes = false;
++
++            for (int biomeId : biomeIds)
++            {
++                if (biomeId == -1)
++                {
++                    initializeBiomes = true;
++                    break;
++                }
++            }
++
++            if (initializeBiomes)
++            {
++                Biome[] biomes = this.world.getBiomeProvider().getBiomes(null, x << 4, z << 4, 16, 16);
++
++                for (int j = 0; j < biomeIds.length; j++)
++                {
++                    biomeIds[j] = Biome.getIdForBiome(biomes[j]);
++                }
++            }
++
+             this.loadedChunks.put(i, chunk);
+             chunk.onLoad();
+             chunk.populate(this, this.chunkGenerator);
+@@ -222,6 +274,11 @@
          {
              if (!this.droppedChunks.isEmpty())
              {
@@ -72,7 +101,7 @@
                  Iterator<Long> iterator = this.droppedChunks.iterator();
  
                  for (int i = 0; i < 100 && iterator.hasNext(); iterator.remove())
-@@ -232,6 +267,7 @@
+@@ -232,6 +289,7 @@
                      if (chunk != null && chunk.unloadQueued)
                      {
                          chunk.onUnload();
@@ -80,7 +109,7 @@
                          this.saveChunkData(chunk);
                          this.saveChunkExtraData(chunk);
                          this.loadedChunks.remove(olong);
-@@ -239,6 +275,8 @@
+@@ -239,6 +297,8 @@
                      }
                  }
              }

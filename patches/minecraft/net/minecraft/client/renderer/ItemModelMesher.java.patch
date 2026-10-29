@@ -1,5 +1,16 @@
 --- before/net/minecraft/client/renderer/ItemModelMesher.java
 +++ after/net/minecraft/client/renderer/ItemModelMesher.java
+@@ -16,8 +16,8 @@
+ @SideOnly(Side.CLIENT)
+ public class ItemModelMesher
+ {
+-    private final Map<Integer, ModelResourceLocation> simpleShapes = Maps.newHashMap();
+-    private final Map<Integer, IBakedModel> simpleShapesCache = Maps.newHashMap();
++    private final Map<Long, ModelResourceLocation> simpleShapes = Maps.newHashMap();
++    private final Map<Long, IBakedModel> simpleShapesCache = Maps.newHashMap();
+     protected final Map<Item, ItemMeshDefinition> shapers = Maps.newHashMap();
+     private final ModelManager modelManager;
+ 
 @@ -33,7 +33,9 @@
  
      public TextureAtlasSprite getParticleIcon(Item item, int meta)
@@ -11,3 +22,24 @@
      }
  
      public IBakedModel getItemModel(ItemStack stack)
+@@ -70,9 +72,9 @@
+         return this.simpleShapesCache.get(this.getIndex(item, meta));
+     }
+ 
+-    private int getIndex(Item item, int meta)
++    private long getIndex(Item item, int meta)
+     {
+-        return Item.getIdFromItem(item) << 16 | meta;
++        return (long)Item.getIdFromItem(item) << 32 | meta & 0xFFFFFFFFL;
+     }
+ 
+     public void register(Item item, int meta, ModelResourceLocation location)
+@@ -95,7 +97,7 @@
+     {
+         this.simpleShapesCache.clear();
+ 
+-        for (Entry<Integer, ModelResourceLocation> entry : this.simpleShapes.entrySet())
++        for (Entry<Long, ModelResourceLocation> entry : this.simpleShapes.entrySet())
+         {
+             this.simpleShapesCache.put(entry.getKey(), this.modelManager.getModel(entry.getValue()));
+         }
