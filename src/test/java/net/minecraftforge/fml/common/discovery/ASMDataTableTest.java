@@ -68,4 +68,27 @@ public class ASMDataTableTest {
 
         assertSame(table.getAnnotationsFor(container), table.getAnnotationsFor(container));
     }
+
+    /**
+     * Several mods can live in one jar, in which case they share one candidate and therefore one source file. The
+     * attribution key is that file, not the container, so both mods see the very same annotations - callers that
+     * need per-mod filtering have to narrow by modid themselves. This is the property the grouping rewrite was
+     * written to preserve, and the one a future "exact attribution" refactor is most likely to break silently.
+     */
+    @Test
+    public void containersSharingOneJarSeeTheSameAnnotations() {
+        File jar = new File("multi.jar");
+        ModCandidate candidate = new ModCandidate(jar, jar, ContainerType.JAR);
+        ASMDataTable table = new ASMDataTable();
+        table.addASMData(candidate, "AnnoX", "com/example/AClassOne", null, null);
+        table.addASMData(candidate, "AnnoX", "com/example/AClassTwo", null, null);
+
+        ModContainer first = containerWithSource(jar);
+        ModContainer second = containerWithSource(jar);
+        table.addContainer(first);
+        table.addContainer(second);
+
+        assertEquals(2, table.getAnnotationsFor(first).get("AnnoX").size());
+        assertEquals(table.getAnnotationsFor(first), table.getAnnotationsFor(second));
+    }
 }
