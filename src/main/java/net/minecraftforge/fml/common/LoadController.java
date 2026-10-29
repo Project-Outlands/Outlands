@@ -239,7 +239,7 @@ public class LoadController
                     packageOwners.put(pkg, mc);
                 }
             }
-            if (mc.getMod() == null && !mc.isImmutable() && state != LoaderState.CONSTRUCTING)
+            if (!mc.hasInstance() && !mc.isImmutable() && state != LoaderState.CONSTRUCTING)
             {
                 FormattedMessage message = new FormattedMessage("There is a severe problem with {} ({}) - it appears not to have constructed correctly", mc.getName(), mc.getModId());
                 this.errorOccurred(mc, new RuntimeException(message.getFormattedMessage()));

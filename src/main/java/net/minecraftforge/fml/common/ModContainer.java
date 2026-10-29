@@ -147,6 +147,19 @@ public interface ModContainer
      */
     Object getMod();
 
+    /**
+     * Whether this container is backed by a mod object at all.
+     *
+     * <p>Most containers are: they wrap an instance the language adapter produced. Some are not, and legitimately so
+     * - declarative mods (no {@code @Mod} class, only phase listeners) and containes for jars that exist to provide a
+     * capability rather than a mod. Those return {@code null} from {@link #getMod()} by design, so the "did this mod
+     * construct correctly" check downstream cannot use {@code getMod() == null} as its signal.
+     */
+    default boolean hasInstance()
+    {
+        return getMod() != null;
+    }
+
     ArtifactVersion getProcessedVersion();
 
     boolean isImmutable();
