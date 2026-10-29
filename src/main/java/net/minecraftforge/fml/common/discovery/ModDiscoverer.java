@@ -22,7 +22,7 @@ package net.minecraftforge.fml.common.discovery;
 import net.minecraftforge.cleanmix.CleanMixModContainer;
 import net.minecraftforge.fml.common.CleanroomEnvironment;
 import net.minecraftforge.util.CleanroomLog;
-import com.cleanroommc.loader.LanguageAdapterRegistry;
+import net.minecraftforge.fml.common.LanguageAdapterRegistry;
 import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.LinkedHashMultimap;

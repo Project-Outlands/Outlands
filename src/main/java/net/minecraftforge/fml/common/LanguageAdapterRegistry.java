@@ -1,7 +1,6 @@
-package com.cleanroommc.loader;
+package net.minecraftforge.fml.common;
 
-import net.minecraftforge.fml.common.FMLLog;
-import net.minecraftforge.fml.common.ILanguageAdapter;
+import com.cleanroommc.loader.Registry;
 
 /**
  * Maps a {@code modLanguage} name to the adapter that knows how to construct that language's mod instances.

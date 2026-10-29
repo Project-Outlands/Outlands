@@ -37,7 +37,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import com.cleanroommc.loader.LanguageAdapterRegistry;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.Config;
 import net.minecraftforge.common.config.ConfigManager;
