@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.util.text.TextFormatting;
 import net.minecraftforge.client.ClientCommandHandler;
+import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.relauncher.SideOnly;
 
@@ -77,11 +78,11 @@ public class SuggestionList {
     }
 
     public boolean isInvisible() {
-        return this.suggestions.isEmpty();
+        return !ForgeEarlyConfig.COMMAND_COMPLETION || this.suggestions.isEmpty();
     }
 
     public boolean isVisible() {
-        return !this.suggestions.isEmpty();
+        return !this.isInvisible();
     }
 
     public void hide() {
@@ -239,7 +240,7 @@ public class SuggestionList {
 
     public void drawCommandColor(GuiTextField inputField, FontRenderer fontRenderer) {
         String text = inputField.getText();
-        if (text.isEmpty() || (!this.commandBlockMode && !text.startsWith("/"))) {
+        if (!ForgeEarlyConfig.COMMAND_COMPLETION || text.isEmpty() || (!this.commandBlockMode && !text.startsWith("/"))) {
             return;
         }
         int scrollOffset = inputField.getLineScrollOffset();

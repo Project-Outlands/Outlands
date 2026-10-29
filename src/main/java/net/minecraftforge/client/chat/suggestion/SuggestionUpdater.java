@@ -7,12 +7,13 @@ import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.network.play.client.CPacketTabComplete;
 import net.minecraft.util.TabCompleter;
 import net.minecraftforge.client.ClientCommandHandler;
+import net.minecraftforge.common.ForgeEarlyConfig;
 
 import java.util.List;
 
 /**
  * GuiResponder for the {@link GuiTextField} in {@link GuiChat}
- * so that text changes fires a server tab-complete request, populating the {@link SuggestionList}
+ * so that text changes fire completion requests while command completion is enabled.
  */
 public class SuggestionUpdater implements GuiPageButtonList.GuiResponder {
 
@@ -30,7 +31,7 @@ public class SuggestionUpdater implements GuiPageButtonList.GuiResponder {
         this.field = field;
         this.commandBlockMode = commandBlockMode;
         Minecraft mc = Minecraft.getMinecraft();
-        if (mc.player != null && mc.player.connection != null) {
+        if (ForgeEarlyConfig.COMMAND_COMPLETION && mc.player != null && mc.player.connection != null) {
             mc.player.connection.sendPacket(new CPacketTabComplete("/", null, false));
             this.pendingReplies++;
         }
@@ -53,6 +54,12 @@ public class SuggestionUpdater implements GuiPageButtonList.GuiResponder {
      * deduplicates on the cursor-relative prefix so a no-op move is basically free
      */
     public void refresh() {
+        if (!ForgeEarlyConfig.COMMAND_COMPLETION) {
+            this.lastRequest = "";
+            this.pendingReplies = 0;
+            this.suggestionList.hide();
+            return;
+        }
         Minecraft mc = Minecraft.getMinecraft();
         if (mc.player == null) {
             return;
@@ -88,11 +95,16 @@ public class SuggestionUpdater implements GuiPageButtonList.GuiResponder {
 
     /**
      * Entrypoint for the async server tab-complete reply.
-     * Known root commands always runs, but the dropdown is only populated
-     * when the reply still matches what the user has typed.
-     * Stale replies are is dropped so the suggestions list isn't outdated.
+     * Stale replies are dropped so the suggestions list isn't outdated.
      */
     public void onServerCompletions(String... completions) {
+        if (!ForgeEarlyConfig.COMMAND_COMPLETION) {
+            this.lastRequest = "";
+            this.pendingReplies = 0;
+            this.suggestionList.hide();
+            return;
+        }
+        this.tabCompleter.resetRequested();
         List<String> suggestions = this.suggestionList.buildSuggestions(completions);
         if (this.pendingReplies > 0) {
             this.pendingReplies--;

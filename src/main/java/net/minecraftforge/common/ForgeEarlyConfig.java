@@ -74,6 +74,12 @@ public class ForgeEarlyConfig {
     })
     public static boolean INPUT_KEYBIND_ALL_MATCHING = true;
 
+    @Config.Comment({
+        "Enable modern command completions, ghost text and argument highlighting.",
+        "Vanilla Tab completion remains available when this is disabled."
+    })
+    public static boolean COMMAND_COMPLETION = false;
+
     @Config.Comment("Linux-only - change the X11 class name, which is used by your window manager to identify the running application")
     public static String X11_CLASS_NAME = "minecraft";
 
