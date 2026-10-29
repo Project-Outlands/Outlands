@@ -22,6 +22,7 @@ package net.minecraftforge.fml.common.discovery;
 import net.minecraftforge.cleanmix.CleanMixModContainer;
 import net.minecraftforge.fml.common.CleanroomEnvironment;
 import net.minecraftforge.util.CleanroomLog;
+import com.cleanroommc.loader.LanguageAdapterRegistry;
 import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.LinkedHashMultimap;
@@ -222,6 +223,9 @@ public final class ModDiscoverer {
 
         mods.addAll(exploreModCandidates(modCandidates, nonModLibs));
         this.nonModLibs = List.copyOf(nonModLibs);
+        // Every container has been built by now, so no mod can still be missing an adapter: a registration from
+        // here on would be invisible to mods that were already resolved. Close the registry instead of accepting it.
+        LanguageAdapterRegistry.freeze();
         return new IdentifiedMods(mods, nonModLibs);
     }
 
