@@ -112,4 +112,58 @@ public class EventBusTest {
             bus.unregister(listener);
         }
     }
+
+    @Test
+    public void addListenerReceivesEventsInPriorityOrder() {
+        var bus = new EventBus();
+        var order = new java.util.ArrayList<String>();
+
+        // Registered out of order on purpose: the list is ordered by priority, not by registration.
+        bus.addListener(ExampleEvent.class, EventPriority.LOWEST, e -> order.add("lowest"), null);
+        bus.addListener(ExampleEvent.class, EventPriority.HIGHEST, e -> order.add("highest"), null);
+        bus.addListener(ExampleEvent.class, EventPriority.NORMAL, e -> order.add("normal"), null);
+
+        bus.post(new ExampleEvent());
+
+        Assertions.assertEquals(List.of("highest", "normal", "lowest"), order);
+    }
+
+    @Test
+    public void removeListenerStopsDelivery() {
+        var bus = new EventBus();
+        var seen = new java.util.ArrayList<String>();
+        IEventListener kept = e -> seen.add("kept");
+        IEventListener removed = e -> seen.add("removed");
+
+        bus.addListener(ExampleEvent.class, EventPriority.NORMAL, kept, null);
+        bus.addListener(ExampleEvent.class, EventPriority.NORMAL, removed, null);
+        bus.removeListener(removed);
+
+        bus.post(new ExampleEvent());
+
+        Assertions.assertEquals(List.of("kept"), seen);
+    }
+
+    @Test
+    public void shutdownReleasesListeners() throws Exception {
+        var bus = new EventBus();
+
+        // Programmatic listeners are the ones that would otherwise outlive the bus: the listener list lives on the
+        // event class, so nothing about dropping the bus releases them. Assert the release itself - post() being
+        // blocked by the shutdown flag would pass even if nothing were ever unregistered.
+        bus.addListener(ExampleEvent.class, EventPriority.NORMAL, e -> { }, null);
+        Assertions.assertFalse(registeredListeners(bus).isEmpty(), "precondition: the listener was tracked");
+
+        bus.shutdown();
+
+        Assertions.assertTrue(registeredListeners(bus).isEmpty(),
+                "shutdown must drop every listener the bus registered");
+        Assertions.assertFalse(bus.post(new ExampleEvent()), "a shut down bus must not post");
+    }
+
+    private static java.util.Map<?, ?> registeredListeners(EventBus bus) throws Exception {
+        var field = EventBus.class.getDeclaredField("listeners");
+        field.setAccessible(true);
+        return (java.util.Map<?, ?>) field.get(bus);
+    }
 }
