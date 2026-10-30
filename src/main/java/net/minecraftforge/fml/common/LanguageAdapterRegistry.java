@@ -9,20 +9,21 @@ import javax.annotation.Nullable;
 /**
  * Maps a {@code modLanguage} name to the adapter that knows how to construct that language's mod instances.
  *
- * <p>Writable during discovery only: mods that ship an adapter register it from a coremod, before any container is
- * built, and the registry is frozen once discovery ends. A late registration is a bug in the registrant (it would be
- * invisible to every mod already resolved), so it fails loudly instead of being dropped.
+ * <p>Two kinds of adapter, with two lifetimes. The loader's own adapters (today only {@code java}) are registered by this
+ * class and frozen once discovery ends - a jar must not be able to replace the adapter that reads plain Java entry
+ * classes, because that would silently change how every mod in the instance is built. Adapters for languages that jars
+ * bring are declarations ({@link #declareProviders}): data until something asks for them, then one shared instance per
+ * language.
  *
- * <p>A language nobody registered is an error, not a fallback. Until this was changed, the lookup returned the Java
+ * <p>Declaring is the only way a jar can provide a language. There is deliberately no public method that hands over a
+ * live adapter instance: the claim "this jar provides scala" belongs with the jar, where it is discoverable, travels
+ * under the same signature, and can be named in an error message. An instance handed over from code makes the same claim
+ * in a place nobody can find.
+ *
+ * <p>A language nobody provides is an error, not a fallback. Until this was changed, the lookup returned the Java
  * adapter for any unknown name, so {@code modLanguage="scala"} without a Scala provider was constructed reflectively as
  * if it were Java: the mod either worked by accident or failed in {@code getConstructor()} with a message about a
  * missing no-arg constructor, two frames away from the actual cause.
- *
- * <p>Two things can satisfy a language lookup: an adapter registered from code (a coremod calling
- * {@link #registerLanguageAdapter}) and a provider a jar declares in its {@code mcmod.info} {@code jar} section
- * ({@link #declareProviders}). The first is instantiated by its registrant and frozen with the registry; the second is
- * only data until something asks for it. Either way the language has exactly one provider, and a jar declaring one that
- * already exists is rejected rather than ignored.
  */
 public final class LanguageAdapterRegistry {
 
@@ -43,16 +44,22 @@ public final class LanguageAdapterRegistry {
     }
 
     /**
-     * Registers an adapter for {@code language}.
+     * Registers one of the loader's own adapters for {@code language}.
+     *
+     * <p>Package-private on purpose. A jar provides a language by declaring it in {@code mcmod.info}
+     * ({@link #declareProviders}); this method exists for the adapters the loader itself ships, which a jar must not be
+     * able to shadow. Adding a public entry point here would restore a second declaration site - and with it a second set
+     * of conflict rules against the declarations - for a claim that already has a home.
      *
      * @throws IllegalArgumentException if the id is blank, the adapter is not an {@link ILanguageAdapter}, or the
-     *                                  language already has one - two jars claiming the same language cannot both be
-     *                                  honoured, and silently keeping the first hides the conflict
+     *                                  language already has one
      * @throws LoaderException          if a jar already declared a provider for {@code language}; that declaration would
-     *                                  become inert, so both sides are reported
+     *                                  become inert, so both sides are reported. Unreachable while this is only called
+     *                                  from the static initialiser, kept so that a future registration path cannot quietly
+     *                                  reintroduce the conflict
      * @throws IllegalStateException    if called after discovery ended
      */
-    public static void registerLanguageAdapter(String language, ILanguageAdapter languageAdapter) {
+    static void registerLanguageAdapter(String language, ILanguageAdapter languageAdapter) {
         LanguageProviders.Declaration declared = DECLARED.declarationFor(language);
         if (declared != null) {
             throw new LoaderException("Cannot register a language adapter for '" + language + "': "

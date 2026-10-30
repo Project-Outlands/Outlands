@@ -32,8 +32,10 @@ class LanguageProviderConflictTest {
 
     @Test
     void aDeclaredProviderBlocksALaterRegistration() {
-        // The declaration was read while scanning, the registration comes from a coremod; whichever arrives second has
-        // to be told, because keeping the first silently makes the other's declaration inert.
+        // Only reachable if a registration path is ever added that runs after jars are scanned (today the loader's own
+        // adapters are registered in a static initialiser, before scanning). Kept because the invariant it states - one
+        // adapter per language, whichever side arrives first - is what lets the message name the other side instead of
+        // silently keeping the first.
         LanguageAdapterRegistry.declareProviders(Map.of("scalance", "com.example.ScalaLanguageAdapter"), "/mods/lib.jar");
 
         LoaderException failure = assertThrows(LoaderException.class,
