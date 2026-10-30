@@ -38,11 +38,14 @@ import net.minecraftforge.fml.common.ModContainerFactory;
 import net.minecraftforge.fml.common.discovery.ASMDataTable.ASMData;
 import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.DeclarativeModContainer;
+import net.minecraftforge.fml.common.ModMetadata;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.discovery.json.JsonAnnotationLoader;
 
+import java.util.Map;
 import java.util.zip.ZipEntry;
 
 import org.objectweb.asm.Type;
@@ -86,6 +89,8 @@ public class JarDiscoverer implements ITypeDiscoverer
                 findClassesJSON(candidate, table, jar, foundMods, mc);
             else
                 findClassesASM(candidate, table, jar, foundMods, mc);
+
+            addDeclarativeContainers(candidate, table, foundMods, mc);
         }
         catch (Exception e)
         {
@@ -215,6 +220,50 @@ public class JarDiscoverer implements ITypeDiscoverer
         foundMods.add(container);
         container.bindMetadata(mc);
         container.setClassVersion(classVersion);
+    }
+
+    /**
+     * Adds a container for every mod the jar declares an entry point for.
+     *
+     * <p>Runs after the class scan so a jar that also has {@code @Mod} classes keeps them; a declared entry point whose
+     * mod id is already taken is reported instead of silently disappearing, because two mods cannot share an id and the
+     * order they were found in is not a reason to pick one.
+     */
+    private void addDeclarativeContainers(ModCandidate candidate, ASMDataTable table, List<ModContainer> foundMods, MetadataCollection mc)
+    {
+        JarDeclaration declaration = mc.getJarDeclaration();
+        if (declaration == null || declaration.entrypoints().isEmpty())
+        {
+            return;
+        }
+        for (Map.Entry<String, String> entry : declaration.entrypoints().entrySet())
+        {
+            String modId = entry.getKey();
+            ModContainer existing = findById(foundMods, modId);
+            if (existing != null)
+            {
+                throw new LoaderException("The mcmod.info of " + candidate.getModContainer().getName() + " declares an entrypoint"
+                        + " for mod id '" + modId + "', but that id is already used by " + existing.getClass().getName()
+                        + " in the same jar. One id can only name one mod.");
+            }
+            ModMetadata metadata = mc.getMetadataForId(modId, Map.of());
+            DeclarativeModContainer container = new DeclarativeModContainer(metadata, candidate.getModContainer(), entry.getValue());
+            table.addContainer(container);
+            foundMods.add(container);
+            FMLLog.log.debug("Declared mod {} without a mod class, entry point {}", modId, entry.getValue());
+        }
+    }
+
+    private static ModContainer findById(List<ModContainer> containers, String modId)
+    {
+        for (ModContainer container : containers)
+        {
+            if (modId.equals(container.getModId()))
+            {
+                return container;
+            }
+        }
+        return null;
     }
 
     private void findClassesJSON(ModCandidate candidate, ASMDataTable table, JarFile jar, List<ModContainer> foundMods, MetadataCollection mc) throws IOException

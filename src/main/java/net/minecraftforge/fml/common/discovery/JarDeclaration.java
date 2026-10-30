@@ -50,7 +50,8 @@ public final class JarDeclaration {
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
     private static final Set<String> KNOWN_KEYS =
-            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps");
+            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps",
+                    "entrypoints");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -94,6 +95,7 @@ public final class JarDeclaration {
     private final String license;
     private final LoadOrder loadOrder;
     private final List<ContainedDep> containedDeps;
+    private final Map<String, String> entrypoints;
     private final Map<String, String> providers;
     private final Map<String, List<String>> providerVersions;
     private final Map<String, String> unknown;
@@ -110,12 +112,13 @@ public final class JarDeclaration {
     }
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, List<ContainedDep> containedDeps,
-                           Map<String, String> providers, Map<String, List<String>> providerVersions,
-                           Map<String, String> unknown) {
+                           Map<String, String> entrypoints, Map<String, String> providers,
+                           Map<String, List<String>> providerVersions, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
         this.containedDeps = containedDeps;
+        this.entrypoints = entrypoints;
         this.providers = providers;
         this.providerVersions = providerVersions;
         this.unknown = unknown;
@@ -168,8 +171,42 @@ public final class JarDeclaration {
 
         Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
         return new JarDeclaration(schemaVersion, license.trim(), loadOrder,
-                parseContainedDeps(json.get("containedDeps"), sourceName), providers,
+                parseContainedDeps(json.get("containedDeps"), sourceName),
+                parseEntrypoints(json.get("entrypoints"), sourceName), providers,
                 parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+    }
+
+    /**
+     * Reads {@code entrypoints}: declared mod names, each with the class that will speak for it at runtime.
+     *
+     * <p>The key is the mod id, so a jar written in a language without mod classes can still present named mods that
+     * dependency ordering, disabling and per-mod event delivery all work on. The value is the only place a class name
+     * appears: everything the author would otherwise write as annotations sits behind it.
+     */
+    private static Map<String, String> parseEntrypoints(JsonElement element, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return Collections.emptyMap();
+        }
+        if (!element.isJsonObject()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"entrypoints\" as something other than an object. Expected {\"<modid>\": \"<entry point class>\"}.");
+        }
+        Map<String, String> entrypoints = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+            String modId = entry.getKey() == null ? "" : entry.getKey().trim();
+            if (modId.isEmpty()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares an entrypoint under an empty mod id.");
+            }
+            String className = asString(entry.getValue());
+            if (className == null || className.isBlank()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the entrypoint "
+                        + "\"" + modId + "\" without a class name. The value must be the full name of an "
+                        + "IDeclarativeEntrypoint implementation.");
+            }
+            entrypoints.put(modId, className.trim());
+        }
+        return entrypoints.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(entrypoints);
     }
 
     /**
@@ -323,6 +360,14 @@ public final class JarDeclaration {
         return license;
     }
 
+    /**
+     * @return the mods this jar declares without mod classes, as mod id to entry point class, in declaration order; never
+     *         {@code null}, empty when it declares none
+     */
+    public Map<String, String> entrypoints() {
+        return entrypoints;
+    }
+
     /** @return where this jar wants to sit in coremod discovery order */
     public LoadOrder loadOrder() {
         return loadOrder;
@@ -366,6 +411,7 @@ public final class JarDeclaration {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
                 + (containedDeps.isEmpty() ? "" : ", containedDeps=" + containedDeps.size())
+                + (entrypoints.isEmpty() ? "" : ", entrypoints=" + entrypoints.keySet())
                 + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
                 + (providerVersions.isEmpty() ? "" : ", providerVersions=" + providerVersions)
                 + (unknown.isEmpty() ? "" : ", unknown=" + unknown.keySet()) + "]";
