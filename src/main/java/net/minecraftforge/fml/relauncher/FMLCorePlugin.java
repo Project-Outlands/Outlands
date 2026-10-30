@@ -30,7 +30,6 @@ public class FMLCorePlugin implements IFMLLoadingPlugin
     {
         return new String[] {
                              "net.minecraftforge.fml.common.asm.transformers.SideTransformer",
-                             "net.minecraftforge.fml.common.asm.transformers.EventSubscriptionTransformer",
                              "net.minecraftforge.fml.common.asm.transformers.SoundEngineFixTransformer",
                              // Rewrites LWJGL2 call sites of mods to native LWJGL3 calls (never modifies org.lwjgl.**).
                              "net.minecraftforge.lwjgl.legacy.Lwjgl2CompatTransformer",

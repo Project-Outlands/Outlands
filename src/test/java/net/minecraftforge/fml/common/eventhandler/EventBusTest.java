@@ -166,4 +166,95 @@ public class EventBusTest {
         field.setAccessible(true);
         return (java.util.Map<?, ?>) field.get(bus);
     }
+
+    @Test
+    public void cancelableEvent() {
+        // The annotation used to be compiled into a constant-returning override by the transformer. Now the answer
+        // comes from the probe, and getting it wrong would silently make every @Cancelable event non-cancelable.
+        var event = new CancelableEvents.CancelableEvent();
+        event.setCanceled(true);
+        Assertions.assertTrue(event.isCanceled());
+
+        var bus = new EventBus();
+        Assertions.assertTrue(bus.post(event), "post returns true when the event is cancelable and canceled");
+    }
+
+    @Test
+    public void nonCancelableEvent() {
+        var event = new CancelableEvents.NonCancelableEvent();
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () -> event.setCanceled(true),
+            "setCanceled on a non-cancelable event must throw"
+        );
+    }
+
+    @Test
+    public void handWrittenCancelableOverrideWins() {
+        // A handwritten override must beat the annotation probe, which only answers for classes using the base impl.
+        var event = new CancelableEvents.HandWritten();
+        Assertions.assertTrue(event.isCancelable());
+        event.setCanceled(true);
+        Assertions.assertTrue(event.isCanceled());
+    }
+
+    @Test
+    public void subclassEventsReachSuperclassListeners() {
+        var bus = new EventBus();
+        var parent = new PolymorphicEvents.ParentListener();
+        var child = new PolymorphicEvents.ChildListener();
+        bus.register(parent);
+        bus.register(child);
+
+        // The transformer chained each class's list to its superclass's. The probe has to do the same, or listeners
+        // registered on a common base event would silently stop firing for every subclass event.
+        bus.post(new PolymorphicEvents.ChildEvent());
+        Assertions.assertEquals(1, parent.calls, "superclass listeners fire for subclass events");
+        Assertions.assertEquals(1, child.calls);
+
+        // One-way: a superclass event must not reach subclass listeners.
+        bus.post(new PolymorphicEvents.ParentEvent());
+        Assertions.assertEquals(2, parent.calls);
+        Assertions.assertEquals(1, child.calls, "subclass listeners must not fire for superclass events");
+    }
+
+    @Test
+    public void registersEventWithoutNoArgConstructor() {
+        // Types such as TextureStitchEvent$Pre cannot be instantiated; the probe resolves what posting resolves.
+        var bus = new EventBus();
+        var seen = new java.util.ArrayList<String>();
+        bus.addListener(ParameterlessByConstruction.class, EventPriority.NORMAL, e -> seen.add("heard"), null);
+
+        bus.post(new ParameterlessByConstruction(7));
+        Assertions.assertEquals(List.of("heard"), seen);
+    }
+
+    @Test
+    public void refusesHandWrittenListThatCannotBeReached() {
+        // Registering into the probe's list would succeed and then never fire, since posting goes through the
+        // override. A clear failure is the only useful answer that does not need to manufacture an instance.
+        var bus = new EventBus();
+        var error = Assertions.assertThrows(IllegalArgumentException.class,
+                () -> bus.addListener(HandwrittenListWithoutNoArgCtor.class, EventPriority.NORMAL, e -> { }, null));
+
+        Assertions.assertTrue(error.getMessage().contains("no-arg constructor"), error.getMessage());
+    }
+
+    private static class ParameterlessByConstruction extends Event {
+        ParameterlessByConstruction(@SuppressWarnings("unused") int unused) {
+        }
+    }
+
+    /** Replaces the per-class list with its own and has no public no-arg constructor: unreachable by design. */
+    private static class HandwrittenListWithoutNoArgCtor extends Event {
+        private final ListenerList own = new ListenerList();
+
+        HandwrittenListWithoutNoArgCtor(@SuppressWarnings("unused") int unused) {
+        }
+
+        @Override
+        public ListenerList getListenerList() {
+            return own;
+        }
+    }
 }
