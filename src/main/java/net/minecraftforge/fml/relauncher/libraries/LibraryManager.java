@@ -22,11 +22,14 @@ package net.minecraftforge.fml.relauncher.libraries;
 import java.io.*;
 import java.net.URISyntaxException;
 import java.security.CodeSource;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -67,6 +70,8 @@ public class LibraryManager
     private static Set<File> processed = new HashSet<File>();
     private static File minecraftHome;
     private static List<File> candidates;
+    /** Libraries extracted out of other jars. Kept apart from the mods directory, so they have to be offered separately. */
+    private static final Set<File> containedDeps = new LinkedHashSet<>();
 
     public static void setup(File minecraftHome)
     {
@@ -207,6 +212,65 @@ public class LibraryManager
         }
         return null;
     }
+    private static byte[] bytesOf(JarFile jar, JarEntry entry, byte[] preloaded) throws IOException
+    {
+        if (preloaded != null)
+        {
+            return preloaded;
+        }
+        return readAll(jar.getInputStream(entry));
+    }
+
+    /**
+     * Extracts a bundled library that carries no coordinates, into {@code libraries/contained/<sha1>.jar}.
+     *
+     * <p>Content-addressed on purpose: the file name is the only identity a coordinate-less library has, and two jars
+     * bundling different builds under the same name must not overwrite each other. It also makes the operation
+     * idempotent, so nothing has to remember what was extracted last run.
+     *
+     * <p>The directory is deliberately outside {@code mods/}: what lives there is scanned as mod candidates, and a
+     * bundled library is not one. The extracted file is offered to the candidate list directly instead.
+     */
+    private static void extractContained(byte[] bytes, String fileName, String fromJar, ModList modlist, File... modDirs)
+    {
+        File dir = new File(minecraftHome, "libraries" + File.separator + "contained");
+        File target;
+        try
+        {
+            byte[] digest = MessageDigest.getInstance("SHA-1").digest(bytes);
+            StringBuilder name = new StringBuilder();
+            for (int i = 0; i < 12; i++)
+            {
+                name.append(String.format("%02x", digest[i]));
+            }
+            target = new File(dir, name + "-" + fileName);
+        }
+        catch (NoSuchAlgorithmException e)
+        {
+            // SHA-1 is required by the platform; if it is missing there is nothing sane to fall back to but the name.
+            target = new File(dir, fileName);
+        }
+
+        if (target.exists())
+        {
+            FMLLog.log.debug("Bundled library {} from {} already extracted to {}, reusing it", fileName, fromJar, target);
+            containedDeps.add(target);
+            return;
+        }
+        try
+        {
+            Files.createParentDirs(target);
+            java.nio.file.Files.write(target.toPath(), bytes);
+            FMLLog.log.debug("Extracted bundled library {} from {} to {}", fileName, fromJar, target);
+            containedDeps.add(target);
+            extractPacked(target, modlist, modDirs);
+        }
+        catch (IOException e)
+        {
+            FMLLog.log.error("An error occurred extracting bundled library " + fileName + " from " + fromJar, e);
+        }
+    }
+
     private static Pair<Artifact, byte[]> extractPacked(JarFile jar, ModList modlist, File... modDirs) throws IOException
     {
         Attributes attrs;
@@ -278,41 +342,12 @@ public class LibraryManager
                     }
                 }
 
-                if (meta == null || !meta.containsKey(MAVEN_ARTIFACT)) //Ugh I really don't want to do backwards compatibility here, I want to force modders to provide information... TODO: Remove in 1.13?
+                if (meta == null || !meta.containsKey(MAVEN_ARTIFACT))
                 {
-                    boolean found = false;
-                    for (File dir : modDirs)
-                    {
-                        File target = new File(dir, depEndName);
-                        if (target.exists())
-                        {
-                            FMLLog.log.debug("Found existing ContainDep extracted to {}, skipping extraction", target.getCanonicalPath());
-                            found = true;
-                        }
-                    }
-                    if (!found)
-                    {
-                        File target = new File(modDirs[0], depEndName);
-                        FMLLog.log.debug("Extracting ContainedDep {} from {} to {}", dep, jar.getName(), target.getCanonicalPath());
-                        try
-                        {
-                            Files.createParentDirs(target);
-                            try
-                            (
-                                FileOutputStream out = new FileOutputStream(target);
-                                InputStream in = data == null ? jar.getInputStream(depEntry) : new ByteArrayInputStream(data)
-                            )
-                            {
-                                ByteStreams.copy(in, out);
-                            }
-                            FMLLog.log.debug("Extracted ContainedDep {} from {} to {}", dep, jar.getName(), target.getCanonicalPath());
-                            extractPacked(target, modlist, modDirs);
-                        }
-                        catch (IOException e)
-                        {
-                            FMLLog.log.error("An error occurred extracting dependency", e);
-                        }
-                    }
+                    // No coordinates, so there is nowhere sensible to file it under and nothing to dedupe on but the
+                    // content. It used to be extracted next to the mods - which turned every bundled library into
+                    // something the loader would scan as a mod, and left files in mods/ that no mod claims.
+                    extractContained(bytesOf(jar, depEntry, data), depEndName, jar.getName(), modlist, modDirs);
                 }
                 else
                 {
@@ -520,6 +555,11 @@ public class LibraryManager
                 if (candidateSet.add(target))
                     gathered.add(target);
             }
+        }
+        for (File extracted : containedDeps)
+        {
+            if (candidateSet.add(extracted))
+                gathered.add(extracted);
         }
         // Nothing may rewrite the candidate list any more. It used to be mutable in place for Bansoukou, which
         // meant the set of files the loader considered was decided by whoever got to the list first, while the

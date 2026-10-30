@@ -104,6 +104,8 @@ public final class ModDiscoverer {
     private final Map<File, DiscoveredMod> discoveredFiles = new LinkedHashMap<>();
     private final Map<File, JarScanRecord> scanRecords = new HashMap<>();
     private final Map<File, MetadataCollection> modMetadata = new HashMap<>();
+    /** Bundled library id to the first declaration of it, for the report that two jars bundle different versions. */
+    private final Map<String, String> containedDepClaims = new HashMap<>();
     private final ASMDataTable asmDataTable = new ASMDataTable();
 
     private List<File> nonModLibs = List.of();
@@ -370,6 +372,7 @@ public final class ModDiscoverer {
                         if (!declaration.providers().isEmpty()) {
                             LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
                         }
+                        reportContainedDepClaims(file, declaration);
                         CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
                     }
                 }
@@ -510,6 +513,29 @@ public final class ModDiscoverer {
         }
 
         CoreModManager.loadCoreModFromDiscoveredJar(classLoader, fmlCorePlugin, file);
+    }
+
+    /**
+     * Reports bundled libraries that more than one jar claims with different versions.
+     *
+     * <p>1.12.2 has one class loader for every mod, so two versions of a library cannot both be on the classpath - only
+     * one of them can win, and which one used to be decided by extraction order. Saying so is the part that can be done
+     * without inventing a storage layout; choosing the winner needs the library directory that the contained-deps work
+     * builds.
+     */
+    private void reportContainedDepClaims(File file, JarDeclaration declaration) {
+        for (JarDeclaration.ContainedDep dep : declaration.containedDeps()) {
+            String key = dep.id();
+            String previous = containedDepClaims.get(key);
+            String current = dep.version() + " (" + file.getName() + ")";
+            if (previous == null) {
+                containedDepClaims.put(key, current);
+            } else if (!previous.startsWith(dep.version() + " ")) {
+                CleanroomLog.get().warn("Two jars bundle a library called \"{}\" with different versions: {} and {}."
+                        + " Only one version of a library can be on the classpath, so one of them will be shadowed.",
+                        key, previous, current);
+            }
+        }
     }
 
     private static void addContainedDepsToClasspath(LaunchClassLoader classLoader, Attributes attributes, File containedDepsDir) throws MalformedURLException {

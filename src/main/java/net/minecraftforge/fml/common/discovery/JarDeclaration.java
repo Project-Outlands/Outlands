@@ -50,7 +50,7 @@ public final class JarDeclaration {
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
     private static final Set<String> KNOWN_KEYS =
-            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions");
+            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -93,15 +93,29 @@ public final class JarDeclaration {
     private final int schemaVersion;
     private final String license;
     private final LoadOrder loadOrder;
+    private final List<ContainedDep> containedDeps;
     private final Map<String, String> providers;
     private final Map<String, List<String>> providerVersions;
     private final Map<String, String> unknown;
 
-    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> providers,
-                           Map<String, List<String>> providerVersions, Map<String, String> unknown) {
+
+    /**
+     * One library bundled inside the jar.
+     *
+     * <p>{@code id} and {@code version} exist so that two jars can bundle different versions of the same library and the
+     * loader can say which one it is looking at. The legacy {@code ContainedDeps} manifest key carries neither - only a
+     * path - which is why the same runtime conflict used to be unavoidable there.
+     */
+    public record ContainedDep(String id, String version, String path) {
+    }
+
+    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, List<ContainedDep> containedDeps,
+                           Map<String, String> providers, Map<String, List<String>> providerVersions,
+                           Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
+        this.containedDeps = containedDeps;
         this.providers = providers;
         this.providerVersions = providerVersions;
         this.unknown = unknown;
@@ -153,8 +167,56 @@ public final class JarDeclaration {
         }
 
         Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
-        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, providers,
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder,
+                parseContainedDeps(json.get("containedDeps"), sourceName), providers,
                 parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+    }
+
+    /**
+     * Reads {@code containedDeps}: libraries bundled inside this jar, each with an optional identity.
+     *
+     * <p>Structured rather than the manifest's space-separated list because the manifest form cannot express which
+     * library a path is or which version it is, so two jars bundling different versions of one library cannot be told
+     * apart. A path with no {@code id} takes its name from the file, and no {@code version} means {@code "0"} - the
+     * same reading the legacy form gets, so a jar can migrate one entry at a time.
+     */
+    private static List<ContainedDep> parseContainedDeps(JsonElement element, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return List.of();
+        }
+        if (!element.isJsonArray()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"containedDeps\" as something other than an array. Expected [{\"path\": \"...\"}, ...].");
+        }
+        List<ContainedDep> deps = new ArrayList<>();
+        for (JsonElement entry : element.getAsJsonArray()) {
+            if (entry == null || !entry.isJsonObject()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a containedDep that is not an object.");
+            }
+            JsonObject object = entry.getAsJsonObject();
+            String path = asString(object.get("path"));
+            if (path == null || path.isBlank()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a containedDep without a \"path\". The path is the entry inside this jar.");
+            }
+            path = path.trim();
+            if (!path.endsWith(".jar")) {
+                // The only reason a path is here is to be put on the classpath, and only a jar can be.
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares the containedDep \"" + path + "\", which is not a .jar file.");
+            }
+            String name = path.substring(path.lastIndexOf('/') + 1);
+            name = name.substring(0, name.length() - ".jar".length());
+
+            String id = asString(object.get("id"));
+            id = id == null || id.isBlank() ? name : id.trim();
+            String version = asString(object.get("version"));
+            version = version == null || version.isBlank() ? "0" : version.trim();
+
+            deps.add(new ContainedDep(id, version, path));
+        }
+        return deps.isEmpty() ? List.of() : List.copyOf(deps);
     }
 
     /**
@@ -270,8 +332,11 @@ public final class JarDeclaration {
      * @return the language providers this jar declares, as language name to adapter class name, in declaration order;
      *         never {@code null}, empty when nothing is declared
      */
-    public Map<String, String> providers() {
-        return providers;
+    /**
+     * @return the libraries this jar bundles, in declaration order; never {@code null}, empty when it bundles none
+     */
+    public List<ContainedDep> containedDeps() {
+        return containedDeps;
     }
 
     /**
@@ -280,6 +345,10 @@ public final class JarDeclaration {
      */
     public Map<String, List<String>> providerVersions() {
         return providerVersions;
+    }
+
+    public Map<String, String> providers() {
+        return providers;
     }
 
     /** @return keys this loader does not understand, with their JSON text, for a single warning */
@@ -296,6 +365,7 @@ public final class JarDeclaration {
     public String toString() {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
+                + (containedDeps.isEmpty() ? "" : ", containedDeps=" + containedDeps.size())
                 + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
                 + (providerVersions.isEmpty() ? "" : ", providerVersions=" + providerVersions)
                 + (unknown.isEmpty() ? "" : ", unknown=" + unknown.keySet()) + "]";
