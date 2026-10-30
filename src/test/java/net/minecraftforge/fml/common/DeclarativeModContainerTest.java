@@ -48,8 +48,15 @@ class DeclarativeModContainerTest {
 
         assertEquals(null, container.getMod());
         assertFalse(container.matches(new Object()));
-        // hasInstance is what the loader checks before reporting "did not construct correctly".
-        assertFalse(container.hasInstance());
+
+    }
+
+    @Test
+    void anInstanceLessModIsNotReportedAsAFailedConstruction() {
+        // LoadController.buildModObjectList reports a severe error for containers that answer false here. A declarative
+        // mod has no mod object on purpose, so answering the default (getMod() != null) would make every such mod load
+        // and then be flagged as broken.
+        assertTrue(container(DeclarativeStubEntrypoint.class.getName()).hasInstance());
     }
 
     @Test

@@ -59,6 +59,19 @@ public class DeclarativeModContainer extends DummyModContainer {
         return source;
     }
 
+    /**
+     * {@code true} because this container has no mod object <em>by design</em>.
+     *
+     * <p>Despite the name, the flag does not mean "wraps an instance": it is the signal
+     * {@code LoadController.buildModObjectList} uses to tell an instance-less container apart from a mod whose
+     * construction actually failed. Answering {@code false} would let every declarative mod load and then be reported as
+     * "appears not to have constructed correctly".
+     */
+    @Override
+    public boolean hasInstance() {
+        return true;
+    }
+
     @Override
     public boolean registerBus(EventBus bus, LoadController controller) {
         EntrypointRegistrar registrar = new EntrypointRegistrar(this);
