@@ -321,13 +321,31 @@ public final class ModDiscoverer {
                     modIds.add("jsonpaintings");
                 }
             }
-            if (modIds.isEmpty()) {
-                ZipEntry entry = jarFile.getEntry("mcmod.info");
-                if (entry != null) {
-                    // Kept for the container discovery, which would otherwise read and parse the very same entry again
-                    MetadataCollection metadata = parseMcmodInfo(file, jarFile.getInputStream(entry), modIds);
-                    if (metadata != null) {
-                        modMetadata.put(absolute, metadata);
+            // Read the metadata entry for every jar, not only for the ones whose mod id is still unknown: the jar
+            // section describes the jar, so it has to be reachable for jars identified from their manifest too (those
+            // are exactly the ones that need to declare load order). Ids are only taken from it when the manifest did
+            // not already provide any, so the special cases above keep their single derived id.
+            ZipEntry entry = jarFile.getEntry("mcmod.info");
+            if (entry != null)
+            {
+                // Kept for the container discovery, which would otherwise read and parse the very same entry again
+                MetadataCollection metadata = parseMcmodInfo(file, jarFile.getInputStream(entry));
+                if (metadata != null) {
+                    modMetadata.put(absolute, metadata);
+                    if (modIds.isEmpty()) {
+                        collectModIds(file, metadata, modIds);
+                    }
+                    JarDeclaration declaration = metadata.getJarDeclaration();
+                    if (declaration != null) {
+                        if (declaration.schemaVersion() > JarDeclaration.CURRENT_SCHEMA) {
+                            CleanroomLog.get().warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
+                                    file.getName(), declaration.schemaVersion(), JarDeclaration.CURRENT_SCHEMA, JarDeclaration.CURRENT_SCHEMA);
+                        }
+                        if (!declaration.unknownKeys().isEmpty()) {
+                            CleanroomLog.get().warn("{} declares jar keys this loader does not understand: {}",
+                                    file.getName(), declaration.unknownKeys());
+                        }
+                        CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
                     }
                 }
             }
@@ -664,22 +682,29 @@ public final class ModDiscoverer {
         return false;
     }
 
-    private MetadataCollection parseMcmodInfo(File file, InputStream stream, Set<String> ids) {
+    /** Parses the metadata entry; ids are collected by the caller, which knows whether they are wanted. */
+    private MetadataCollection parseMcmodInfo(File file, InputStream stream) {
         try {
-            MetadataCollection metadata = MetadataCollection.from(stream, file.getName());
-            for (String id : metadata.getIds()) {
-                if (id == null || id.isBlank()) {
-                    CleanroomLog.get().warn("Skipping null/blank mod id from {}", file.getName());
-                    continue;
-                }
-                ids.add(id);
-            }
-            return metadata;
+            return MetadataCollection.from(stream, file.getName());
+        } catch (LoaderException e) {
+            // A declaration this loader refuses to read is not a parse failure to be tolerated: the jar claimed to
+            // follow the current schema and then did not, so continuing would silently drop what it declared.
+            throw e;
         } catch (Throwable t) {
             CleanroomLog.get().error("Failed to parse mcmod.info for {}", file.getName(), t);
             return null;
         } finally {
             IOUtils.closeQuietly(stream);
+        }
+    }
+
+    private static void collectModIds(File file, MetadataCollection metadata, Set<String> ids) {
+        for (String id : metadata.getIds()) {
+            if (id == null || id.isBlank()) {
+                CleanroomLog.get().warn("Skipping null/blank mod id from {}", file.getName());
+                continue;
+            }
+            ids.add(id);
         }
     }
 

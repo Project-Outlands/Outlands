@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -75,5 +77,48 @@ class MetadataCollectionTest {
 
         assertEquals(1, collection.getIds().size());
         assertNotNull(collection.getMetadataForId("survivor", java.util.Collections.emptyMap()));
+    }
+
+    @Test
+    void filesWithoutAJarSectionHaveNoDeclaration() {
+        // Every file that predates the section: reading it must not invent one, otherwise a loader-side default
+        // would apply to thousands of jars that never opted in.
+        assertNull(parse("[{\"modid\":\"old\"}]").getJarDeclaration());
+        assertNull(parse("{\"modList\":[{\"modid\":\"old\"}]}").getJarDeclaration());
+    }
+
+    @Test
+    void jarSectionWithoutModListIsRead() {
+        // A jar that only describes itself: library, language provider, or a mod with no @Mod class.
+        var declaration = parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"LGPL-2.1-only\"}}").getJarDeclaration();
+
+        assertNotNull(declaration);
+        assertEquals(1, declaration.schemaVersion());
+        assertEquals("LGPL-2.1-only", declaration.license());
+        assertTrue(declaration.unknownKeys().isEmpty());
+    }
+
+    @Test
+    void jarSectionIsReadForJarsThatAlsoHaveMods() {
+        var collection = parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"MIT\",\"futureKey\":\"x\"},"
+                + "\"modList\":[{\"modid\":\"mixed\"}]}");
+
+        assertEquals(1, collection.getIds().size());
+        var declaration = collection.getJarDeclaration();
+        assertNotNull(declaration);
+        // Unknown keys are reported, not rejected: a newer schema must not brick an older loader.
+        assertEquals(java.util.Map.of("futureKey", "\"x\""), declaration.unknownKeys());
+    }
+
+    @Test
+    void jarSectionRequiresSchemaVersionAndLicense() {
+        // Declaring the section is opting into the current schema, so its mandatory fields are mandatory. A missing
+        // licence is the one thing a downstream consumer cannot guess or default.
+        assertThrows(LoaderException.class,
+                () -> parse("{\"jar\":{\"license\":\"MIT\"}}"));
+        assertThrows(LoaderException.class,
+                () -> parse("{\"jar\":{\"schemaVersion\":1}}"));
+        assertThrows(LoaderException.class,
+                () -> parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"  \"}}"));
     }
 }

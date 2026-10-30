@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 
+import net.minecraftforge.fml.common.discovery.JarDeclaration;
 import net.minecraftforge.fml.common.versioning.ArtifactVersion;
 import net.minecraftforge.fml.common.versioning.VersionParser;
 
@@ -34,6 +35,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.TypeAdapter;
@@ -45,6 +47,12 @@ import javax.annotation.Nullable;
 public class MetadataCollection
 {
     private ModMetadata[] modList;
+    /**
+     * The jar-level declaration, or {@code null} for files that predate it. Transient because it is read by hand:
+     * gson would happily fill it while ignoring the keys it does not know, which is the opposite of what the section
+     * needs - an unknown key has to be visible to the reader, not silently dropped.
+     */
+    private transient JarDeclaration jar;
     private final Map<String, ModMetadata> metadatas = Maps.newHashMap();
 
     public static MetadataCollection from(@Nullable InputStream inputStream, String sourceName)
@@ -76,10 +84,16 @@ public class MetadataCollection
                 // Object form: an optional "modList" array plus jar level data. The array may be absent, either
                 // because the file only describes the jar itself (library, provider, declarative mod) or because
                 // the file describes a jar that has no @Mod class at all.
-                collection = gson.fromJson(rootElement, MetadataCollection.class);
+                JsonObject root = rootElement.getAsJsonObject();
+                collection = gson.fromJson(root, MetadataCollection.class);
                 if (collection == null)
                 {
                     collection = new MetadataCollection();
+                }
+                JsonElement jarElement = root.get("jar");
+                if (jarElement != null && jarElement.isJsonObject())
+                {
+                    collection.jar = JarDeclaration.parse(jarElement.getAsJsonObject(), sourceName);
                 }
             }
             else
@@ -134,6 +148,15 @@ public class MetadataCollection
 
     public Set<String> getIds() {
         return metadatas.keySet();
+    }
+
+    /**
+     * @return the jar-level declaration this file carries, or {@code null} when it carries none
+     */
+    @Nullable
+    public JarDeclaration getJarDeclaration()
+    {
+        return jar;
     }
 
     public static class ArtifactVersionAdapter extends TypeAdapter<ArtifactVersion>
