@@ -20,6 +20,7 @@
 package net.minecraftforge.registries;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Queue;
@@ -85,7 +86,12 @@ class ObjectHolderRef
         try
         {
             field.setAccessible(true);
-            ReflectionHackery.stripFieldOfFinalModifier(field);
+            // Declaring the field non-final is the supported shape; this is the compatibility path for the thousands of
+            // mods that already declare @ObjectHolder fields as "public static final".
+            if (Modifier.isFinal(field.getModifiers()))
+            {
+                ReflectionHackery.stripFieldOfFinalModifier(field);
+            }
         }
         catch (ReflectiveOperationException e)
         {

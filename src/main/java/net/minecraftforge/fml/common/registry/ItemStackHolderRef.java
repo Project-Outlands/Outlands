@@ -54,7 +54,11 @@ class ItemStackHolderRef {
         try
         {
             f.setAccessible(true);
-            ReflectionHackery.stripFieldOfFinalModifier(f);
+            // Same compatibility path as @ObjectHolder: non-final is the shape to declare, final still works.
+            if (java.lang.reflect.Modifier.isFinal(f.getModifiers()))
+            {
+                ReflectionHackery.stripFieldOfFinalModifier(f);
+            }
         }
         catch (ReflectiveOperationException e)
         {

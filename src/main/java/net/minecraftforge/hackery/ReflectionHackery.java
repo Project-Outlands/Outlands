@@ -61,6 +61,14 @@ public final class ReflectionHackery {
         return null;
     }
 
+    /**
+     * Removes {@code final} so the field can be written reflectively.
+     *
+     * <p>Only call this when the field actually is final. Writing a non-final field needs no modifier surgery, and doing
+     * it anyway pokes at {@code Field.modifiers} - the most fragile part of this class - for nothing. Deciding at the
+     * call site also keeps the decision visible: {@code ObjectHolder}/{@code ItemStackHolder} targets should be declared
+     * non-final, and stripping is the compatibility path for the ones that are not.
+     */
     public static void stripFieldOfFinalModifier(Field field) throws IllegalAccessException {
         stripFieldOfModifier(field, Modifier.FINAL);
     }

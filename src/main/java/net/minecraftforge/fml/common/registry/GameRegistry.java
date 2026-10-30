@@ -272,8 +272,13 @@ public class GameRegistry
     }
 
     /**
-     * ObjectHolder can be used to automatically populate public static final fields with entries
-     * from the registry. These values can then be referred within mod code directly.
+     * ObjectHolder can be used to automatically populate public static fields with entries from the registry. These
+     * values can then be referred within mod code directly.
+     *
+     * <p>The fields should be {@code static} and <b>not</b> {@code final}. Declaring them final still works - the loader
+     * removes the modifier reflectively, which means writing to {@code Field.modifiers}, and that is the part of the
+     * reflection stack most likely to be restricted by a future JDK. New code should leave the modifier off; the support
+     * for final exists for the mods that already shipped it.
      */
     @Retention(RetentionPolicy.RUNTIME)
     @Target({ElementType.TYPE, ElementType.FIELD})
