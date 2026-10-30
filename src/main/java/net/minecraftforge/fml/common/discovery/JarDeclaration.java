@@ -47,7 +47,7 @@ public final class JarDeclaration {
     public static final int CURRENT_SCHEMA = 1;
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
-    private static final Set<String> KNOWN_KEYS = Set.of("schemaVersion", "license", "loadOrder");
+    private static final Set<String> KNOWN_KEYS = Set.of("schemaVersion", "license", "loadOrder", "providers");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -90,12 +90,15 @@ public final class JarDeclaration {
     private final int schemaVersion;
     private final String license;
     private final LoadOrder loadOrder;
+    private final Map<String, String> providers;
     private final Map<String, String> unknown;
 
-    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> unknown) {
+    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> providers,
+                           Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
+        this.providers = providers;
         this.unknown = unknown;
     }
 
@@ -144,7 +147,41 @@ public final class JarDeclaration {
                     + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
         }
 
-        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, unknown);
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, parseProviders(json.get("providers"), sourceName), unknown);
+    }
+
+    /**
+     * Reads the {@code providers} object: language name to the class that can construct mods written in it.
+     *
+     * <p>Malformed entries are rejected rather than skipped. A provider section exists so that a mod declaring
+     * {@code modLanguage: "scala"} can be built; dropping half of it silently would leave that mod failing with "no
+     * provider is registered" while the jar visibly declares one, which is the least debuggable outcome available.
+     */
+    private static Map<String, String> parseProviders(JsonElement element, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return Collections.emptyMap();
+        }
+        if (!element.isJsonObject()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"providers\" as something other than an object. Expected {\"<language>\": \"<adapter class>\"}.");
+        }
+        Map<String, String> providers = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+            String language = entry.getKey() == null ? "" : entry.getKey().trim();
+            if (language.isEmpty()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a provider under an empty language name. The key is the language mods will ask for.");
+            }
+            String className = asString(entry.getValue());
+            if (className == null || className.isBlank()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a provider for language \"" + language
+                        + "\" without a class name. The value must be the full name of an "
+                        + "ILanguageAdapter implementation.");
+            }
+            providers.put(language, className.trim());
+        }
+        return providers.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(providers);
     }
 
     private static String asString(JsonElement element) {
@@ -170,6 +207,14 @@ public final class JarDeclaration {
         return loadOrder;
     }
 
+    /**
+     * @return the language providers this jar declares, as language name to adapter class name, in declaration order;
+     *         never {@code null}, empty when nothing is declared
+     */
+    public Map<String, String> providers() {
+        return providers;
+    }
+
     /** @return keys this loader does not understand, with their JSON text, for a single warning */
     public Map<String, String> unknownKeys() {
         return Collections.unmodifiableMap(unknown);
@@ -184,6 +229,7 @@ public final class JarDeclaration {
     public String toString() {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
+                + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
                 + (unknown.isEmpty() ? "" : ", unknown=" + unknown.keySet()) + "]";
     }
 }
