@@ -26,7 +26,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -48,6 +47,7 @@ import org.apache.maven.artifact.versioning.ArtifactVersion;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import net.minecraft.launchwrapper.Launch;
+import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.common.ForgeVersion;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
@@ -59,7 +59,16 @@ public class LibraryManager
     private static final String LIBRARY_DIRECTORY_OVERRIDE = System.getProperty("forge.lib_folder", null);
     private static final List<String> skipContainedDeps = Arrays.asList(System.getProperty("fml.skipContainedDeps","").split(",")); //TODO: Is this used by anyone in the real world? TODO: Remove in 1.13.
     private static final FilenameFilter MOD_FILENAME_FILTER  = (dir, name) -> name.endsWith(".jar") || name.endsWith(".zip"); //TODO: Disable support for zip in 1.13
-    private static final Comparator<File> FILE_NAME_SORTER_INSENSITVE = Comparator.comparing(o -> o.getName().toLowerCase(Locale.ENGLISH));
+    /**
+     * Whether jars one directory deeper are collected too.
+     *
+     * <p>Read from the config on demand rather than captured in a static initialiser: this class is initialised during
+     * launch, and a static read would silently depend on whether the config happened to be parsed first.
+     */
+    private static boolean oneLevelScan()
+    {
+        return ForgeEarlyConfig.MOD_SCAN_DEPTH == ForgeEarlyConfig.ModScanDepth.ONE_LEVEL;
+    }
 
     public static final Attributes.Name MODSIDE = new Attributes.Name("ModSide");
     public static final Attributes.Name MODCONTAINSDEPS = new Attributes.Name("ContainedDeps");
@@ -521,22 +530,63 @@ public class LibraryManager
                 continue;
 
             FMLLog.log.info("Searching {} for mods", base.getAbsolutePath());
-            for (File f : base.listFiles(MOD_FILENAME_FILTER))
-            {
-                if (seen.add(f))
-                {
-                    FMLLog.log.debug("  Adding {} to the mod list", f.getName());
-                    list.add(f);
-                }
-            }
+            collectModFiles(base, seen, list);
         }
 
         ModList memory = ModList.cache.get("MEMORY");
         if (!ENABLE_AUTO_MOD_MOVEMENT && memory != null && memory.getRepository() != null)
             memory.getRepository().filterLegacy(list);
 
-        list.sort(FILE_NAME_SORTER_INSENSITVE);
+        list.sort(ModFileOrder.INSTANCE);
         return list;
+    }
+
+    /**
+     * Collects the jars directly inside {@code base} and, when {@code ONE_LEVEL} is configured, the ones one directory
+     * deeper so packs can group files by mod.
+     *
+     * <p>Depth is deliberately fixed at one level rather than arbitrary: the point is grouping, and a recursive walk
+     * would let a stray directory tree turn into an unbounded scan with no way to explain which jar was found where.
+     */
+    private static void collectModFiles(File base, Set<File> seen, List<File> target)
+    {
+        File[] direct = base.listFiles(MOD_FILENAME_FILTER);
+        if (direct != null)
+        {
+            for (File f : direct)
+            {
+                if (seen.add(f))
+                {
+                    FMLLog.log.debug("  Adding {} to the mod list", f.getName());
+                    target.add(f);
+                }
+            }
+        }
+        if (!oneLevelScan())
+        {
+            return;
+        }
+        File[] subdirectories = base.listFiles(File::isDirectory);
+        if (subdirectories == null)
+        {
+            return;
+        }
+        for (File directory : subdirectories)
+        {
+            File[] nested = directory.listFiles(MOD_FILENAME_FILTER);
+            if (nested == null)
+            {
+                continue;
+            }
+            for (File f : nested)
+            {
+                if (seen.add(f))
+                {
+                    FMLLog.log.debug("  Adding {} from {} to the mod list", f.getName(), directory.getName());
+                    target.add(f);
+                }
+            }
+        }
     }
 
     public static List<File> getCandidates() {

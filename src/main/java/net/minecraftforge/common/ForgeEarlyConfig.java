@@ -103,6 +103,24 @@ public class ForgeEarlyConfig {
     @Config.RequiresMcRestart
     public static boolean IGNORE_SCAN_CACHE = false;
 
+    /** How deeply the mods directory is searched for jars. */
+    public enum ModScanDepth {
+        /** Only jars directly in {@code mods/} and {@code mods/<mcversion>/}. The default, and the historical behaviour. */
+        FLAT,
+        /** Also jars one directory deeper, so packs can group files: {@code mods/thaumcraft/addons.jar}. */
+        ONE_LEVEL
+    }
+
+    @Config.Comment({
+        "How deeply to search the mods directory: FLAT or ONE_LEVEL.",
+        "FLAT (default) reads only mods/*.jar and mods/<mcversion>/*.jar.",
+        "ONE_LEVEL also reads mods/*/*.jar, so files can be grouped into folders about your own",
+        "mods subdirectories.",
+        "Directory names are labels only: they never affect load order or how a jar is treated."
+    })
+    @Config.RequiresMcRestart
+    public static ModScanDepth MOD_SCAN_DEPTH = ModScanDepth.FLAT;
+
     public static boolean CUSTOM_BUILT_IN_MOD_VERSION = false;
     public static String CONFIG_ANY_TIME_VERSION = "3.0";
     public static String MIXIN_BOOTER_VERSION = Tags.VERSION;
