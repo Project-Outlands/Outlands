@@ -1055,7 +1055,12 @@ public class Display {
                     Sys.checkSdl(SDLSurface.SDL_AddSurfaceAlternateImage(iconSet, surface));
                 }
             }
-            Sys.checkSdl(SDL_SetWindowIcon(sdlWindow, iconSet));
+            if (!SDL_SetWindowIcon(sdlWindow, iconSet)) {
+                FMLLog.log.debug(
+                    "Could not set a window icon with SDL video driver '{}' ({}), continuing without one",
+                    SDLVideo.SDL_GetCurrentVideoDriver(),
+                    SDLError.SDL_GetError());
+            }
             SDLSurface.SDL_DestroySurface(iconSet);
         });
     }
