@@ -20,7 +20,6 @@
 package net.minecraftforge.fml.relauncher.libraries;
 
 import java.io.*;
-import java.lang.reflect.Method;
 import java.net.URISyntaxException;
 import java.security.CodeSource;
 import java.util.ArrayList;
@@ -510,41 +509,8 @@ public class LibraryManager
         {
             return candidates;
         }
-        candidates = gatherLegacyCanidates(minecraftHome);
-        // Query if Bansoukou exists in these files... This way we can replace from the root before any other mod has been added
-        Method bansoukouMethod = null;
-        for (File candidate : candidates)
-        {
-            if (candidate.isDirectory())
-            {
-                continue;
-            }
-            try (JarFile jar = new JarFile(candidate))
-            {
-                Attributes attributes = jar.getManifest() == null ? null : jar.getManifest().getMainAttributes();
-                if (attributes == null)
-                {
-                    continue;
-                }
-                // Check for Bansoukou's existence
-                String bansoukou = attributes.getValue("Bansoukou");
-                if (bansoukou == null)
-                {
-                    continue;
-                }
-                Launch.classLoader.addURL(candidate.toURI().toURL());
-                Launch.classLoader.addTransformerExclusion(bansoukou);
-                Class<?> cleanBansoukou = Class.forName(bansoukou, true, Launch.classLoader);
-                bansoukouMethod = cleanBansoukou.getMethod("bansoukou", List.class);
-                break; // We found Bansoukou
-            }
-            catch (IOException ignore) { }
-            catch (ClassNotFoundException | NoSuchMethodException e)
-            {
-                throw new RuntimeException("Unable to instantiate linkage with Bansoukou", e);
-            }
-        }
-        Set<File> candidateSet = new HashSet<>(candidates);
+        List<File> gathered = gatherLegacyCanidates(minecraftHome);
+        Set<File> candidateSet = new HashSet<>(gathered);
         for (Artifact artifact : flattenLists(minecraftHome))
         {
             artifact = Repository.resolveAll(artifact);
@@ -552,20 +518,13 @@ public class LibraryManager
             {
                 File target = artifact.getFile();
                 if (candidateSet.add(target))
-                    candidates.add(target);
+                    gathered.add(target);
             }
         }
-        if (bansoukouMethod != null)
-        {
-            try
-            {
-                bansoukouMethod.invoke(null, candidates); // Modifies in-place
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException("Unable to invoke linkage with Bansoukou", e);
-            }
-        }
+        // Nothing may rewrite the candidate list any more. It used to be mutable in place for Bansoukou, which
+        // meant the set of files the loader considered was decided by whoever got to the list first, while the
+        // ordering that coremod loading depends on came from somewhere else entirely.
+        candidates = List.copyOf(gathered);
         return candidates;
     }
 

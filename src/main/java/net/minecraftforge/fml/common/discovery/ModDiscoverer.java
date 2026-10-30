@@ -90,6 +90,8 @@ public final class ModDiscoverer {
     private static final String FORCE_LOAD_AS_MOD = "ForceLoadAsMod";
     private static final String COREMOD_CONTAINS_FML_MOD = "FMLCorePluginContainsFMLMod";
     private static final String FML_CORE_PLUGIN = "FMLCorePlugin";
+    /** Manifest attribute of a mod that used to rewrite other jars' classes at load time. No longer honoured. */
+    private static final String BANSOUKOU = "Bansoukou";
 
     public static ModDiscoverer instance() {
         return INSTANCE;
@@ -324,6 +326,13 @@ public final class ModDiscoverer {
                 hasMixinManifestAttributes = attributes.getValue(MIXIN_CONFIGS) != null || attributes.getValue(MIXIN_CONNECTOR) != null;
                 mixinTweakerForceMod = "true".equalsIgnoreCase(attributes.getValue(FORCE_LOAD_AS_MOD)) && MIXIN_TWEAKER.equals(tweaker);
                 coreModContainsMod = attributes.getValue(COREMOD_CONTAINS_FML_MOD) != null;
+                if (attributes.getValue(BANSOUKOU) != null) {
+                    // The loader no longer honours this: distributing modified class files to overwrite the originals
+                    // is what mixins exist for, and it never worked without also bypassing signatures. Say so once
+                    // per jar instead of letting the jar silently do nothing.
+                    CleanroomLog.get().warn("{} declares the Bansoukou attribute, which this loader no longer supports; "
+                            + "the jar will load normally, but its class replacements will not be applied", file.getName());
+                }
                 if ("optifine.OptiFineForgeTweaker".equals(tweaker)) {
                     modIds.add("optifine");
                 } else if ("net.jan.moddirector.launchwrapper.ModDirectorTweaker".equals(tweaker)) {
