@@ -303,13 +303,14 @@ public final class ModDiscoverer {
             return;
         }
         if (!isArchive(absolute)) {
-            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, false, false, false, null, null);
+            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, DeclarationTypes.MOD, false, false, false, null, null);
             discoveredFiles.put(absolute, info);
             return;
         }
 
         Attributes attributes = null;
         Set<String> modIds = new LinkedHashSet<>();
+        String declarationType = DeclarationTypes.MOD;
         String modType = ManifestAttributes.FORGEMODTYPE;
         String coremod = null, tweaker = null;
         boolean hasMixinManifestAttributes = false, mixinTweakerForceMod = false, coreModContainsMod = false;
@@ -370,6 +371,15 @@ public final class ModDiscoverer {
                         if (!declaration.providers().isEmpty()) {
                             LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
                         }
+                        declarationType = declaration.type();
+                        if (!DeclarationTypes.isKnown(declarationType)) {
+                            // The jar is from something newer than this loader. Keeping it on the classpath is the only
+                            // safe response: it must not be silently treated as a mod, and refusing to start would make
+                            // one optional jar unremovable.
+                            CleanroomLog.get().warn("{} declares jar type \"{}\", which this loader does not know (known: {})."
+                                    + " It will be put on the classpath but no mod will be loaded from it.",
+                                    file.getName(), declarationType, DeclarationTypes.describe());
+                        }
                         CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
                     }
                 }
@@ -396,6 +406,12 @@ public final class ModDiscoverer {
             if (scan != null) {
                 scanRecords.put(absolute, scan);
             }
+            if (!DeclarationTypes.isScannedForContainer(declarationType) && !modIds.isEmpty()) {
+                // The jar contradicts itself: it says it is not a mod but carries mod ids. The declaration wins - it is
+                // the newer, more specific statement, and obeying the scan would load something the author excluded.
+                CleanroomLog.get().warn("{} declares jar type \"{}\" but looks like a mod ({}). The declaration wins:"
+                        + " no mod will be loaded from it.", file.getName(), declarationType, modIds);
+            }
             for (String modId : modIds) {
                 if (recordMod(modId, absolute)) {
                     return;
@@ -410,6 +426,7 @@ public final class ModDiscoverer {
                 attributes,
                 List.copyOf(modIds),
                 modType,
+                declarationType,
                 hasMixinManifestAttributes,
                 mixinTweakerForceMod,
                 coreModContainsMod,
@@ -512,6 +529,21 @@ public final class ModDiscoverer {
         CoreModManager.loadCoreModFromDiscoveredJar(classLoader, fmlCorePlugin, file);
     }
 
+    /**
+     * @return whether this source should be scanned for mod containers. Sources the early scan never saw are scanned:
+     *         "not classified yet" must not mean "not a mod".
+     */
+    private boolean isScannedForContainer(File source) {
+        DiscoveredMod discovered = discoveredFiles.get(source.getAbsoluteFile());
+        return discovered == null || DeclarationTypes.isScannedForContainer(discovered.declarationType());
+    }
+
+    /** @return what {@code source} declares itself to be, or {@link DeclarationTypes#MOD} when it declares nothing */
+    public String declarationTypeOf(File source) {
+        DiscoveredMod discovered = discoveredFiles.get(source.getAbsoluteFile());
+        return discovered == null ? DeclarationTypes.MOD : discovered.declarationType();
+    }
+
     private static void addContainedDepsToClasspath(LaunchClassLoader classLoader, Attributes attributes, File containedDepsDir) throws MalformedURLException {
         String containedDeps = attributes.getValue(LibraryManager.MODCONTAINSDEPS);
         if (containedDeps == null || containedDeps.isEmpty()) {
@@ -583,6 +615,14 @@ public final class ModDiscoverer {
     private List<ModContainer> exploreModCandidates(List<ModCandidate> modCandidates, List<File> nonModLibs) {
         List<ModContainer> modList = new ArrayList<>();
         for (ModCandidate candidate : modCandidates) {
+            if (!isScannedForContainer(candidate.getModContainer())) {
+                // Library by declaration, or a type this loader has no factory for. It stays on the classpath either
+                // way; what it must not do is contribute containers nobody asked for.
+                if (!candidate.isClasspath()) {
+                    nonModLibs.add(candidate.getModContainer());
+                }
+                continue;
+            }
             try {
                 List<ModContainer> mods = candidate.explore(asmDataTable);
                 if (mods.isEmpty() && !candidate.isClasspath()) {

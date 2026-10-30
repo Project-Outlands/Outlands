@@ -50,7 +50,7 @@ public final class JarDeclaration {
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
     private static final Set<String> KNOWN_KEYS =
-            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions");
+            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "type");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -93,15 +93,18 @@ public final class JarDeclaration {
     private final int schemaVersion;
     private final String license;
     private final LoadOrder loadOrder;
+    private final String type;
     private final Map<String, String> providers;
     private final Map<String, List<String>> providerVersions;
     private final Map<String, String> unknown;
 
-    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> providers,
-                           Map<String, List<String>> providerVersions, Map<String, String> unknown) {
+    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, String type,
+                           Map<String, String> providers, Map<String, List<String>> providerVersions,
+                           Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
+        this.type = type;
         this.providers = providers;
         this.providerVersions = providerVersions;
         this.unknown = unknown;
@@ -153,8 +156,33 @@ public final class JarDeclaration {
         }
 
         Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
-        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, providers,
-                parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, parseType(json.get("type"), sourceName),
+                providers, parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+    }
+
+    /**
+     * Reads the {@code type} key: what this jar is, as far as the loader's assembly is concerned.
+     *
+     * <p>Kept as a plain identifier here and interpreted during discovery, because "unknown type" is not a parse error -
+     * a jar from a newer loader has to remain readable, and the loader responds to an unknown type by keeping the jar on
+     * the classpath instead of refusing to start.
+     */
+    private static String parseType(JsonElement element, String sourceName) {
+        String text = asString(element);
+        if (text == null || text.isBlank()) {
+            return DeclarationTypes.MOD;
+        }
+        String type = text.trim().toUpperCase(java.util.Locale.ENGLISH);
+        // The id is matched against registered ones and printed in warnings, so an id with punctuation that cannot
+        // appear in a Java identifier is a typo rather than a future type.
+        for (int i = 0; i < type.length(); i++) {
+            char c = type.charAt(i);
+            if (!Character.isLetterOrDigit(c) && c != '_' && c != '-' && c != '.') {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares an unusable \"type\": \"" + text.trim() + "\". Use letters, digits, '_', '-' or '.'.");
+            }
+        }
+        return type;
     }
 
     /**
@@ -261,6 +289,11 @@ public final class JarDeclaration {
         return license;
     }
 
+    /** @return what this jar declares itself to be: {@link DeclarationTypes#MOD} when it declares nothing */
+    public String type() {
+        return type;
+    }
+
     /** @return where this jar wants to sit in coremod discovery order */
     public LoadOrder loadOrder() {
         return loadOrder;
@@ -295,6 +328,7 @@ public final class JarDeclaration {
     @Override
     public String toString() {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
+                + (DeclarationTypes.MOD.equals(type) ? "" : ", type=" + type)
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
                 + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
                 + (providerVersions.isEmpty() ? "" : ", providerVersions=" + providerVersions)

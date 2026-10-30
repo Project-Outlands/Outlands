@@ -14,6 +14,7 @@ import net.minecraftforge.fml.common.discovery.DiscoveredMod;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import top.outlands.foundation.boot.LoadingContext;
 
+import net.minecraftforge.fml.common.discovery.DeclarationTypes;
 import org.spongepowered.asm.util.Constants.ManifestAttributes;
 
 /**
@@ -94,7 +95,9 @@ final class ModSourceIndex {
         if (discovered == null) {
             return Kind.UNCLASSIFIED;
         }
-        if (!isMod(discovered)) {
+        // A jar that declares itself a library is not a mod whatever it carries; the loader will not build containers
+        // from it, so rewriting its classes as if it were one would be inconsistent with what actually gets loaded.
+        if (!DeclarationTypes.isScannedForContainer(discovered.declarationType()) || !isMod(discovered)) {
             return Kind.NON_MOD;
         }
         return ManifestAttributes.CLEANROOMMODTYPE.equals(discovered.modType())

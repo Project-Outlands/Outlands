@@ -82,6 +82,6 @@ public class ModSourceIndexTest {
     }
 
     private static DiscoveredMod mod(String modType, List<String> modIds, boolean mixinAttributes) {
-        return new DiscoveredMod(SOURCE, null, modIds, modType, mixinAttributes, false, false, null, null);
+        return new DiscoveredMod(SOURCE, null, modIds, modType, "MOD", mixinAttributes, false, false, null, null);
     }
 }
