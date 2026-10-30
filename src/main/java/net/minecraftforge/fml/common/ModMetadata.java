@@ -56,6 +56,22 @@ public class ModMetadata
     public String parent = "";
     public String[] screenshots;
 
+    /**
+     * The language the mod's entry class is written in, mirroring {@code @Mod#modLanguage()}. Declaring it in both
+     * places is fine as long as the values agree; disagreeing values are rejected rather than resolved.
+     */
+    public String modLanguage = "";
+    /**
+     * The full class name of an {@link ILanguageAdapter} to construct this mod with, mirroring
+     * {@code @Mod#modLanguageAdapter()}. Takes precedence over {@link #modLanguage} when set.
+     */
+    public String modLanguageAdapter = "";
+    /**
+     * A version constraint on the language runtime, for languages whose provider can state which versions it supports.
+     * Recorded but not enforced while nothing declares supported versions.
+     */
+    public String modLanguageVersion = "";
+
     // this field is not for use in the json
     public transient ModContainer parentMod;
     // this field is not for use in the json

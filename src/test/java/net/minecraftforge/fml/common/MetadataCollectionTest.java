@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -120,5 +121,28 @@ class MetadataCollectionTest {
                 () -> parse("{\"jar\":{\"schemaVersion\":1}}"));
         assertThrows(LoaderException.class,
                 () -> parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"  \"}}"));
+    }
+
+    @Test
+    void languageKeysAreReadFromAModEntry() {
+        // These three keys are per-mod, not jar level, so they must survive gson into ModMetadata: the merge with the
+        // annotation reads them from there, and a key that gson silently drops would look declared but be invisible.
+        var collection = parse("[{\"modid\":\"scaly\",\"modLanguage\":\"scala\","
+                + "\"modLanguageAdapter\":\"com.example.Adapter\",\"modLanguageVersion\":\"[2.13,2.14)\"}]");
+
+        ModMetadata metadata = collection.getMetadataForId("scaly", java.util.Collections.emptyMap());
+        assertEquals("scala", metadata.modLanguage);
+        assertEquals("com.example.Adapter", metadata.modLanguageAdapter);
+        assertEquals("[2.13,2.14)", metadata.modLanguageVersion);
+    }
+
+    @Test
+    void languageKeysAreNotTreatedAsJarLevelKeys() {
+        // warnOnJarLevelKeyInModEntry flags jar-level keys written in a mod entry. These belong in the entry, so they
+        // must stay out of that set - a warning telling authors to move them into the "jar" object is the opposite of
+        // what the schema says, and would send them to a place where they are not read either.
+        assertFalse(net.minecraftforge.fml.common.discovery.JarDeclaration.knownKeys().contains("modLanguage"));
+        assertFalse(net.minecraftforge.fml.common.discovery.JarDeclaration.knownKeys().contains("modLanguageAdapter"));
+        assertFalse(net.minecraftforge.fml.common.discovery.JarDeclaration.knownKeys().contains("modLanguageVersion"));
     }
 }

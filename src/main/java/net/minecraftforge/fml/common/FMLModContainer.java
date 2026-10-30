@@ -98,7 +98,14 @@ public class FMLModContainer implements ModContainer
     private boolean fingerprintNotPresent;
     private Set<String> sourceFingerprints;
     private Certificate certificate;
-    private final String modLanguage;
+    /**
+     * The merged language declaration of this mod, computed once.
+     *
+     * <p>Computed lazily because the two halves arrive at different times: the annotation is known in the constructor,
+     * the {@code mcmod.info} entry is not. The first call therefore happens from {@link #bindMetadata}, which is where a
+     * disagreement between the two is reported.
+     */
+    private ModLanguageDeclaration languageDeclaration;
     private ILanguageAdapter languageAdapter;
     private Disableable disableability;
     private final ListMultimap<Class<? extends FMLEvent>, Method> eventMethods;
@@ -116,19 +123,6 @@ public class FMLModContainer implements ModContainer
         this.descriptor = modDescriptor;
         this.eventMethods = ArrayListMultimap.create();
 
-        this.modLanguage = (String)modDescriptor.get("modLanguage");
-        String languageAdapterType = (String)modDescriptor.get("modLanguageAdapter");
-        if (Strings.isNullOrEmpty(languageAdapterType))
-        {
-            languageAdapter = LanguageAdapterRegistry.getAdapterFor(modLanguage);
-            FMLLog.log.trace("Using registered custom language adapter {} for {} (modid: {})", languageAdapterType, this.className, getModId());
-        }
-        else
-        {
-            // Delay loading of the adapter until the mod is on the classpath, in case the mod itself contains it.
-            this.languageAdapter = null;
-            FMLLog.log.trace("Using custom language adapter {} for {} (modid: {})", languageAdapterType, this.className, getModId());
-        }
         sanityCheckModId();
     }
 
@@ -162,13 +156,68 @@ public class FMLModContainer implements ModContainer
         }
     }
 
+    private ModLanguageDeclaration languageDeclaration()
+    {
+        if (languageDeclaration == null)
+        {
+            languageDeclaration = ModLanguageDeclaration.of(descriptor, modMetadata, getModId(), source.getName());
+        }
+        return languageDeclaration;
+    }
+
+    /**
+     * Resolves the declared language to an adapter, during discovery.
+     *
+     * <p>Deliberately not deferred to {@code constructMod}: an unknown language or two disagreeing declarations are
+     * errors in a jar's metadata, and metadata is read during discovery precisely so that such errors surface before
+     * {@code preInit} has run. The one thing that stays deferred is the adapter named by {@code modLanguageAdapter},
+     * which may live inside the mod's own jar and therefore cannot be loaded yet.
+     */
+    private void resolveLanguageAdapter()
+    {
+        ModLanguageDeclaration declaration = languageDeclaration();
+        if (declaration.adapterClass() != null)
+        {
+            FMLLog.log.trace("Mod {} declares its own language adapter {}; it will be loaded when the mod is constructed",
+                    getModId(), declaration.adapterClass());
+        }
+        else
+        {
+            languageAdapter = LanguageAdapterRegistry.getAdapterFor(declaration.language(), getModId(), source.getName());
+            FMLLog.log.trace("Using language adapter {} for mod {} (language: {})",
+                    languageAdapter.getClass().getName(), getModId(), declaration.language());
+        }
+        declaration.warnAboutUnenforcedVersion(getModId());
+    }
+
     private ILanguageAdapter getLanguageAdapter()
     {
         if (languageAdapter == null)
         {
+            ModLanguageDeclaration declaration = languageDeclaration();
+            if (declaration.adapterClass() == null)
+            {
+                // Only reachable when metadata was never bound, which does not happen for containers built by the
+                // discoverers; resolving here keeps such a container working instead of failing on a null adapter.
+                languageAdapter = LanguageAdapterRegistry.getAdapterFor(declaration.language(), getModId(), source.getName());
+                return languageAdapter;
+            }
+            String adapterClass = declaration.adapterClass();
             try
             {
-                languageAdapter = (ILanguageAdapter)Class.forName((String)descriptor.get("modLanguageAdapter"), true, Loader.instance().getModClassLoader()).getConstructor().newInstance();
+                Class<?> adapterType = Class.forName(adapterClass, true, Loader.instance().getModClassLoader());
+                // Checked here rather than left to the cast below: a class that does not implement the interface is a
+                // wrong declaration, and a ClassCastException at the first construction call says nothing useful.
+                if (!ILanguageAdapter.class.isAssignableFrom(adapterType))
+                {
+                    throw new LoaderException("The mod language adapter " + adapterClass + " of mod " + getModId()
+                            + " (" + source.getName() + ") does not implement " + ILanguageAdapter.class.getName() + ".");
+                }
+                languageAdapter = (ILanguageAdapter)adapterType.getConstructor().newInstance();
+            }
+            catch (LoaderException ex)
+            {
+                throw ex;
             }
             catch (Exception ex)
             {
@@ -208,7 +257,7 @@ public class FMLModContainer implements ModContainer
     @Override
     public String getModLanguage()
     {
-        return modLanguage;
+        return languageDeclaration().language();
     }
 
     @Override
@@ -309,6 +358,9 @@ public class FMLModContainer implements ModContainer
                 FMLLog.log.debug("Specified json URL for mod '{}' is invalid: {}", getModId(), jsonURL);
             }
         }
+
+        // Last: needs both halves of the declaration, and reports a disagreement between them.
+        resolveLanguageAdapter();
     }
 
     @Nullable
