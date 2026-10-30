@@ -409,12 +409,17 @@ public final class ModDiscoverer {
             if (!DeclarationTypes.isScannedForContainer(declarationType) && !modIds.isEmpty()) {
                 // The jar contradicts itself: it says it is not a mod but carries mod ids. The declaration wins - it is
                 // the newer, more specific statement, and obeying the scan would load something the author excluded.
+                // The ids are therefore not recorded either: reporting a mod as present while no container for it will
+                // ever exist is worse than reporting nothing.
                 CleanroomLog.get().warn("{} declares jar type \"{}\" but looks like a mod ({}). The declaration wins:"
                         + " no mod will be loaded from it.", file.getName(), declarationType, modIds);
             }
-            for (String modId : modIds) {
-                if (recordMod(modId, absolute)) {
-                    return;
+            else
+            {
+                for (String modId : modIds) {
+                    if (recordMod(modId, absolute)) {
+                        return;
+                    }
                 }
             }
         } catch (IOException e) {
@@ -434,7 +439,10 @@ public final class ModDiscoverer {
                 tweaker);
         discoveredFiles.put(absolute, info);
 
-        if (!hasForgeMods && ManifestAttributes.FORGEMODTYPE.equals(info.modType())) {
+        // Only jars that will actually be assembled as mods: a library sits in the same directory and carries the same
+        // default manifest type, but counting it would claim the instance contains Forge mods when it contains none.
+        if (!hasForgeMods && DeclarationTypes.isScannedForContainer(info.declarationType())
+                && ManifestAttributes.FORGEMODTYPE.equals(info.modType())) {
             hasForgeMods = true;
         }
     }
