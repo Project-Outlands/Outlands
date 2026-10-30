@@ -1,8 +1,11 @@
 package net.minecraftforge.fml.common;
 
+import java.util.List;
 import java.util.Map;
 
 import com.cleanroommc.loader.Registry;
+
+import net.minecraftforge.fml.common.discovery.JarDeclaration;
 
 import javax.annotation.Nullable;
 
@@ -69,12 +72,12 @@ public final class LanguageAdapterRegistry {
      * before any coremod exists, so the class would be loaded before the transformers meant for it) and accepting a
      * second claim to the same language. Both are handled here, the first by only recording the class name.
      *
-     * @param providers language name to the full name of an {@link ILanguageAdapter} implementation
-     * @param jarPath   the jar making the claim, for conflict reports
+     * @param declaration the jar section of the jar's {@code mcmod.info}
+     * @param jarPath     the jar making the claim, for conflict reports
      * @throws LoaderException if a language is already provided by a registered adapter or by another jar
      */
-    public static void declareProviders(Map<String, String> providers, String jarPath) {
-        for (Map.Entry<String, String> entry : providers.entrySet()) {
+    public static void declareProviders(JarDeclaration declaration, String jarPath) {
+        for (Map.Entry<String, String> entry : declaration.providers().entrySet()) {
             String language = entry.getKey();
             int slot = ADAPTERS.slotOf(language);
             if (slot != -1) {
@@ -84,8 +87,23 @@ public final class LanguageAdapterRegistry {
                         + "', but an adapter for it is already registered (" + ADAPTERS.get(slot).getClass().getName()
                         + "). Only one adapter can serve a language; remove the declaration from the jar.");
             }
-            DECLARED.declare(language, entry.getValue(), jarPath);
+            DECLARED.declare(language, entry.getValue(), jarPath,
+                    declaration.providerVersions().getOrDefault(language, List.of()));
         }
+    }
+
+    /**
+     * @return the language versions the declared provider for {@code language} can serve, or {@code null} when no jar
+     *         declares that language or the one that does does not say which versions it supports. Both cases mean the
+     *         same thing to a caller: there is nothing to compare a {@code modLanguageVersion} against.
+     */
+    @Nullable
+    public static List<String> declaredVersionsFor(String language) {
+        LanguageProviderDeclarations.Declaration declared = DECLARED.declarationFor(language);
+        if (declared == null || declared.versions().isEmpty()) {
+            return null;
+        }
+        return declared.versions();
     }
 
     /**

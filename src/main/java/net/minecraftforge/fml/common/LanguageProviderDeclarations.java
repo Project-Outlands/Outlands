@@ -2,6 +2,7 @@ package net.minecraftforge.fml.common;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nullable;
@@ -20,8 +21,8 @@ import javax.annotation.Nullable;
  */
 final class LanguageProviderDeclarations {
 
-    /** One jar's claim to provide a language. */
-    record Declaration(String language, String className, String jarPath) {
+    /** One jar's claim to provide a language, and which language versions that provider can serve. */
+    record Declaration(String language, String className, String jarPath, List<String> versions) {
     }
 
     private final Map<String, Declaration> declarations = new LinkedHashMap<>();
@@ -29,9 +30,10 @@ final class LanguageProviderDeclarations {
     /**
      * Records that {@code jarPath} provides {@code language}.
      *
+     * @param versions the language versions this provider can serve, empty when it does not say
      * @throws LoaderException if another jar already claimed the same language
      */
-    void declare(String language, String className, String jarPath) {
+    void declare(String language, String className, String jarPath, List<String> versions) {
         Declaration existing = declarations.get(language);
         if (existing != null) {
             // Two jars cannot both be the adapter for one language, and keeping whichever was scanned first would make
@@ -42,7 +44,7 @@ final class LanguageProviderDeclarations {
                     + "Only one jar can provide a language, so this has to be resolved before the game can start."
                     + " Remove the provider from one of them.");
         }
-        declarations.put(language, new Declaration(language, className, jarPath));
+        declarations.put(language, new Declaration(language, className, jarPath, List.copyOf(versions)));
     }
 
     /** @return the declaration for {@code language}, or {@code null} when no jar claims it */

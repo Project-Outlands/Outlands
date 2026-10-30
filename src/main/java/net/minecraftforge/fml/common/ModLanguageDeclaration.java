@@ -1,8 +1,14 @@
 package net.minecraftforge.fml.common;
 
+import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nullable;
+
+import net.minecraftforge.fml.common.versioning.ArtifactVersion;
+import net.minecraftforge.fml.common.versioning.DefaultArtifactVersion;
+import net.minecraftforge.fml.common.versioning.InvalidVersionSpecificationException;
+import net.minecraftforge.fml.common.versioning.VersionRange;
 
 /**
  * What a mod declares about the language its entry class is written in, after merging the two places that declaration
@@ -19,10 +25,10 @@ import javax.annotation.Nullable;
  * cannot know which of the two the author meant, it reports both and stops. A mod that only declares in one place, which
  * is every mod written before the metadata keys existed, never conflicts.
  *
- * <p>{@code modLanguageVersion} is recorded here but has nothing to compare against yet: provider version ranges
- * ({@code jar.providerVersions}) arrive with the provider declaration, and until then the field cannot be enforced. It
- * is still carried through so that a declaration written today keeps its meaning once enforcement exists - see
- * {@link #warnAboutUnenforcedVersion}.
+ * <p>{@code modLanguageVersion} is checked against the versions the provider declares
+ * ({@code jar.providerVersions}), which turns what used to be a {@code NoSuchMethodError} inside {@code preInit} into a
+ * discovery-time failure that names both sides. A provider that declares no versions keeps working - see
+ * {@link #checkVersion}.
  */
 public final class ModLanguageDeclaration {
 
@@ -132,18 +138,78 @@ public final class ModLanguageDeclaration {
     }
 
     /**
-     * Reports a declared {@code modLanguageVersion} as recorded-but-not-enforced.
+     * Reports a declared {@code modLanguageVersion} as recorded-but-uncheckable.
      *
-     * <p>The alternative is to drop the field on the floor, which is worse in both directions: an author would not learn
-     * that the constraint is inert, and a user hitting the version mismatch the field exists to prevent would have no
-     * hint that the declaration was even seen.
+     * <p>The alternative is to drop the constraint on the floor, which is worse in both directions: an author would not
+     * learn that it is inert, and a user hitting the runtime mismatch it exists to prevent would have no hint that the
+     * declaration was ever read.
      */
-    public void warnAboutUnenforcedVersion(String modId) {
+    public void warnUncheckableVersion(String modId) {
         if (version != null) {
-            FMLLog.log.warn("Mod {} (language {}) declares modLanguageVersion \"{}\", which is recorded but not enforced"
-                    + " yet: no provider declares the versions it supports, so there is nothing to compare against.",
-                    modId, language, version);
+            FMLLog.log.warn("Mod {} (language {}) declares modLanguageVersion \"{}\", but nothing states which versions that"
+                    + " language provider supports, so the constraint cannot be checked and is ignored.", modId, language, version);
         }
+    }
+
+    /**
+     * Checks the declared {@code modLanguageVersion} against the versions the provider says it supports.
+     *
+     * <p>This exists because the failure it catches shows up at the worst possible time otherwise: a mod compiled against
+     * Scala 2.13 running on a 2.11 provider does not fail at load, it fails inside {@code preInit} with
+     * {@code NoSuchMethodError} or {@code AbstractMethodError}, which points at the mod rather than at the mismatch.
+     *
+     * <p>Silence is not a failure: a provider that does not say which versions it serves keeps working, and the author of
+     * the mod gets a warning instead of a crash. Requiring the declaration would have invalidated every provider written
+     * before it existed, for a check that is a convenience rather than a correctness requirement.
+     *
+     * @param supported the versions the provider declares, or {@code null} when it declares none
+     * @throws LoaderException if the constraint is malformed, or no supported version satisfies it
+     */
+    public void checkVersion(String modId, String sourceName, @Nullable List<String> supported) {
+        if (version == null) {
+            return;
+        }
+        if (supported == null || supported.isEmpty()) {
+            warnUncheckableVersion(modId);
+            return;
+        }
+
+        VersionRange wanted;
+        try {
+            wanted = VersionRange.createFromVersionSpec(version);
+        } catch (InvalidVersionSpecificationException e) {
+            throw new LoaderException("Mod '" + modId + "' (" + sourceName + ") declares modLanguageVersion \"" + version
+                    + "\", which is not a version range. Use Maven range syntax, for example \"[2.13,2.14)\".", e);
+        }
+
+        if (wanted != null && satisfiesAny(wanted, supported)) {
+            return;
+        }
+        throw new LoaderException("Mod '" + modId + "' (" + sourceName + ") requires language " + language + " " + version
+                + ", but the provider supports " + supported + ".\n"
+                + "  Fix: install a provider jar that supports a version in that range, or change modLanguageVersion to one"
+                + " of the supported versions.");
+    }
+
+    /**
+     * @return whether any of {@code supported} falls inside {@code wanted}. One common version is enough: the provider's
+     *         list says which versions it can serve, not which one is installed, so the question is whether the two
+     *         descriptions overlap.
+     */
+    static boolean satisfiesAny(VersionRange wanted, List<String> supported) {
+        // A bare version ("2.13", no brackets) ends up as the range's recommended version with no restrictions, and
+        // VersionRange.containsVersion consults only the restrictions - so it answers "yes" to everything. Comparing
+        // against the recommended version is what makes "2.13" mean exactly 2.13 instead of nothing at all.
+        ArtifactVersion exact = wanted.getRecommendedVersion();
+        for (String candidate : supported) {
+            // Single-argument constructor on purpose: the (String, boolean) one means "unbounded", and an unbounded
+            // version compares equal to everything, which would make an exclusive upper bound reject every candidate.
+            DefaultArtifactVersion parsed = new DefaultArtifactVersion(candidate);
+            if (exact != null ? parsed.compareTo(exact) == 0 : wanted.containsVersion(parsed)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

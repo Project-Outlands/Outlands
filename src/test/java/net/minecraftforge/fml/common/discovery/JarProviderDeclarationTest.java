@@ -89,4 +89,50 @@ class JarProviderDeclarationTest {
         assertTrue(failure.getMessage().contains("test.jar"), failure.getMessage());
         assertTrue(failure.getMessage().contains("scala"), failure.getMessage());
     }
+
+    @Test
+    void providerVersionsAreParsedPerLanguage() {
+        JarDeclaration declaration = declaration(MANDATORY
+                + ",\"providers\":{\"scala\":\"com.example.Scala\",\"kotlin\":\"com.example.Kotlin\"}"
+                + ",\"providerVersions\":{\"scala\":[\"2.12\",\"2.13\"]}");
+
+        assertNotNull(declaration);
+        assertEquals(Map.of("scala", java.util.List.of("2.12", "2.13")), declaration.providerVersions());
+    }
+
+    @Test
+    void providerVersionsWithoutProvidersKeyIsNoDeclarations() {
+        assertTrue(declaration(MANDATORY).providerVersions().isEmpty());
+    }
+
+    @Test
+    void providerVersionsForALanguageTheJarDoesNotProvideIsRejected() {
+        // Such a list describes a provider that does not exist, so it would silently never be consulted.
+        LoaderException failure = assertThrows(LoaderException.class,
+                () -> declaration(MANDATORY + ",\"providerVersions\":{\"scala\":[\"2.13\"]}"));
+
+        assertTrue(failure.getMessage().contains("scala"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("no provider"), failure.getMessage());
+    }
+
+    @Test
+    void malformedProviderVersionsAreRejected() {
+        String providers = ",\"providers\":{\"scala\":\"com.example.Scala\"}";
+        assertThrows(LoaderException.class,
+                () -> declaration(MANDATORY + providers + ",\"providerVersions\":{\"scala\":\"2.13\"}"));
+        assertThrows(LoaderException.class,
+                () -> declaration(MANDATORY + providers + ",\"providerVersions\":{\"scala\":[]}"));
+        assertThrows(LoaderException.class,
+                () -> declaration(MANDATORY + providers + ",\"providerVersions\":{\"scala\":[\"  \"]}"));
+    }
+
+    @Test
+    void providerVersionsAreNotReportedAsUnknownKeys() {
+        JarDeclaration declaration = declaration(MANDATORY
+                + ",\"providers\":{\"scala\":\"com.example.Scala\"}"
+                + ",\"providerVersions\":{\"scala\":[\"2.13\"]}");
+
+        assertNotNull(declaration);
+        assertTrue(declaration.unknownKeys().isEmpty(), declaration.unknownKeys().toString());
+    }
 }

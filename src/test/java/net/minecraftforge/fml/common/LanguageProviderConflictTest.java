@@ -1,7 +1,5 @@
 package net.minecraftforge.fml.common;
 
-import java.util.Map;
-
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,7 +17,7 @@ class LanguageProviderConflictTest {
         // "java" is registered by the registry itself. Accepting a replacement would change how every plain mod in the
         // instance is constructed, decided by whichever jar happened to ship a provider.
         LoaderException failure = assertThrows(LoaderException.class,
-                () -> LanguageAdapterRegistry.declareProviders(Map.of("java", "com.example.CustomJava"), "/mods/x.jar"));
+                () -> LanguageAdapterRegistry.declareProviders(Declarations.providing("java", "com.example.CustomJava"), "/mods/x.jar"));
 
         String message = failure.getMessage();
         assertTrue(message.contains("/mods/x.jar"), message);

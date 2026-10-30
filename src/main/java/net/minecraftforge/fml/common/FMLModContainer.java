@@ -180,14 +180,18 @@ public class FMLModContainer implements ModContainer
         {
             FMLLog.log.trace("Mod {} declares its own language adapter {}; it will be loaded when the mod is constructed",
                     getModId(), declaration.adapterClass());
+            // Self-contained: the adapter is the mod's own, so no provider states which versions it serves and the
+            // constraint cannot be checked against anything.
+            declaration.checkVersion(getModId(), source.getName(), null);
         }
         else
         {
             languageAdapter = LanguageAdapterRegistry.getAdapterFor(declaration.language(), getModId(), source.getName());
             FMLLog.log.trace("Using language adapter {} for mod {} (language: {})",
                     languageAdapter.getClass().getName(), getModId(), declaration.language());
+            declaration.checkVersion(getModId(), source.getName(),
+                    LanguageAdapterRegistry.declaredVersionsFor(declaration.language()));
         }
-        declaration.warnAboutUnenforcedVersion(getModId());
     }
 
     private ILanguageAdapter getLanguageAdapter()

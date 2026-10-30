@@ -368,7 +368,7 @@ public final class ModDiscoverer {
                         // Collected here, instantiated only when a mod actually asks for the language: unlike the
                         // manifest keys read below, this is a claim about code that would run before any mod does.
                         if (!declaration.providers().isEmpty()) {
-                            LanguageAdapterRegistry.declareProviders(declaration.providers(), absolute.getPath());
+                            LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
                         }
                         CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
                     }

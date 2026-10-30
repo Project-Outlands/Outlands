@@ -1,9 +1,11 @@
 package net.minecraftforge.fml.common;
 
-import java.util.Map;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,7 +27,7 @@ class LanguageProviderResolutionTest {
 
     @Test
     void aDeclarationBecomesAnAdapterOnFirstUseAndIsThenShared() {
-        LanguageAdapterRegistry.declareProviders(Map.of("testscale", StubLanguageAdapter.class.getName()), "/mods/lib.jar");
+        LanguageAdapterRegistry.declareProviders(Declarations.providing("testscale", StubLanguageAdapter.class.getName()), "/mods/lib.jar");
         StubLanguageAdapter.instantiations = 0;
 
         ILanguageAdapter first = resolve("testscale");
@@ -42,7 +44,7 @@ class LanguageProviderResolutionTest {
     void aProviderThatDoesNotImplementTheInterfaceFailsBeforeAnyInstanceIsBuilt() {
         // The alternative is a ClassCastException at the first mod construction, which names neither the jar nor the
         // language that asked for it.
-        LanguageAdapterRegistry.declareProviders(Map.of("testnotadapter", String.class.getName()), "/mods/lib.jar");
+        LanguageAdapterRegistry.declareProviders(Declarations.providing("testnotadapter", String.class.getName()), "/mods/lib.jar");
 
         LoaderException failure = assertThrows(LoaderException.class, () -> resolve("testnotadapter"));
 
@@ -53,7 +55,7 @@ class LanguageProviderResolutionTest {
 
     @Test
     void aMissingProviderClassFailsAndNamesTheJar() {
-        LanguageAdapterRegistry.declareProviders(Map.of("testmissing", "com.example.NotThere"), "/mods/lib.jar");
+        LanguageAdapterRegistry.declareProviders(Declarations.providing("testmissing", "com.example.NotThere"), "/mods/lib.jar");
 
         LoaderException failure = assertThrows(LoaderException.class, () -> resolve("testmissing"));
 
@@ -65,12 +67,34 @@ class LanguageProviderResolutionTest {
     void anUndeclaredLanguageStillFailsAndListsWhatIsDeclared() {
         // The message has to distinguish "nothing provides this" from "something declared it and could not be used".
         // The declaration is made here rather than relied on from another test: the registry is static.
-        LanguageAdapterRegistry.declareProviders(Map.of("testlisted", StubLanguageAdapter.class.getName()), "/mods/lib.jar");
+        LanguageAdapterRegistry.declareProviders(Declarations.providing("testlisted", StubLanguageAdapter.class.getName()), "/mods/lib.jar");
 
         LoaderException failure = assertThrows(LoaderException.class, () -> resolve("testnothing"));
 
         assertTrue(failure.getMessage().contains("Known languages: java"), failure.getMessage());
         assertTrue(failure.getMessage().contains("Providers declared in this instance"), failure.getMessage());
         assertTrue(failure.getMessage().contains("testlisted"), failure.getMessage());
+    }
+
+    @Test
+    void declaredVersionsAreVisibleToTheModThatRequiresThem() {
+        // The two halves of the check live in different files of different jars; this is the join between them.
+        LanguageAdapterRegistry.declareProviders(Declarations.jar(
+                ",\"providers\":{\"testversioned\":\"" + StubLanguageAdapter.class.getName() + "\"}"
+                        + ",\"providerVersions\":{\"testversioned\":[\"2.12\",\"2.13\"]}"),
+                "/mods/versionedlib.jar");
+
+        assertEquals(List.of("2.12", "2.13"), LanguageAdapterRegistry.declaredVersionsFor("testversioned"));
+    }
+
+    @Test
+    void aProviderThatDeclaresNoVersionsReportsNothingToCompareAgainst() {
+        LanguageAdapterRegistry.declareProviders(Declarations.providing("testunversioned", StubLanguageAdapter.class.getName()),
+                "/mods/lib.jar");
+
+        // null rather than an empty list: "declares none" and "declares an empty list" mean the same thing to the
+        // caller, and an empty list would invite treating "no version is supported" as a fact.
+        assertNull(LanguageAdapterRegistry.declaredVersionsFor("testunversioned"));
+        assertNull(LanguageAdapterRegistry.declaredVersionsFor("testnotdeclaredatall"));
     }
 }

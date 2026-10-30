@@ -1,5 +1,7 @@
 package net.minecraftforge.fml.common;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,7 +27,7 @@ class LanguageProviderDeclarationsTest {
     @Test
     void aDeclarationIsJustRecorded() {
         LanguageProviderDeclarations declarations = new LanguageProviderDeclarations();
-        declarations.declare("scala", StubLanguageAdapter.class.getName(), JAR_A);
+        declarations.declare("scala", StubLanguageAdapter.class.getName(), JAR_A, List.of());
 
         // Nothing was loaded, so the class has to still be uninstantiated for this to mean anything.
         assertEquals(0, StubLanguageAdapter.instantiations, "declaring must not run the provider's code");
@@ -45,10 +47,10 @@ class LanguageProviderDeclarationsTest {
     @Test
     void twoJarsClaimingOneLanguageFailAndBothPathsAreReported() {
         LanguageProviderDeclarations declarations = new LanguageProviderDeclarations();
-        declarations.declare("scala", "com.example.One", JAR_A);
+        declarations.declare("scala", "com.example.One", JAR_A, List.of());
 
         LoaderException failure = assertThrows(LoaderException.class,
-                () -> declarations.declare("scala", "com.example.Two", JAR_B));
+                () -> declarations.declare("scala", "com.example.Two", JAR_B, List.of()));
 
         String message = failure.getMessage();
         assertTrue(message.contains("scala"), message);
@@ -61,8 +63,8 @@ class LanguageProviderDeclarationsTest {
     @Test
     void differentLanguagesDoNotCollide() {
         LanguageProviderDeclarations declarations = new LanguageProviderDeclarations();
-        declarations.declare("scala", "com.example.Scala", JAR_A);
-        declarations.declare("kotlin", "com.example.Kotlin", JAR_B);
+        declarations.declare("scala", "com.example.Scala", JAR_A, List.of());
+        declarations.declare("kotlin", "com.example.Kotlin", JAR_B, List.of());
 
         assertNotNull(declarations.declarationFor("scala"));
         assertNotNull(declarations.declarationFor("kotlin"));
@@ -73,7 +75,7 @@ class LanguageProviderDeclarationsTest {
         LanguageProviderDeclarations declarations = new LanguageProviderDeclarations();
         assertEquals("    - (none)", declarations.describe());
 
-        declarations.declare("scala", "com.example.Scala", JAR_A);
+        declarations.declare("scala", "com.example.Scala", JAR_A, List.of());
         assertEquals("    - scala (from " + JAR_A + ")", declarations.describe());
     }
 }

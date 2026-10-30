@@ -18,9 +18,11 @@
 
 package net.minecraftforge.fml.common.discovery;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,7 +49,8 @@ public final class JarDeclaration {
     public static final int CURRENT_SCHEMA = 1;
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
-    private static final Set<String> KNOWN_KEYS = Set.of("schemaVersion", "license", "loadOrder", "providers");
+    private static final Set<String> KNOWN_KEYS =
+            Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -91,14 +94,16 @@ public final class JarDeclaration {
     private final String license;
     private final LoadOrder loadOrder;
     private final Map<String, String> providers;
+    private final Map<String, List<String>> providerVersions;
     private final Map<String, String> unknown;
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> providers,
-                           Map<String, String> unknown) {
+                           Map<String, List<String>> providerVersions, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
         this.providers = providers;
+        this.providerVersions = providerVersions;
         this.unknown = unknown;
     }
 
@@ -147,7 +152,9 @@ public final class JarDeclaration {
                     + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
         }
 
-        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, parseProviders(json.get("providers"), sourceName), unknown);
+        Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, providers,
+                parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
     }
 
     /**
@@ -184,6 +191,58 @@ public final class JarDeclaration {
         return providers.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(providers);
     }
 
+    /**
+     * Reads {@code providerVersions}: for each language this jar provides, the language versions that provider can serve.
+     *
+     * <p>This is the other half of {@code modLanguageVersion} on a mod entry. Without it the constraint has nothing to
+     * compare against, which is why a mod that declares one only gets a warning today.
+     *
+     * <p>Versions for a language the same jar does not provide are rejected rather than kept: they describe a provider
+     * that does not exist, so they would silently never be consulted.
+     */
+    private static Map<String, List<String>> parseProviderVersions(JsonElement element, Map<String, String> providers,
+                                                                   String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return Collections.emptyMap();
+        }
+        if (!element.isJsonObject()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"providerVersions\" as something other than an object. Expected {\"<language>\": [\"<version>\", ...]}.");
+        }
+        Map<String, List<String>> versions = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+            String language = entry.getKey() == null ? "" : entry.getKey().trim();
+            if (!providers.containsKey(language)) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares providerVersions for language \"" + language
+                        + "\", but this jar declares no provider for that language. Versions describe a provider, so both go together.");
+            }
+            JsonElement value = entry.getValue();
+            if (value == null || !value.isJsonArray()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares providerVersions for \"" + language + "\" as something other than an array of versions.");
+            }
+            List<String> supported = new ArrayList<>();
+            for (JsonElement version : value.getAsJsonArray()) {
+                String text = asString(version);
+                if (text == null || text.isBlank()) {
+                    throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                            + " declares a blank version for the \"" + language + "\" provider.");
+                }
+                supported.add(text.trim());
+            }
+            if (supported.isEmpty()) {
+                // An empty list is indistinguishable from "declares nothing" once read, so accepting it would make the
+                // jar look like it constrained something while having no effect.
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares an empty providerVersions list for \"" + language
+                        + "\". Remove the key instead, which means the same thing explicitly.");
+            }
+            versions.put(language, List.copyOf(supported));
+        }
+        return versions.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(versions);
+    }
+
     private static String asString(JsonElement element) {
         if (element == null || element.isJsonNull()) {
             return null;
@@ -215,6 +274,14 @@ public final class JarDeclaration {
         return providers;
     }
 
+    /**
+     * @return the language versions the providers of this jar can serve, as language name to versions, in declaration
+     *         order; never {@code null}, empty when nothing is declared
+     */
+    public Map<String, List<String>> providerVersions() {
+        return providerVersions;
+    }
+
     /** @return keys this loader does not understand, with their JSON text, for a single warning */
     public Map<String, String> unknownKeys() {
         return Collections.unmodifiableMap(unknown);
@@ -230,6 +297,7 @@ public final class JarDeclaration {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
                 + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
+                + (providerVersions.isEmpty() ? "" : ", providerVersions=" + providerVersions)
                 + (unknown.isEmpty() ? "" : ", unknown=" + unknown.keySet()) + "]";
     }
 }
