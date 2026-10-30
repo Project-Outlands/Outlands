@@ -77,6 +77,7 @@ public class MetadataCollection
                 for (JsonElement mod : jsonList)
                 {
                     collection.modList[i++]=gson.fromJson(mod, ModMetadata.class);
+                    warnOnJarLevelKeyInModEntry(mod, sourceName);
                 }
             }
             else if (rootElement != null && rootElement.isJsonObject())
@@ -95,6 +96,14 @@ public class MetadataCollection
                 {
                     collection.jar = JarDeclaration.parse(jarElement.getAsJsonObject(), sourceName);
                 }
+                JsonElement modListElement = root.get("modList");
+                if (modListElement != null && modListElement.isJsonArray())
+                {
+                    for (JsonElement mod : modListElement.getAsJsonArray())
+                    {
+                        warnOnJarLevelKeyInModEntry(mod, sourceName);
+                    }
+                }
             }
             else
             {
@@ -111,6 +120,26 @@ public class MetadataCollection
         {
             FMLLog.log.error("The mcmod.info file in {} cannot be parsed as valid JSON. It will be ignored", sourceName, e);
             return new MetadataCollection();
+        }
+    }
+
+    /**
+     * Reports jar-level keys written into a mod entry, where they are read by nobody. Silent would be worse: the entry
+     * parses fine, the jar loads fine, and the declaration simply has no effect.
+     */
+    private static void warnOnJarLevelKeyInModEntry(JsonElement mod, String sourceName)
+    {
+        if (mod == null || !mod.isJsonObject())
+        {
+            return;
+        }
+        for (String jarLevelKey : JarDeclaration.knownKeys())
+        {
+            if (mod.getAsJsonObject().has(jarLevelKey))
+            {
+                FMLLog.log.warn("The mcmod.info of {} declares \"{}\" inside a mod entry; it is a jar-level key and has no"
+                        + " effect there. Move it into the \"jar\" object.", sourceName, jarLevelKey);
+            }
         }
     }
 

@@ -69,6 +69,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.Attributes;
@@ -187,13 +188,23 @@ public final class ModDiscoverer {
 
         CleanroomLog.get().debug("Discovering coremods");
         File containedDepsDir = new File(new File(Launch.minecraftHome, "mods"), ForgeVersion.mcVersion);
-        for (DiscoveredMod discoveredMod : discoveredFiles.values()) {
+        for (DiscoveredMod discoveredMod : CoremodLoadOrder.sort(discoveredFiles.values(), this::loadOrderRank)) {
             if (discoveredMod.isDirectoryBased()) {
                 CleanroomLog.get().debug("Ignoring folder {} in coremod searching", discoveredMod.file().getAbsolutePath());
                 continue;
             }
             discoverCoreMod(classLoader, tweaker, discoveredMod, containedDepsDir);
         }
+    }
+
+    /** @return the declared coremod discovery position of {@code file}, {@code 0} when it declares none */
+    private int loadOrderRank(File file) {
+        MetadataCollection metadata = modMetadata.get(file.getAbsoluteFile());
+        if (metadata == null) {
+            return 0;
+        }
+        JarDeclaration declaration = metadata.getJarDeclaration();
+        return declaration == null ? 0 : declaration.loadOrder().rank();
     }
 
     public IdentifiedMods identifyMods(ModClassLoader modClassLoader, List<String> injectedContainers, List<ModContainer> builtInMods) {

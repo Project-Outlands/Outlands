@@ -47,15 +47,55 @@ public final class JarDeclaration {
     public static final int CURRENT_SCHEMA = 1;
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
-    private static final Set<String> KNOWN_KEYS = Set.of("schemaVersion", "license");
+    private static final Set<String> KNOWN_KEYS = Set.of("schemaVersion", "license", "loadOrder");
+
+    /**
+     * Where this jar wants to sit in the order jars are opened for coremod discovery.
+     *
+     * <p>Three positions, not a number: what existing packs express with a {@code !} or {@code 000_} filename prefix is
+     * "before everything", and a score would make "why is this third" unanswerable from the file listing alone. The
+     * order still falls back to the filename, so a jar that declares nothing keeps the position it has today.
+     */
+    public enum LoadOrder {
+        /** Ahead of jars that declare nothing. */
+        FIRST(-1),
+        /** The default: filename order. */
+        NORMAL(0),
+        /** Behind jars that declare nothing. */
+        LAST(1);
+
+        private final int rank;
+
+        LoadOrder(int rank) {
+            this.rank = rank;
+        }
+
+        public int rank() {
+            return rank;
+        }
+
+        static LoadOrder parse(String value) {
+            if (value == null || value.isBlank()) {
+                return NORMAL;
+            }
+            return switch (value.trim().toLowerCase(java.util.Locale.ENGLISH)) {
+                case "first" -> FIRST;
+                case "normal", "default" -> NORMAL;
+                case "last" -> LAST;
+                default -> null;
+            };
+        }
+    }
 
     private final int schemaVersion;
     private final String license;
+    private final LoadOrder loadOrder;
     private final Map<String, String> unknown;
 
-    private JarDeclaration(int schemaVersion, String license, Map<String, String> unknown) {
+    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
+        this.loadOrder = loadOrder;
         this.unknown = unknown;
     }
 
@@ -96,7 +136,15 @@ public final class JarDeclaration {
             unknown.put(entry.getKey(), entry.getValue().toString());
         }
 
-        return new JarDeclaration(schemaVersion, license.trim(), unknown);
+        String orderText = asString(json.get("loadOrder"));
+        LoadOrder loadOrder = LoadOrder.parse(orderText);
+        if (loadOrder == null) {
+            // Rejecting the whole jar over a typo would be disproportionate; falling back silently would hide it.
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
+        }
+
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, unknown);
     }
 
     private static String asString(JsonElement element) {
@@ -117,6 +165,11 @@ public final class JarDeclaration {
         return license;
     }
 
+    /** @return where this jar wants to sit in coremod discovery order */
+    public LoadOrder loadOrder() {
+        return loadOrder;
+    }
+
     /** @return keys this loader does not understand, with their JSON text, for a single warning */
     public Map<String, String> unknownKeys() {
         return Collections.unmodifiableMap(unknown);
@@ -130,6 +183,7 @@ public final class JarDeclaration {
     @Override
     public String toString() {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
+                + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
                 + (unknown.isEmpty() ? "" : ", unknown=" + unknown.keySet()) + "]";
     }
 }
