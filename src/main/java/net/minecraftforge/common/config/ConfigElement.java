@@ -384,7 +384,7 @@ public class ConfigElement implements IConfigElement
         if (annotation == null)
             throw new RuntimeException(String.format("The class '%s' has no @Config annotation!", configClass.getName()));
         
-        Configuration config = ConfigManager.getConfiguration(annotation.modid(), annotation.name());
+        Configuration config = ConfigManager.getConfiguration(annotation);
         if (config == null)
         {
             String error = String.format("The configuration '%s' of mod '%s' isn't loaded with the ConfigManager!", annotation.name(), annotation.modid());

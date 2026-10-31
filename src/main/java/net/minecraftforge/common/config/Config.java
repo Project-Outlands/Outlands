@@ -52,6 +52,18 @@ public @interface Config
     String category() default "general";
 
     /**
+     * The on-disk syntax of this configuration.
+     * <p>
+     * Defaults to {@link Format#CFG}, which is the historical format and remains byte-for-byte unchanged. Declaring
+     * another format changes the file extension the manager looks for (see {@link ConfigFileResolver}) and asks for a
+     * codec that can read and write it.
+     * <p>
+     * This only has a meaning on the root class of a configuration; nested classes inherit it and the value is not
+     * read from them.
+     */
+    Format format() default Format.CFG;
+
+    /**
      * The {@link Side} this configuration file is registered on.
      * <p>
      * Defaults to {@link Side#BOTH}, meaning the config is registered on both the client and the dedicated server.
@@ -60,6 +72,68 @@ public @interface Config
      * and nothing is shown in the config GUI.
      */
     Side side() default Side.BOTH;
+
+    /**
+     * The syntaxes a configuration file can be written in.
+     * <p>
+     * The extension is what identifies the format on disk, so it is part of the enum rather than a separate table.
+     * {@link #CFG} comes first because it is the default and therefore wins when several files of the same name exist.
+     */
+    enum Format
+    {
+        /** Forge's historical {@code name=value} format, including {@code <} and {@code >} category markers. */
+        CFG("cfg"),
+        TOML("toml"),
+        /** HOCON. {@code .conf} is the extension typesafe-config itself recommends. */
+        HOCON("conf"),
+        YAML("yml", "yaml"),
+        JSON("json");
+
+        private final String[] extensions;
+
+        Format(String... extensions)
+        {
+            this.extensions = extensions;
+        }
+
+        /**
+         * The extension written when this format creates a file. Ambiguous formats (YAML) list their preferred
+         * spelling first.
+         */
+        public String extension()
+        {
+            return extensions[0];
+        }
+
+        /** Every spelling this format is recognised by, preferred first. */
+        public String[] extensions()
+        {
+            return extensions.clone();
+        }
+
+        /** @return whether {@code extension} (without the dot, any case) is a spelling of this format */
+        public boolean matchesExtension(String extension)
+        {
+            for (String candidate : extensions)
+                if (candidate.equalsIgnoreCase(extension))
+                    return true;
+            return false;
+        }
+
+        /**
+         * @return the format spelled by {@code extension} (without the dot, any case), or {@code null} if the
+         *         extension names no known format
+         */
+        public static Format byExtension(String extension)
+        {
+            if (extension == null)
+                return null;
+            for (Format format : values())
+                if (format.matchesExtension(extension))
+                    return format;
+            return null;
+        }
+    }
 
     enum Type
     {

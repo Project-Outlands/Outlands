@@ -34,7 +34,6 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 
 import net.minecraftforge.fml.common.CleanroomEnvironment;
-import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.common.config.Config.Comment;
 import net.minecraftforge.common.config.Config.LangKey;
 import net.minecraftforge.common.config.Config.Name;
@@ -57,6 +56,8 @@ public class ConfigManager
     private static final Map<String, Configuration> CONFIGS = Maps.newHashMap();
     private static final Map<String, Set<Class<?>>> MOD_CONFIG_CLASSES = Maps.newHashMap();
     private static final Map<Class<?>, Configuration> CLASS_TO_CONFIG = Maps.newHashMap();
+    /** Absolute paths already mentioned in a startup log line, so a file is only explained once. */
+    private static final Set<String> WARNED_RESOLUTIONS = Sets.newHashSet();
 
     static
     {
@@ -190,16 +191,8 @@ public class ConfigManager
                 if (category == null)
                     category = "general";
 
-                File file = new File(configDir, name + ".cfg");
-
-                Configuration cfg = CONFIGS.get(file.getAbsolutePath());
-                if (cfg == null)
-                {
-                    cfg = new Configuration(file);
-                    cfg.load();
-                    CONFIGS.put(file.getAbsolutePath(), cfg);
-                }
-
+                Config.Format declared = config != null ? config.format() : null;
+                Configuration cfg = configuration(ConfigFileResolver.resolve(configDir, modid, name, declared));
                 sync(cfg, cls, modid, category, !Loader.instance().hasReachedState(LoaderState.AVAILABLE), null);
 
                 cfg.save();
@@ -226,12 +219,60 @@ public class ConfigManager
     // =======================================================
     //                    INTERNAL
     // =======================================================
-    static Configuration getConfiguration(String modid, String name) {
-        if (Strings.isNullOrEmpty(name))
-            name = modid;
-        File configDir = Loader.instance().getConfigDir();
-        File configFile = new File(configDir, name + ".cfg");
-        return CONFIGS.get(configFile.getAbsolutePath());
+    static Configuration getConfiguration(Config annotation) {
+        return configuration(ConfigFileResolver.resolve(Loader.instance().getConfigDir(), annotation));
+    }
+
+    /**
+     * Hands back the {@link Configuration} behind one resolved file, loading it the first time it is asked for.
+     *
+     * <p>This is the only place a {@link Configuration} is created for an {@code @Config} class, so it is also the only
+     * place that has to know which syntaxes can actually be read. Declaring a format nobody can parse yet has to fail
+     * here rather than quietly produce a CFG file under a {@code .toml} name, because that would look like it worked.
+     */
+    private static Configuration configuration(ConfigFileResolver.Target target)
+    {
+        if (target.format() != Config.Format.CFG)
+            throw new UnsupportedOperationException(String.format(
+                    "The config file %s is declared as %s, but no codec for that format exists yet: keep it as CFG for now",
+                    target.file().getName(), target.format()));
+
+        warnAboutResolution(target);
+
+        Configuration cfg = CONFIGS.get(target.file().getAbsolutePath());
+        if (cfg == null)
+        {
+            cfg = new Configuration(target.file());
+            cfg.load();
+            CONFIGS.put(target.file().getAbsolutePath(), cfg);
+        }
+        return cfg;
+    }
+
+    private static void warnAboutResolution(ConfigFileResolver.Target target)
+    {
+        if (!WARNED_RESOLUTIONS.add(target.file().getAbsolutePath()))
+            return;
+
+        switch (target.origin())
+        {
+            case EXISTING_FILE:
+                FMLLog.log.warn("Using {} for the config file {} because the @Config annotation names no format."
+                        + " Declare the format to make this independent of the files on disk.",
+                        target.format(), target.file().getName());
+                break;
+            case LEGACY_NAME:
+                FMLLog.log.warn("The config file {} is named with its extension, which dates from before formats existed."
+                        + " Drop the extension from @Config(name) to be able to change the format later.",
+                        target.file().getName());
+                break;
+            default:
+                return;
+        }
+
+        for (File ignored : target.ignored())
+            FMLLog.log.warn("Ignoring {} next to {}, which has the same name but another extension",
+                    ignored.getName(), target.file().getName());
     }
     
     private static Side currentSide()
@@ -432,15 +473,7 @@ public class ConfigManager
         String modId = config.modid();
         Set<Class<?>> modConfigClasses = MOD_CONFIG_CLASSES.computeIfAbsent(modId, k -> Sets.newHashSet());
         modConfigClasses.add(configClass);
-        File configDir = new File(Launch.minecraftHome, "config");
-        String name = config.name();
-        File configFile = new File(configDir, (Strings.isNullOrEmpty(name) ? config.modid() : name) + ".cfg");
-        Configuration cfg = CONFIGS.get(configFile.getAbsolutePath());
-        if (cfg == null) {
-            cfg = new Configuration(configFile);
-            cfg.load();
-            CONFIGS.put(configFile.getAbsolutePath(), cfg);
-        }
+        Configuration cfg = configuration(ConfigFileResolver.resolve(Loader.instance().getConfigDir(), config));
         sync(cfg, configClass, modId, config.category(), true, null);
         cfg.save();
         
