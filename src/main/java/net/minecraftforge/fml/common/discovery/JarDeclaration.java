@@ -102,13 +102,47 @@ public final class JarDeclaration {
 
 
     /**
-     * One library bundled inside the jar.
+     * What a jar says a bundled entry is.
      *
-     * <p>{@code id} and {@code version} exist so that two jars can bundle different versions of the same library and the
-     * loader can say which one it is looking at. The legacy {@code ContainedDeps} manifest key carries neither - only a
-     * path - which is why the same runtime conflict used to be unavoidable there.
+     * <p>This is per entry rather than per jar because one jar routinely bundles both kinds at once: a prerequisite mod
+     * that has to be discovered, and a plain library that only needs to be on the classpath. The old {@code NonModDeps}
+     * manifest attribute was one flag for the whole jar, so such a jar could not say either thing correctly.
      */
-    public record ContainedDep(String id, String version, String path) {
+    public enum ContainedDepKind {
+        /** A mod in its own right: extracted into the mods directory and discovered like any other. The default. */
+        MOD,
+        /**
+         * A library: put on the classpath and not scanned for mods.
+         *
+         * <p>Deliberately unchecked - nothing looks inside a jar marked this way, so an entry that does contain a mod is
+         * the declaring author's mistake and is not second-guessed here.
+         */
+        LIB;
+
+        static ContainedDepKind parse(String value) {
+            if (value == null || value.isBlank()) {
+                return MOD;
+            }
+            return switch (value.trim().toUpperCase(java.util.Locale.ENGLISH)) {
+                case "MOD" -> MOD;
+                case "LIB", "LIBRARY" -> LIB;
+                default -> null;
+            };
+        }
+    }
+
+    /**
+     * One bundled jar inside this jar.
+     *
+     * <p>{@code id} and {@code version} exist so that two jars can bundle different versions of the same dependency and
+     * the loader can say which one it is looking at. The legacy {@code ContainedDeps} manifest key carries neither - only
+     * a path - which is why the same runtime conflict used to be unavoidable there.
+     */
+    public record ContainedDep(String id, String version, String path, ContainedDepKind kind) {
+
+        public ContainedDep(String id, String version, String path) {
+            this(id, version, path, ContainedDepKind.MOD);
+        }
     }
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, List<ContainedDep> containedDeps,
@@ -250,8 +284,15 @@ public final class JarDeclaration {
             id = id == null || id.isBlank() ? name : id.trim();
             String version = asString(object.get("version"));
             version = version == null || version.isBlank() ? "0" : version.trim();
+            String kindText = asString(object.get("kind"));
+            ContainedDepKind kind = ContainedDepKind.parse(kindText);
+            if (kind == null) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares an unknown"
+                        + " \"kind\" for the contained dependency \"" + path + "\": \"" + kindText.trim()
+                        + "\". Expected one of: MOD, LIB.");
+            }
 
-            deps.add(new ContainedDep(id, version, path));
+            deps.add(new ContainedDep(id, version, path, kind));
         }
         return deps.isEmpty() ? List.of() : List.copyOf(deps);
     }

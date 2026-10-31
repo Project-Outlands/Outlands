@@ -44,6 +44,41 @@ class ContainedDepsDeclarationTest {
         assertEquals("guava", deps.get(0).id());
         assertEquals("21.0", deps.get(0).version());
         assertEquals("META-INF/libraries/guava.jar", deps.get(0).path());
+        // An entry that says nothing about what it is describes a mod, which is what every bundled jar used to be.
+        assertEquals(JarDeclaration.ContainedDepKind.MOD, deps.get(0).kind());
+    }
+
+    @Test
+    void anEntryCanBeMarkedAsALibrary() {
+        // Per entry rather than per jar: one jar routinely bundles both a prerequisite mod and a plain library, and the old
+        // NonModDeps flag could only say "all of them" or "none of them".
+        List<JarDeclaration.ContainedDep> deps = declaration(",\"containedDeps\":["
+                + "{\"path\":\"libs/guide.jar\"},"
+                + "{\"path\":\"libs/asm.jar\",\"kind\":\"LIB\"}]")
+                .containedDeps();
+
+        assertEquals(JarDeclaration.ContainedDepKind.MOD, deps.get(0).kind());
+        assertEquals(JarDeclaration.ContainedDepKind.LIB, deps.get(1).kind());
+    }
+
+    @Test
+    void theKindIsCaseInsensitiveAndAcceptsTheLongSpelling() {
+        assertEquals(JarDeclaration.ContainedDepKind.LIB,
+                declaration(",\"containedDeps\":[{\"path\":\"libs/a.jar\",\"kind\":\"lib\"}]").containedDeps().get(0).kind());
+        assertEquals(JarDeclaration.ContainedDepKind.LIB,
+                declaration(",\"containedDeps\":[{\"path\":\"libs/a.jar\",\"kind\":\"Library\"}]").containedDeps().get(0).kind());
+    }
+
+    @Test
+    void anUnknownKindIsRejectedWithTheAcceptedValues() {
+        // Falling back to MOD would silently extract a library as if it were a mod and scan it; falling back to LIB would
+        // hide a prerequisite mod. Neither is a guess the loader should make.
+        LoaderException failure = assertThrows(LoaderException.class,
+                () -> declaration(",\"containedDeps\":[{\"path\":\"libs/a.jar\",\"kind\":\"PLUGIN\"}]"));
+
+        assertTrue(failure.getMessage().contains("PLUGIN"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("MOD"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("LIB"), failure.getMessage());
     }
 
     @Test

@@ -431,7 +431,6 @@ public final class ModDiscoverer {
         JarFile jar = null;
         Attributes attributes;
         String fmlCorePlugin;
-        boolean containNonMods;
         try {
             attributes = discoveredMod.attributes();
             if (attributes == null) {
@@ -451,11 +450,11 @@ public final class ModDiscoverer {
                 ModAccessTransformer.addJar(jar, accessTransformers);
             }
 
-            containNonMods = Boolean.parseBoolean(attributes.getValue("NonModDeps"));
             if (discoveredMod.tweaker() != null) {
-                if (containNonMods) {
-                    addContainedDepsToClasspath(classLoader, attributes, containedDepsDir);
-                }
+                // Bundled libraries are put on the classpath before the tweaker runs, which is the same moment the old
+                // NonModDeps attribute asked for. What changed is where the fact comes from: the jar's own declaration
+                // says which of its bundled entries are libraries, instead of a jar-wide flag saying they all are.
+                addDeclaredLibrariesToClasspath(classLoader, file, containedDepsDir);
                 CleanroomLog.get().info("Cascading tweaker {} from {}", discoveredMod.tweaker(), file.getName());
                 Integer sortOrder = Ints.tryParse(Strings.nullToEmpty(attributes.getValue("TweakOrder")));
                 CoreModManager.injectDiscoveredCascadingTweaker(file, discoveredMod.tweaker(), classLoader, tweaker, sortOrder == null ? 0 : sortOrder);
@@ -494,9 +493,7 @@ public final class ModDiscoverer {
         }
 
         try {
-            if (containNonMods) {
-                addContainedDepsToClasspath(classLoader, attributes, containedDepsDir);
-            }
+            addDeclaredLibrariesToClasspath(classLoader, file, containedDepsDir);
 
             classLoader.addURL(file.toURI().toURL());
 
@@ -538,13 +535,29 @@ public final class ModDiscoverer {
         }
     }
 
-    private static void addContainedDepsToClasspath(LaunchClassLoader classLoader, Attributes attributes, File containedDepsDir) throws MalformedURLException {
-        String containedDeps = attributes.getValue(LibraryManager.MODCONTAINSDEPS);
-        if (containedDeps == null || containedDeps.isEmpty()) {
-            return;
-        }
-        for (String file : containedDeps.split(" ")) {
-            classLoader.addURL(new File(containedDepsDir, file).getAbsoluteFile().toURI().toURL());
+    /**
+     * Puts the bundled entries a jar marked as libraries on the classpath, before its tweaker or coremod runs.
+     *
+     * <p>This is the job the {@code NonModDeps} manifest attribute used to do, at the same moment and for the same
+     * reason: a coremod that ships a library it needs during {@code injectIntoClassLoader} cannot wait for the general
+     * classpath injection, which happens long after coremods are loaded.
+     *
+     * <p>The difference is the granularity. {@code NonModDeps} was one flag for the whole jar, so a jar bundling a
+     * prerequisite mod and a library had to choose; the declaration names each entry. Entries not marked as libraries are
+     * left alone - they are extracted into the mods directory and discovered like any other mod.
+     */
+    private static void addDeclaredLibrariesToClasspath(LaunchClassLoader classLoader, File source, File containedDepsDir)
+            throws MalformedURLException {
+        for (JarDeclaration.ContainedDep dep : LibraryManager.declaredLibrariesOf(source)) {
+            File extracted = LibraryManager.bundledLibraryNamed(new File(dep.path()).getName());
+            if (extracted == null) {
+                // Said out loud rather than skipped: the jar promised the dependency and the coremod is about to run
+                // without it, which is the failure mode this early injection exists to prevent.
+                CleanroomLog.get().warn("{} declares the bundled library {}, but it was not extracted",
+                        source.getName(), dep.path());
+                continue;
+            }
+            classLoader.addURL(extracted.getAbsoluteFile().toURI().toURL());
         }
     }
 
