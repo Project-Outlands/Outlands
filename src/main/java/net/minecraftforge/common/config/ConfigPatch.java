@@ -1,6 +1,7 @@
 package net.minecraftforge.common.config;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
@@ -19,6 +20,11 @@ import net.minecraftforge.fml.common.FMLLog;
  * <p>A key absent from the patch keeps whatever {@code config/} says. That is the whole reason this layer needs no
  * record of "what the value used to be": absence already means "not overridden".
  *
+ * <p>{@code @Config(name = "sub/quality")} puts the file at {@code config/sub/quality.cfg}, and the patch mirrors that
+ * relative path: {@code custom_config/sub/quality.cfg}. Keying on the bare file name instead would make every
+ * {@code quality.cfg} in the tree share one patch file, and would also drop the patch <em>inside</em> {@code config/},
+ * where a pack update wipes it.
+ *
  * <p>The patch is applied when the annotation model creates or looks up the property it patches, not when the file is
  * read. A config file written by an older version of a mod does not contain the keys that were added since, so applying
  * the patch straight after {@code load()} would call every one of those keys unknown and drop the override.
@@ -31,15 +37,25 @@ public final class ConfigPatch {
     private ConfigPatch() {}
 
     /**
-     * @return the patch file that would patch {@code configFile}, whether or not it exists, or {@code null} when the
-     *         path has no parent to hang the directory off
+     * @param configDir the {@code config/} directory the config subsystem was told about
+     * @param configFile a config file, normally one inside {@code configDir}
+     * @return the patch file that would patch {@code configFile}, whether or not it exists, or {@code null} when there
+     *         can be no patch - a file outside {@code config/} is not part of a pack's tree, so nothing should patch it
      */
-    static File fileFor(File configFile) {
-        File configDir = configFile.getParentFile();
-        File root = configDir == null ? null : configDir.getParentFile();
-        if (root == null)
+    static File fileFor(File configDir, File configFile) {
+        if (configDir == null || configFile == null)
             return null;
-        return new File(new File(root, DIRECTORY_NAME), configFile.getName());
+
+        Path root = configDir.getAbsoluteFile().toPath().normalize();
+        Path file = configFile.getAbsoluteFile().toPath().normalize();
+        if (file.equals(root) || !file.startsWith(root))
+            return null;
+
+        Path instanceDir = root.getParent();
+        if (instanceDir == null)
+            return null;
+
+        return instanceDir.resolve(DIRECTORY_NAME).resolve(root.relativize(file)).toFile();
     }
 
     /**
@@ -47,8 +63,8 @@ public final class ConfigPatch {
      *
      * @return the layer, or {@code null} when there is no patch file
      */
-    static Layer load(File configFile) {
-        File patchFile = fileFor(configFile);
+    static Layer load(File configDir, File configFile) {
+        File patchFile = fileFor(configDir, configFile);
         if (patchFile == null || !patchFile.isFile())
             return null;
 

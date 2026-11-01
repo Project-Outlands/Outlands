@@ -296,7 +296,7 @@ public class ConfigManager
         {
             cfg = new Configuration(target.file(), target.format());
             cfg.load();
-            cfg.setPatchLayer(ConfigPatch.load(target.file()));
+            cfg.setPatchLayer(ConfigPatch.load(environment().configDir(), target.file()));
             CONFIGS.put(target.file().getAbsolutePath(), cfg);
         }
         return cfg;

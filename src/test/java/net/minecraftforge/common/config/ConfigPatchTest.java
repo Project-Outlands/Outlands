@@ -45,7 +45,7 @@ class ConfigPatchTest {
         File file = base(root);
         Configuration cfg = new Configuration(file);
         cfg.load();
-        cfg.setPatchLayer(ConfigPatch.load(file));
+        cfg.setPatchLayer(ConfigPatch.load(root.resolve("config").toFile(), file));
         return cfg;
     }
 
@@ -162,7 +162,7 @@ class ConfigPatchTest {
         writeCase(root, BASE_COUNT, null);
 
         File file = base(root);
-        assertNull(ConfigPatch.load(file), "no custom_config means no layer at all");
+        assertNull(ConfigPatch.load(root.resolve("config").toFile(), file), "no custom_config means no layer at all");
 
         Configuration cfg = load(root);
         assertEquals(5, cfg.getCategory("general").get("count").getInt());
@@ -170,7 +170,34 @@ class ConfigPatchTest {
 
     @Test
     void thePatchDirectoryIsASiblingOfConfig(@TempDir Path root) {
-        assertEquals(new File(root.toFile(), "custom_config/mymod.cfg"), ConfigPatch.fileFor(base(root)));
+        File configDir = root.resolve("config").toFile();
+        assertEquals(new File(root.toFile(), "custom_config/mymod.cfg"), ConfigPatch.fileFor(configDir, base(root)));
+    }
+
+    /**
+     * {@code @Config(name = "sub/name")} has always put the file in a subdirectory, because the resolver joins the name
+     * onto {@code config/} as a path. The patch has to follow that path rather than the bare file name, or every
+     * {@code quality.cfg} in the tree would share one patch file.
+     */
+    @Test
+    void aSubdirectoryConfigGetsItsOwnPatchInTheSameShape(@TempDir Path root) {
+        File configDir = root.resolve("config").toFile();
+        File quality = new File(configDir, "sodium/quality.cfg");
+        File shadows = new File(configDir, "shaders/quality.cfg");
+
+        assertEquals(new File(root.toFile(), "custom_config/sodium/quality.cfg"),
+                ConfigPatch.fileFor(configDir, quality));
+        assertEquals(new File(root.toFile(), "custom_config/shaders/quality.cfg"),
+                ConfigPatch.fileFor(configDir, shadows),
+                "same file name, different directory: they must not share a patch");
+    }
+
+    /** A file the resolver put outside {@code config/} is not part of a pack's tree, so nothing patches it. */
+    @Test
+    void aFileOutsideConfigHasNoPatch(@TempDir Path root) {
+        File configDir = root.resolve("config").toFile();
+        assertNull(ConfigPatch.fileFor(configDir, root.resolve("shared/mymod.cfg").toFile()));
+        assertNull(ConfigPatch.fileFor(configDir, new File(configDir, "../shared/mymod.cfg")));
     }
 
     @Test

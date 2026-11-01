@@ -20,7 +20,7 @@ import net.minecraftforge.fml.relauncher.Side;
  */
 public interface ConfigEnvironment {
 
-    /** The directory {@code config/} lives in. */
+    /** The {@code config/} directory itself - the parent of every instance-level config file. */
     File configDir();
 
     /** The class loader mod {@code @Config} classes are loaded with. */
