@@ -34,7 +34,7 @@ class NestedLibraryJarsTest {
     @AfterEach
     void release() {
         NestedLibraryJars.closeAll();
-        System.clearProperty("cleanroom.nestedJars");
+        System.clearProperty("outlands.nestedJars");
     }
 
     /** Builds {@code outer.jar} containing {@code inner.jar}, which itself contains {@code entries}. */
@@ -135,11 +135,11 @@ class NestedLibraryJarsTest {
     void extractModeTurnsMountingOff() {
         assertTrue(NestedLibraryJars.enabled(), "serving from inside the jar is the default");
 
-        System.setProperty("cleanroom.nestedJars", "extract");
+        System.setProperty("outlands.nestedJars", "extract");
         assertFalse(NestedLibraryJars.enabled());
         assertEquals("extract", NestedLibraryJars.mode());
 
-        System.setProperty("cleanroom.nestedJars", "zipfs");
+        System.setProperty("outlands.nestedJars", "zipfs");
         assertTrue(NestedLibraryJars.enabled());
     }
 

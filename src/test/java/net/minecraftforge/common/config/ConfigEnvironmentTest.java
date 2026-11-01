@@ -161,15 +161,15 @@ class ConfigEnvironmentTest {
     /** The escape hatch: a pack or a container pins the directory instead of relying on the home directory. */
     @Test
     void theUserConfigDirectoryCanBeOverridden() {
-        String previous = System.getProperty("cleanroom.userConfigDir");
+        String previous = System.getProperty("outlands.userConfigDir");
         try {
-            System.setProperty("cleanroom.userConfigDir", "/pinned/here");
+            System.setProperty("outlands.userConfigDir", "/pinned/here");
             assertEquals(new File("/pinned/here"), ConfigManager.findUserConfigDir());
         } finally {
             if (previous == null)
-                System.clearProperty("cleanroom.userConfigDir");
+                System.clearProperty("outlands.userConfigDir");
             else
-                System.setProperty("cleanroom.userConfigDir", previous);
+                System.setProperty("outlands.userConfigDir", previous);
         }
     }
 

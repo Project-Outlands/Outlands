@@ -178,19 +178,19 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
 
         this.configButton = this.addButton(new ModListIconButton(
                 contentLeft, 105, 10, 0, buttonWidth,
-                I18n.format("cleanroom.gui.config"),
+                I18n.format("outlands.gui.config"),
                 _ -> this.selectedModData.openConfigScreen(this.mc, this)));
         this.configButton.visible = false;
 
         this.websiteButton = this.addButton(new ModListIconButton(
                 contentLeft + buttonWidth + 5, 105, 20, 0, buttonWidth,
-                I18n.format("cleanroom.gui.website"),
+                I18n.format("outlands.gui.website"),
                 _ -> this.openLink(this.selectedModData.getHomepage())));
         this.websiteButton.visible = false;
 
         this.issueButton = this.addButton(new ModListIconButton(
                 contentLeft + buttonWidth + buttonWidth + 10, 105, 30, 0, buttonWidth,
-                I18n.format("cleanroom.gui.submit_bug"),
+                I18n.format("outlands.gui.submit_bug"),
                 _ -> this.openLink(this.selectedModData.getIssueTracker())));
         this.issueButton.visible = false;
 
@@ -212,10 +212,10 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             }
         }
 
-        // Init Cleanroom icon for the header
-        ModData cleanroomData = CACHED_MODS.get(ModListConstants.OWNER_MOD_ID);
-        if (cleanroomData != null) {
-            this.loadAndCacheIcon(cleanroomData);
+        // Init the loader icon for the header
+        ModData loaderData = CACHED_MODS.get(ModListConstants.OWNER_MOD_ID);
+        if (loaderData != null) {
+            this.loadAndCacheIcon(loaderData);
         }
     }
 
@@ -223,41 +223,41 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
         return DropdownMenu.builder(this)
                 .setMinItemSize(100, 16)
                 .setAlignment(DropdownMenu.Alignment.BELOW_RIGHT)
-                .addMenu(I18n.format("cleanroom.gui.filters"), DropdownMenu.builder(this)
+                .addMenu(I18n.format("outlands.gui.filters"), DropdownMenu.builder(this)
                         .setMinItemSize(60, 16)
                         .setAlignment(DropdownMenu.Alignment.END_TOP)
-                        .addCheckbox(I18n.format("cleanroom.gui.filters.configs_only"), OPTION_CONFIGS_ONLY, _ -> {
+                        .addCheckbox(I18n.format("outlands.gui.filters.configs_only"), OPTION_CONFIGS_ONLY, _ -> {
                             this.modList.filterAndUpdateList();
                             return false;
                         })
-                        .addCheckbox(I18n.format("cleanroom.gui.filters.updates_only"), OPTION_UPDATES_ONLY, _ -> {
+                        .addCheckbox(I18n.format("outlands.gui.filters.updates_only"), OPTION_UPDATES_ONLY, _ -> {
                             this.modList.filterAndUpdateList();
                             return false;
                         })
-                        .addCheckbox(I18n.format("cleanroom.gui.filters.favourites"), OPTION_FAVOURITES_ONLY, _ -> {
+                        .addCheckbox(I18n.format("outlands.gui.filters.favourites"), OPTION_FAVOURITES_ONLY, _ -> {
                             this.modList.filterAndUpdateList();
                             return false;
                         }))
-                .addMenu(I18n.format("cleanroom.gui.sort"), DropdownMenu.builder(this)
+                .addMenu(I18n.format("outlands.gui.sort"), DropdownMenu.builder(this)
                         .setMinItemSize(60, 16)
                         .setAlignment(DropdownMenu.Alignment.END_TOP)
-                        .addItem(I18n.format("cleanroom.gui.sort.alphabetically"), () -> {
+                        .addItem(I18n.format("outlands.gui.sort.alphabetically"), () -> {
                             optionSort = SORT_ALPHABETICALLY;
                             this.modList.filterAndUpdateList();
                         })
-                        .addItem(I18n.format("cleanroom.gui.sort.alphabetically_reverse"), () -> {
+                        .addItem(I18n.format("outlands.gui.sort.alphabetically_reverse"), () -> {
                             optionSort = SORT_ALPHABETICALLY_REVERSED;
                             this.modList.filterAndUpdateList();
                         })
-                        .addItem(I18n.format("cleanroom.gui.sort.favourites_first"), () -> {
+                        .addItem(I18n.format("outlands.gui.sort.favourites_first"), () -> {
                             optionSort = SORT_FAVOURITES_FIRST;
                             this.modList.filterAndUpdateList();
                         }))
-                .addCheckbox(I18n.format("cleanroom.gui.hide_libraries"), OPTION_HIDE_LIBRARIES, _ -> {
+                .addCheckbox(I18n.format("outlands.gui.hide_libraries"), OPTION_HIDE_LIBRARIES, _ -> {
                     this.modList.filterAndUpdateList();
                     return false;
                 })
-                .addCheckbox(I18n.format("cleanroom.gui.hide_child_mods"), OPTION_HIDE_CHILD_MODS, _ -> {
+                .addCheckbox(I18n.format("outlands.gui.hide_child_mods"), OPTION_HIDE_CHILD_MODS, _ -> {
                     this.modList.filterAndUpdateList();
                     return false;
                 }).build();
@@ -293,9 +293,9 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
 
         GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
 
-        // Cleanroom icon
-        ModData cleanroomData = CACHED_MODS.get(ModListConstants.OWNER_MOD_ID);
-        ImageInfo iconInfo = cleanroomData != null ? cleanroomData.icon : null;
+        // The loader icon
+        ModData loaderData = CACHED_MODS.get(ModListConstants.OWNER_MOD_ID);
+        ImageInfo iconInfo = loaderData != null ? loaderData.icon : null;
         if (iconInfo != null) {
             GlStateManager.enableBlend();
             GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE, GlStateManager.DestFactor.ZERO);
@@ -315,16 +315,16 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             GlStateManager.disableBlend();
 
             if (this.menu == null && RenderUtils.isMouseWithin(iconX, iconY, 10, 10, mouseX, mouseY)) {
-                this.setActiveTooltip(I18n.format("cleanroom.gui.advanced_search.info"));
+                this.setActiveTooltip(I18n.format("outlands.gui.advanced_search.info"));
             }
         }
 
         if (this.menu == null) {
             if (this.optionsButton.isMouseOver()) {
-                this.setActiveTooltip(I18n.format("cleanroom.gui.options"));
+                this.setActiveTooltip(I18n.format("outlands.gui.options"));
                 this.tooltipYOffset = 10;
             } else if (this.modFolderButton.isMouseOver()) {
-                this.setActiveTooltip(I18n.format("cleanroom.gui.open_mods_folder"));
+                this.setActiveTooltip(I18n.format("outlands.gui.open_mods_folder"));
             }
         } else {
             drawRect(0, 0, this.width, this.height, 0x50000000);
@@ -367,7 +367,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             String displayVersion = this.selectedModData.getVersion();
             String innerVersion = this.selectedModData.getInnerVersion();
             boolean useInnerAsMain = displayVersion.isBlank() && !innerVersion.isBlank();
-            String version = I18n.format(useInnerAsMain ? "cleanroom.gui.inner_version" : "cleanroom.gui.version", useInnerAsMain ? innerVersion : displayVersion);
+            String version = I18n.format(useInnerAsMain ? "outlands.gui.inner_version" : "outlands.gui.version", useInnerAsMain ? innerVersion : displayVersion);
             int versionWidth = this.fontRenderer.getStringWidth(version);
             if (RenderUtils.isMouseWithin(contentLeft + versionWidth + 5, 92, 8, 8, mouseX, mouseY)) {
                 IModData.CheckResult check = this.selectedModData.getCheckResult();
@@ -424,7 +424,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
         this.modList.drawScreen(mouseX, mouseY, partialTicks);
         this.searchTextField.drawTextBox();
 
-        String modsLabel = TextFormatting.BOLD + I18n.format("cleanroom.gui.mod_list");
+        String modsLabel = TextFormatting.BOLD + I18n.format("outlands.gui.mod_list");
         String countLabel = TextFormatting.GRAY + "(" + (totalMods + totalLibraries) + ")";
         String title = modsLabel + " " + countLabel;
         int titleWidth = this.fontRenderer.getStringWidth(title);
@@ -434,8 +434,8 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
         int countLabelWidth = this.fontRenderer.getStringWidth(countLabel);
         if (RenderUtils.isMouseWithin(titleLeft + titleWidth - countLabelWidth, 10, countLabelWidth, this.fontRenderer.FONT_HEIGHT, mouseX, mouseY)) {
             List<String> lines = List.of(
-                    I18n.format("cleanroom.gui.mod_count", totalMods),
-                    I18n.format("cleanroom.gui.library_count", totalLibraries)
+                    I18n.format("outlands.gui.mod_count", totalMods),
+                    I18n.format("outlands.gui.library_count", totalLibraries)
             );
             this.setActiveTooltip(lines);
             this.tooltipYOffset = 10;
@@ -483,7 +483,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
         public void drawScreen(int mouseX, int mouseY, float partialTicks) {
             super.drawScreen(mouseX, mouseY, partialTicks);
             if (this.children().isEmpty()) {
-                String text = TextFormatting.GRAY + I18n.format("cleanroom.gui.no_mods");
+                String text = TextFormatting.GRAY + I18n.format("outlands.gui.no_mods");
                 int left = this.left + this.width / 2;
                 int top = this.top + (this.bottom - this.top - ModListScreen.this.fontRenderer.FONT_HEIGHT) / 2;
                 ModListScreen.this.drawCenteredString(ModListScreen.this.fontRenderer, text, left, top, 0xFFFFFFFF);
@@ -639,8 +639,8 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
                 this.button.drawButton(ModListScreen.this.mc, mouseX, mouseY, partialTicks);
                 if (!inOptionsMenu && this.button.isMouseOver()) {
                     String label = !FAVOURITES.has(this.data.getModId()) ?
-                            I18n.format("cleanroom.gui.favourite") :
-                            I18n.format("cleanroom.gui.remove_favourite");
+                            I18n.format("outlands.gui.favourite") :
+                            I18n.format("outlands.gui.remove_favourite");
                     ModListScreen.this.setActiveTooltip(label);
                 }
             }
@@ -797,21 +797,21 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
                 DropdownMenu.Builder builder = DropdownMenu.builder(ModListScreen.this)
                         .setMinItemSize(0, 16)
                         .setAlignment(DropdownMenu.Alignment.BELOW_LEFT)
-                        .addItem(I18n.format("cleanroom.gui.show_dependencies"), () -> {
+                        .addItem(I18n.format("outlands.gui.show_dependencies"), () -> {
                             String filter = "@dependencies:" + this.data.getModId();
                             ModListScreen.this.searchTextField.setText(filter);
                         })
-                        .addItem(I18n.format("cleanroom.gui.show_dependents"), () -> {
+                        .addItem(I18n.format("outlands.gui.show_dependents"), () -> {
                             String filter = "@dependents:" + this.data.getModId();
                             ModListScreen.this.searchTextField.setText(filter);
                         });
                 if (this.data.getType() == IModData.Type.CHILD) {
-                    builder.addItem(I18n.format("cleanroom.gui.show_parent_mod"), () -> {
+                    builder.addItem(I18n.format("outlands.gui.show_parent_mod"), () -> {
                         String filter = "@parentmod:" + this.data.getModId();
                         ModListScreen.this.searchTextField.setText(filter);
                     });
                 } else if (!this.data.getChildMods().isEmpty()) {
-                    builder.addItem(I18n.format("cleanroom.gui.show_child_mods"), () -> {
+                    builder.addItem(I18n.format("outlands.gui.show_child_mods"), () -> {
                         String filter = "@childmods:" + this.data.getModId();
                         ModListScreen.this.searchTextField.setText(filter);
                     });
@@ -890,7 +890,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             GlStateManager.popMatrix();
 
             // Draw mod id
-            String modId = TextFormatting.DARK_GRAY + I18n.format("cleanroom.gui.mod_id", this.selectedModData.getModId());
+            String modId = TextFormatting.DARK_GRAY + I18n.format("outlands.gui.mod_id", this.selectedModData.getModId());
             int modIdWidth = this.fontRenderer.getStringWidth(modId);
             this.drawString(this.fontRenderer, modId, contentLeft + contentWidth - modIdWidth, 92, 0xFFFFFF);
 
@@ -898,14 +898,14 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             String displayVersion = this.selectedModData.getVersion();
             String innerVersion = this.selectedModData.getInnerVersion();
             boolean useInnerAsMain = displayVersion.isBlank() && !innerVersion.isBlank();
-            String drawKey = useInnerAsMain ? "cleanroom.gui.inner_version" : "cleanroom.gui.version";
+            String drawKey = useInnerAsMain ? "outlands.gui.inner_version" : "outlands.gui.version";
             String drawVersion = useInnerAsMain ? innerVersion : displayVersion;
             this.drawStringWithLabel(drawKey, drawVersion, contentLeft, 92, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
             int versionWidth = this.fontRenderer.getStringWidth(I18n.format(drawKey, drawVersion));
 
             // Draw inner version tool tip if the display version is different from it
             if (!useInnerAsMain && !displayVersion.equals(innerVersion) && !innerVersion.isBlank() && RenderUtils.isMouseWithin(contentLeft, 92, versionWidth, this.fontRenderer.FONT_HEIGHT, mouseX, mouseY)) {
-                this.setActiveTooltip(I18n.format("cleanroom.gui.inner_version", innerVersion));
+                this.setActiveTooltip(I18n.format("outlands.gui.inner_version", innerVersion));
             }
 
             // Draws an icon if there is an update for the mod
@@ -928,37 +928,37 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             // Draw child mods
             String childMods = this.selectedModData.getChildModNames();
             if (childMods != null && !childMods.isBlank()) {
-                this.drawStringWithLabel("cleanroom.gui.child_mods", childMods, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
+                this.drawStringWithLabel("outlands.gui.child_mods", childMods, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
                 labelOffset -= 15;
             }
 
             String parentMod = this.selectedModData.getParentModName();
             if (parentMod != null && !parentMod.isBlank()) {
-                this.drawStringWithLabel("cleanroom.gui.parent_mod", parentMod, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
+                this.drawStringWithLabel("outlands.gui.parent_mod", parentMod, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
                 labelOffset -= 15;
             }
 
             // Draw license
             String license = this.selectedModData.getLicense();
             if (license != null && !license.isBlank()) {
-                this.drawStringWithLabel("cleanroom.gui.licenses", license, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
+                this.drawStringWithLabel("outlands.gui.licenses", license, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
                 labelOffset -= 15;
             }
 
             // Draw credits
             String credits = this.selectedModData.getCredits();
             if (credits != null && !credits.isBlank()) {
-                this.drawStringWithLabel("cleanroom.gui.credits", credits, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
+                this.drawStringWithLabel("outlands.gui.credits", credits, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
                 labelOffset -= 15;
             }
 
             // Draw authors
             String authors = this.selectedModData.getAuthors();
             if (authors != null && !authors.isBlank()) {
-                this.drawStringWithLabel("cleanroom.gui.authors", authors, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
+                this.drawStringWithLabel("outlands.gui.authors", authors, contentLeft, labelOffset, contentWidth, mouseX, mouseY, TextFormatting.GRAY, TextFormatting.WHITE);
             }
         } else {
-            String message = TextFormatting.GRAY + I18n.format("cleanroom.gui.no_selection");
+            String message = TextFormatting.GRAY + I18n.format("outlands.gui.no_selection");
             this.drawCenteredString(this.fontRenderer, message, contentLeft + contentWidth / 2, this.height / 2 - 5, 0xFFFFFF);
         }
     }
@@ -1248,7 +1248,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
     private void updateSearchFieldSuggestion() {
         String value = this.searchTextField.getText();
         if (value.isEmpty()) {
-            this.searchTextField.setSuggestion(I18n.format("cleanroom.gui.search") + "...");
+            this.searchTextField.setSuggestion(I18n.format("outlands.gui.search") + "...");
         } else if (value.startsWith("@")) {
             // Mark as special search
             int end = value.indexOf(":");
@@ -1317,7 +1317,7 @@ public class ModListScreen extends GuiScreen implements DropdownMenuHandler {
             try {
                 Path configDir = PlatformUtils.getConfigDirectory();
                 Files.createDirectories(configDir);
-                this.file = configDir.resolve("cleanroom_mod_list_favourites.txt");
+                this.file = configDir.resolve("outlands_mod_list_favourites.txt");
                 return true;
             } catch (IOException | SecurityException e) {
                 ModListConstants.LOG.warn("Failed to initialize mod list favourites file", e);

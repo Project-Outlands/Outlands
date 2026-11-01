@@ -16,7 +16,7 @@ public class LoaderContainer extends DummyModContainer {
     public LoaderContainer() {
         super(new ModMetadata());
         ModMetadata meta = this.getMetadata();
-        meta.modId = "cleanroom";
+        meta.modId = "outlands";
         meta.name = "Outlands";
         meta.description = """
                 Outlands is a 1.12.2 Forge fork, providing newer toolchain, new APIs and 99% compatibility.
@@ -28,9 +28,9 @@ public class LoaderContainer extends DummyModContainer {
         meta.url = "https://cleanroommc.com";
         meta.modProperties.put("issueTrackerUrl", "https://github.com/CleanroomMC/Cleanroom/issues");
         meta.updateJSON = "https://download.cleanroommc.com/api/forge";
-        meta.logoFile = "/assets/cleanroom/banner.png";
-        meta.modProperties.put("iconFile", "/assets/cleanroom/icon.png");
-        meta.modProperties.put("backgroundFile", "/assets/cleanroom/background.png");
+        meta.logoFile = "/assets/outlands/banner.png";
+        meta.modProperties.put("iconFile", "/assets/outlands/icon.png");
+        meta.modProperties.put("backgroundFile", "/assets/outlands/background.png");
     }
 
     @Override

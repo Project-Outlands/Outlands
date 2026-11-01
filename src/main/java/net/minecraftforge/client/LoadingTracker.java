@@ -100,7 +100,7 @@ public class LoadingTracker {
     private static long lastTaskbarUpdateNanos = 0L;
     private static boolean initialized = false;
 
-    private static final String TIMING_FILE_NAME = "cleanroom_load_timings.dat";
+    private static final String TIMING_FILE_NAME = "outlands_load_timings.dat";
 
     private static final Map<String, Phase> TITLE_TO_PHASE = new HashMap<>();
     static {

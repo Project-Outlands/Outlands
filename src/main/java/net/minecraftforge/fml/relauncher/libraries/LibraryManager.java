@@ -202,7 +202,7 @@ public class LibraryManager
         // Named once per launch so a bug report says which mode produced it.
         FMLLog.log.info("Bundled libraries are handled by {}", NestedLibraryJars.enabled()
                 ? "serving them from inside their parent jar (no extraction)"
-                : "extracting them next to the mods (-Dcleanroom.nestedJars=extract)");
+                : "extracting them next to the mods (-Doutlands.nestedJars=extract)");
 
         File mods = new File(minecraftHome, "mods");
         File mods_ver = new File(mods, ForgeVersion.mcVersion);

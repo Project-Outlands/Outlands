@@ -104,7 +104,7 @@ final class ModSourceIndex {
 
     /**
      * Whether the scan found anything that makes this source a mod: a mod id, mixin manifest attributes, a coremod
-     * or a tweaker. This is the primary criterion; {@code modType} only refines mods into Forge and Cleanroom ones.
+     * or a tweaker. This is the primary criterion; {@code modType} only refines mods into Forge and Outlands ones.
      */
     private static boolean isMod(DiscoveredMod discovered) {
         return !discovered.modIds().isEmpty()

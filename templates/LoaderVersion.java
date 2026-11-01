@@ -6,7 +6,7 @@ package net.minecraftforge.common;
 public class LoaderVersion {
     public static final String VERSION = "%VERSION%";
     public static final String BUILD_VERSION = "%BUILD_VERSION%";
-    public static final String MOD_ID = "cleanroom";
+    public static final String MOD_ID = "outlands";
 
     public static String getVersion() {
         return VERSION;

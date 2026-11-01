@@ -51,7 +51,7 @@
  
          if (keyCode == 1)
          {
-+            // Cleanroom: first esc only dismisses the suggestion dropdown and leaves chat open
++            // Outlands: first esc only dismisses the suggestion dropdown and leaves chat open
 +            if (this.suggestionList.isVisible())
 +            {
 +                this.suggestionList.hide();
@@ -76,7 +76,7 @@
          {
 +            if (this.suggestionList.isVisible())
 +            {
-+                // Cleanroom: list grows upward, so Up moves to the next (visually higher) suggestion
++                // Outlands: list grows upward, so Up moves to the next (visually higher) suggestion
 +                this.suggestionList.selectNext();
 +                return;
 +            }
@@ -96,7 +96,7 @@
          else
          {
              this.inputField.textboxKeyTyped(typedChar, keyCode);
-+            // Cleanroom: cursor-move keys change the cursor without firing the GuiResponder - refresh here
++            // Outlands: cursor-move keys change the cursor without firing the GuiResponder - refresh here
 +            this.suggestionUpdater.refresh();
          }
      }
@@ -132,7 +132,7 @@
          }
  
          this.inputField.mouseClicked(mouseX, mouseY, mouseButton);
-+        // Cleanroom: click repositions the cursor without firing the GuiResponder - refresh to follow it
++        // Outlands: click repositions the cursor without firing the GuiResponder - refresh to follow it
 +        this.suggestionUpdater.refresh();
          super.mouseClicked(mouseX, mouseY, mouseButton);
      }

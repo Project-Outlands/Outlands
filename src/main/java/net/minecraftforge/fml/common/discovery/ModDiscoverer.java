@@ -177,7 +177,7 @@ public final class ModDiscoverer {
             MixinBootstrap.getPlatform().addContainer(new ContainerHandleURI(mod.file().toURI()));
         }
         // TODO: evaluate if this is a good place for this
-        String devConfigs = System.getProperty("crl.dev.mixin");
+        String devConfigs = System.getProperty("outlands.dev.mixin");
         if (!Strings.isNullOrEmpty(devConfigs)) {
             for (String singleMixinConfig : devConfigs.split(",")) {
                 Mixins.addConfiguration(singleMixinConfig.trim());
@@ -248,7 +248,7 @@ public final class ModDiscoverer {
         mods.add(minecraft);
         // Minecraft Coder Pack
         mods.add(new InjectedModContainer(mcp, new File("minecraft.jar")));
-        // Cleanroom
+        // The loader itself
         mods.add(new InjectedModContainer(new LoaderContainer(), FMLSanityChecker.fmlLocation));
         mods.add(new InjectedModContainer(new CleanMixModContainer(), CleanMixModContainer.location()));
         // Included Mods
@@ -265,7 +265,7 @@ public final class ModDiscoverer {
                 continue;
             }
             if (CoreModManager.loadCoreModFromDiscoveredJar(Launch.classLoader, coremod, discovered.file())) {
-                FMLLog.log.warn("{} declares both a MixinTweaker TweakClass and FMLCorePlugin. Forge skips the coremod in this case and {} was loaded by Cleanroom.", discovered.file().getName(), coremod);
+                FMLLog.log.warn("{} declares both a MixinTweaker TweakClass and FMLCorePlugin. Forge skips the coremod in this case and {} was loaded by Outlands.", discovered.file().getName(), coremod);
             } else {
                 FMLLog.log.error("Failed to manually load coremod {} from {}.", coremod, discovered.file().getName());
             }
@@ -465,7 +465,7 @@ public final class ModDiscoverer {
 
             String modType = discoveredMod.modType();
             if (!ManifestAttributes.FORGEMODTYPE.equals(modType) && !ManifestAttributes.CLEANROOMMODTYPE.equals(modType)) {
-                FMLLog.log.warn("Adding {} to the list of things to skip. It is not an FML or Cleanroom mod, it is of type: {}", file.getName(), modType);
+                FMLLog.log.warn("Adding {} to the list of things to skip. It is not an FML or Outlands mod, it is of type: {}", file.getName(), modType);
                 CoreModManager.getIgnoredMods().add(file.getName());
                 return;
             }
@@ -585,14 +585,14 @@ public final class ModDiscoverer {
         }
 
         if (!derpMods.isEmpty()) {
-            FMLLog.log.error("Cleanroom detected files with .jar.zip as the extension. These are usually failed downloads or jars renamed as zips. Download them again as .jar files before continuing.");
+            FMLLog.log.error("Outlands detected files with .jar.zip as the extension. These are usually failed downloads or jars renamed as zips. Download them again as .jar files before continuing.");
             for (Path derpMod : derpMods) {
                 FMLLog.log.error("Problem file: {}", derpMod.getFileName());
             }
             throw new RuntimeException("Outlands detected files with .jar.zip as the extension! Check the logs for more information!");
         }
         if (!extractedPaths.isEmpty()) {
-            FMLLog.log.error("Cleanroom detected META-INF directories. These look like extracted mod jars and cannot be loaded correctly.");
+            FMLLog.log.error("Outlands detected META-INF directories. These look like extracted mod jars and cannot be loaded correctly.");
             FMLLog.log.error("Remove these extracted directories and add the jar directly into the mods directory.");
             for (Path extractedPath : extractedPaths) {
                 FMLLog.log.error("Directory {} contains META-INF entries.", extractedPath.getFileName());

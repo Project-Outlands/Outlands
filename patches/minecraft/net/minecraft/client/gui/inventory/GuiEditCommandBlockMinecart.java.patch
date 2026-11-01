@@ -13,7 +13,7 @@
                  return GuiEditCommandBlockMinecart.this.commandBlockLogic.getPosition();
              }
          };
-+        // Cleanroom: modern dropdown completion, in command-block mode (suggest with or without a leading "/")
++        // Outlands: modern dropdown completion, in command-block mode (suggest with or without a leading "/")
 +        this.suggestionList = new net.minecraftforge.client.chat.suggestion.SuggestionList(this.commandField, true);
 +        this.suggestionUpdater = new net.minecraftforge.client.chat.suggestion.SuggestionUpdater(this.suggestionList, this.tabCompleter, this.commandField, true);
 +        this.commandField.setGuiResponder(this.suggestionUpdater);
@@ -24,7 +24,7 @@
  
          if (keyCode == 15)
          {
-+            // Cleanroom: Tab applies the selected/first suggestion while the dropdown is open
++            // Outlands: Tab applies the selected/first suggestion while the dropdown is open
 +            if (this.suggestionList.isVisible())
 +            {
 +                String selected = this.suggestionList.getSelected();
@@ -43,7 +43,7 @@
              this.tabCompleter.resetDidComplete();
          }
  
-+        // Cleanroom: reroute navigation/confirm keys to the dropdown while it is visible
++        // Outlands: reroute navigation/confirm keys to the dropdown while it is visible
 +        if (keyCode == 1)
 +        {
 +            if (this.suggestionList.isVisible())
@@ -70,7 +70,7 @@
 +        {
 +            if (this.suggestionList.isVisible())
 +            {
-+                // Cleanroom: list grows upward, so Up moves to the next (visually higher) suggestion
++                // Outlands: list grows upward, so Up moves to the next (visually higher) suggestion
 +                this.suggestionList.selectNext();
 +                return;
 +            }
@@ -87,7 +87,7 @@
          this.commandField.textboxKeyTyped(typedChar, keyCode);
          this.previousEdit.textboxKeyTyped(typedChar, keyCode);
          this.doneButton.enabled = !this.commandField.getText().trim().isEmpty();
-+        // Cleanroom: cursor-move keys change the cursor without firing the GuiResponder - refresh here
++        // Outlands: cursor-move keys change the cursor without firing the GuiResponder - refresh here
 +        this.suggestionUpdater.refresh();
 +    }
  
@@ -102,7 +102,7 @@
 +    public void handleMouseInput() throws IOException
 +    {
 +        super.handleMouseInput();
-+        // Cleanroom: scroll the suggestion dropdown with the mouse wheel while hovering it
++        // Outlands: scroll the suggestion dropdown with the mouse wheel while hovering it
 +        if (this.suggestionList.isVisible())
 +        {
 +            int wheel = org.lwjgl.input.Mouse.getEventDWheel();
@@ -123,7 +123,7 @@
      {
 +        if (mouseButton == 0)
 +        {
-+            // Cleanroom: clicking a suggestion applies it
++            // Outlands: clicking a suggestion applies it
 +            String clicked = this.suggestionList.mouseClicked(mouseX, mouseY);
 +            if (clicked != null)
 +            {
@@ -135,7 +135,7 @@
          super.mouseClicked(mouseX, mouseY, mouseButton);
          this.commandField.mouseClicked(mouseX, mouseY, mouseButton);
          this.previousEdit.mouseClicked(mouseX, mouseY, mouseButton);
-+        // Cleanroom: click repositions the cursor without firing the GuiResponder - refresh to follow it
++        // Outlands: click repositions the cursor without firing the GuiResponder - refresh to follow it
 +        this.suggestionUpdater.refresh();
      }
  

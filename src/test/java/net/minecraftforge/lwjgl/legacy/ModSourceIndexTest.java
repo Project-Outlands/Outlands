@@ -25,7 +25,7 @@ public class ModSourceIndexTest {
     public void manifestModTypeAloneIsNotEnough() {
         // a jar scanned but without any mod marking: ModType defaults to FML, which must not make it a mod
         assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false)));
-        // nor does an explicit CRL make a non-mod into a Cleanroom mod: the scan decides what is a mod
+        // nor does an explicit CRL make a non-mod into an Outlands mod: the scan decides what is a mod
         assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("CRL", List.of(), false)));
     }
 
@@ -41,8 +41,8 @@ public class ModSourceIndexTest {
     }
 
     @Test
-    public void cleanroomModTypeWinsAmongMods() {
-        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("cleanroommod"), false)));
+    public void loaderModTypeWinsAmongMods() {
+        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("loadermod"), false)));
         assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of(), true)));
     }
 
@@ -52,7 +52,7 @@ public class ModSourceIndexTest {
     }
 
     @Test
-    public void onlyCleanroomModsAreLeftAlone() {
+    public void onlyLoaderModsAreLeftAlone() {
         // the filter may only skip what is known to be written against the LWJGL3 API; everything else, including
         // sources that are not mods at all, keeps its rewrites (Minecraft's own OpenAL binding needs them)
         assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false)));

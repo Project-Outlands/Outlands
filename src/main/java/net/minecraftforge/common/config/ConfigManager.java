@@ -273,13 +273,13 @@ public class ConfigManager
     /**
      * The platform's per-user directory for configuration, or {@code null} when it offers none.
      *
-     * <p>{@code -Dcleanroom.userConfigDir=...} wins over everything else. It is what lets a pack, a test or a server
+     * <p>{@code -Doutlands.userConfigDir=...} wins over everything else. It is what lets a pack, a test or a server
      * operator point the file somewhere writable without the mod author having to guess, and it is the only way to pin
      * this down in a build that runs on a container with no home directory.
      */
     static File findUserConfigDir()
     {
-        String override = System.getProperty("cleanroom.userConfigDir");
+        String override = System.getProperty("outlands.userConfigDir");
         if (override != null && !override.isEmpty())
             return new File(override);
 

@@ -21,7 +21,7 @@ import org.apache.logging.log4j.Logger;
  * The point is not speed: a mod declaring {@code ModType: CRL} is written against the LWJGL3 API, so rewriting it
  * means second-guessing code that is already up to date. Everything else stays rewritten - non-mod sources included:
  * the OpenAL binding Minecraft itself ships ({@code paulscode/sound/libraries}) carries LWJGL2 call sites and only
- * works because this transformer converts them. The mode is selected by {@code -Dcrl.lwjgl2.filter}:
+ * works because this transformer converts them. The mode is selected by {@code -Doutlands.lwjgl2.filter}:
  * <ul>
  *   <li>{@code off} (default) - no classification at all, behave exactly like before;</li>
  *   <li>{@code measure} - transform as before, and report where the filter would have changed the outcome;</li>
@@ -35,7 +35,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
 
     private static final Logger LOGGER = LogManager.getLogger("Outlands|lwjgl2compat");
 
-    private static final String MODE = System.getProperty("crl.lwjgl2.filter", "off");
+    private static final String MODE = System.getProperty("outlands.lwjgl2.filter", "off");
     private static final boolean MEASURE = "measure".equals(MODE);
     private static final boolean SKIP = "skip".equals(MODE);
     private static final boolean CLASSIFY = MEASURE || SKIP;
@@ -114,7 +114,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
             if (CLASSIFY) {
                 REWRITTEN.get(kind).increment();
                 if (kind == ModSourceIndex.Kind.LOADER_MOD) {
-                    // A Cleanroom mod class was rewritten: exactly the redundant work the filter exists to prevent.
+                    // An Outlands mod class was rewritten: exactly the redundant work the filter exists to prevent.
                     // Report it immediately, one line per source, so a short run leaves evidence instead of
                     // depending on a periodic summary.
                     DROPPED.get(kind).increment();

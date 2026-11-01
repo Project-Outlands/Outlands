@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public final class ModListConstants {
-    public static final String OWNER_MOD_ID = "cleanroom";
+    public static final String OWNER_MOD_ID = "outlands";
 
     // ERROR only for critical, unrecoverable failures
     // WARN for non-fatal issues or recoverable states

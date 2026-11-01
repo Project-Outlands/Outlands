@@ -142,7 +142,7 @@
                          if (s1.equals("key_" + keybinding.getKeyDescription()))
                          {
 -                            keybinding.setKeyCode(Integer.parseInt(s2));
-+                            if ("key.cleanroommc.forceIme".equals(keybinding.getKeyDescription()))
++                            if ("key.outlands.forceIme".equals(keybinding.getKeyDescription()))
 +                            {
 +                                keybinding.setKeyCombination(ImeForceKey.fromOptions(s2));
 +                            }
@@ -177,7 +177,7 @@
              for (KeyBinding keybinding : this.keyBindings)
              {
 -                printwriter.println("key_" + keybinding.getKeyDescription() + ":" + keybinding.getKeyCode());
-+                String serializedCombination = "key.cleanroommc.forceIme".equals(keybinding.getKeyDescription())
++                String serializedCombination = "key.outlands.forceIme".equals(keybinding.getKeyDescription())
 +                    ? ImeForceKey.toOptions(keybinding.getKeyCombination())
 +                    : keybinding.getKeyCombination().serialize();
 +                printwriter.println("key_" + keybinding.getKeyDescription() + ":" + serializedCombination);

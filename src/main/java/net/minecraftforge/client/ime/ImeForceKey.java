@@ -31,9 +31,9 @@ public final class ImeForceKey {
      * either side of it works and the controls screen names it the way the modifier itself is named.
      */
     public static final KeyBinding FORCE_IME = new KeyBinding(
-        "key.cleanroommc.forceIme",
+        "key.outlands.forceIme",
         KeyCombination.fromChord(Keyboard.KEY_SPACE, List.of(Keyboard.KEY_LCONTROL, Keyboard.KEY_SPACE)),
-        "key.categories.cleanroommc"
+        "key.categories.outlands"
     );
 
     static {

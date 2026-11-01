@@ -38,7 +38,7 @@ import javax.annotation.Nullable;
  *   <li><b>{@code CodeSource} of the form {@code file:}.</b> {@code getProtectionDomain().getCodeSource().getLocation()}
  *       returns this URL, so a library that turns its own location into a {@link File} will fail. That is the one
  *       behaviour worth knowing about, and it is why extraction is still reachable via
- *       {@code -Dcleanroom.nestedJars=extract}.</li>
+ *       {@code -Doutlands.nestedJars=extract}.</li>
  * </ul>
  *
  * <p>File systems are cached per jar and never closed: a {@link Path} keeps working after its file system is closed only
@@ -51,7 +51,7 @@ public final class NestedLibraryJars {
     public static final String PROTOCOL = "fmlnested";
 
     /** Set to {@code extract} to go back to writing bundled libraries next to the mods. */
-    private static final String MODE_PROPERTY = "cleanroom.nestedJars";
+    private static final String MODE_PROPERTY = "outlands.nestedJars";
 
     private static final Handler HANDLER = new Handler();
     /** Entry lookups, keyed by jar and declared path. Content cannot change under a running game. */

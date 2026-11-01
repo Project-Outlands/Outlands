@@ -46,7 +46,7 @@ public final class RecordFile {
     public static final int CACHE_REV = 1;
 
     private static final int MAGIC = 0x4353; // 'C''S'
-    private static final String CACHE_DIR = "mods/.cache/cleanroom-scan";
+    private static final String CACHE_DIR = "mods/.cache/outlands-scan";
     private static final String FILE_SUFFIX = ".bin";
     private static final String TEMP_SUFFIX = ".tmp";
     private static final String ERR_SUFFIX = ".errored";
