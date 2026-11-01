@@ -30,6 +30,7 @@ import java.util.jar.JarFile;
 
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.fml.common.FMLLog;
+import net.minecraftforge.fml.common.discovery.JarDeclaration;
 
 import com.google.common.collect.Maps;
 import com.google.common.io.ByteSource;
@@ -38,7 +39,7 @@ import org.jspecify.annotations.NonNull;
 
 public class ModAccessTransformer extends AccessTransformer
 {
-    public static final Attributes.Name FMLAT = new Attributes.Name("FMLAT");
+    public static final Attributes.Name FMLAT = JarDeclaration.MANIFEST_ACCESS_TRANSFORMERS;
     private static final Map<String, String> embedded = Maps.newHashMap(); //Needs to be primitive so that both classloaders get the same class.
     public ModAccessTransformer() throws Exception
     {

@@ -73,7 +73,7 @@ public class LibraryManager
         return ForgeEarlyConfig.MOD_SCAN_DEPTH == ForgeEarlyConfig.ModScanDepth.ONE_LEVEL;
     }
 
-    public static final Attributes.Name MODSIDE = new Attributes.Name("ModSide");
+    public static final Attributes.Name MODSIDE = JarDeclaration.MANIFEST_SIDE;
     public static final Attributes.Name MODCONTAINSDEPS = new Attributes.Name("ContainedDeps");
     private static final Attributes.Name MAVEN_ARTIFACT = new Attributes.Name("Maven-Artifact");
     private static final Attributes.Name TIMESTAMP = new Attributes.Name("Timestamp");
@@ -557,12 +557,11 @@ public class LibraryManager
         // A jar needs no manifest to bundle anything: the declaration in its mcmod.info is a complete statement on its
         // own, and it is the only one available to a jar that carries no manifest at all.
         Attributes attrs = jar.getManifest() == null ? null : jar.getManifest().getMainAttributes();
+        JarDeclaration declaration = declaredContainedDeps(jar);
 
-        String modSide = attrs == null ? null : attrs.getValue(LibraryManager.MODSIDE);
-        if (modSide != null && !"BOTH".equals(modSide) && !FMLLaunchHandler.side().name().equals(modSide))
+        if (JarDeclaration.sideOf(attrs, declaration).excludes(FMLLaunchHandler.side().name()))
             return null;
 
-        JarDeclaration declaration = declaredContainedDeps(jar);
         List<String> bundled = containedDepPaths(attrs, declaration, jar.getName());
         if (!bundled.isEmpty() && deferringBundledDeps)
         {

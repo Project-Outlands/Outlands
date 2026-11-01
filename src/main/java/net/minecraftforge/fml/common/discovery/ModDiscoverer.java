@@ -422,6 +422,12 @@ public final class ModDiscoverer {
         }
     }
 
+    /** @return the jar section of {@code file}, or {@code null} when it declares none or was never parsed */
+    private JarDeclaration declaredOf(File file) {
+        MetadataCollection metadata = modMetadata.get(file.getAbsoluteFile());
+        return metadata == null ? null : metadata.getJarDeclaration();
+    }
+
     private void discoverCoreMod(LaunchClassLoader classLoader, FMLTweaker tweaker, DiscoveredMod discoveredMod, File containedDepsDir) {
         File file = discoveredMod.file();
         FMLLog.log.debug("Examining for coremod candidacy {}", file.getName());
@@ -430,21 +436,25 @@ public final class ModDiscoverer {
         String fmlCorePlugin;
         try {
             attributes = discoveredMod.attributes();
-            if (attributes == null) {
-                return;
-            }
+            // A missing manifest does not end the pass: a jar may declare its side and its access transformers in
+            // mcmod.info alone, and every key read below is null-safe.
 
-            String modSide = attributes.getValue(LibraryManager.MODSIDE);
-            if (modSide != null && !"BOTH".equals(modSide) && !modSide.equals(FMLLaunchHandler.side().name())) {
+            // Both keys are read through the same resolvers, so a jar cannot be CLIENT for the coremod pass and SERVER
+            // for the bundled-deps pass: one answer, whichever of the two sources declared it.
+            JarDeclaration declaration = declaredOf(file);
+            JarDeclaration.Side modSide = JarDeclaration.sideOf(attributes, declaration);
+            if (modSide.excludes(FMLLaunchHandler.side().name())) {
                 FMLLog.log.debug("Skipping {}, as we're on {} side and the mod is on {} side", file.getName(), FMLLaunchHandler.side(), modSide);
                 CoreModManager.getIgnoredMods().add(file.getName());
                 return;
             }
 
-            String accessTransformers = attributes.getValue(ModAccessTransformer.FMLAT);
-            if (accessTransformers != null && !accessTransformers.isEmpty()) {
+            List<String> accessTransformers = JarDeclaration.accessTransformersOf(attributes, declaration);
+            if (!accessTransformers.isEmpty()) {
+                // addJar takes the space-separated form the manifest key had; joining keeps one implementation of "which
+                // files are this jar's access transformers" for both sources.
                 jar = new JarFile(file);
-                ModAccessTransformer.addJar(jar, accessTransformers);
+                ModAccessTransformer.addJar(jar, String.join(" ", accessTransformers));
             }
 
             if (discoveredMod.tweaker() != null) {
@@ -453,7 +463,7 @@ public final class ModDiscoverer {
                 // says which of its bundled entries are libraries, instead of a jar-wide flag saying they all are.
                 addDeclaredLibrariesToClasspath(classLoader, file, containedDepsDir);
                 FMLLog.log.info("Cascading tweaker {} from {}", discoveredMod.tweaker(), file.getName());
-                Integer sortOrder = Ints.tryParse(Strings.nullToEmpty(attributes.getValue("TweakOrder")));
+                Integer sortOrder = Ints.tryParse(Strings.nullToEmpty(attributes == null ? null : attributes.getValue("TweakOrder")));
                 CoreModManager.injectDiscoveredCascadingTweaker(file, discoveredMod.tweaker(), classLoader, tweaker, sortOrder == null ? 0 : sortOrder);
                 if (discoveredMod.mixinTweakerForceMod() || discoveredMod.coreModContainsMod()) {
                     CoreModManager.getReparseableCoremods().add(file.getName());

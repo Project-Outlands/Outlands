@@ -25,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.Attributes;
 
 import javax.annotation.Nullable;
 
@@ -61,7 +62,18 @@ public final class JarDeclaration {
      */
     private static final Set<String> KNOWN_KEYS =
             Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps",
-                    "entrypoints");
+                    "entrypoints", "side", "at");
+
+    /**
+     * Manifest attribute the {@code side} key replaces, still read for jars that declare no section.
+     *
+     * <p>Spelled here because this class defines what the section replaces; the manifest constants that used to own
+     * these names are now aliases of them.
+     */
+    public static final Attributes.Name MANIFEST_SIDE = new Attributes.Name("ModSide");
+
+    /** Manifest attribute the {@code at} key replaces: a space-separated list of the same paths. */
+    public static final Attributes.Name MANIFEST_ACCESS_TRANSFORMERS = new Attributes.Name("FMLAT");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -101,9 +113,41 @@ public final class JarDeclaration {
         }
     }
 
+    /**
+     * Which side a jar belongs to.
+     *
+     * <p>{@link #BOTH} is the default: load it wherever. The other two make the jar disappear on the opposite side
+     * completely - it is neither loaded as a coremod nor offered as a mod candidate - so a mod depending on it reports
+     * a missing dependency instead of loading against half of it.
+     */
+    public enum Side {
+        BOTH,
+        CLIENT,
+        SERVER;
+
+        static Side parse(String value) {
+            if (value == null || value.isBlank()) {
+                return BOTH;
+            }
+            return switch (value.trim().toUpperCase(java.util.Locale.ENGLISH)) {
+                case "BOTH", "ANY", "*" -> BOTH;
+                case "CLIENT" -> CLIENT;
+                case "SERVER" -> SERVER;
+                default -> null;
+            };
+        }
+
+        /** @return whether a jar for this side must not be loaded while running as {@code runningSide} */
+        public boolean excludes(String runningSide) {
+            return this != BOTH && !name().equals(runningSide);
+        }
+    }
+
     private final int schemaVersion;
     private final String license;
     private final LoadOrder loadOrder;
+    private final Side side;
+    private final List<String> accessTransformers;
     private final List<ContainedDep> containedDeps;
     private final Map<String, String> entrypoints;
     private final Map<String, String> providers;
@@ -179,12 +223,15 @@ public final class JarDeclaration {
         return null;
     }
 
-    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, List<ContainedDep> containedDeps,
+    private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Side side,
+                           List<String> accessTransformers, List<ContainedDep> containedDeps,
                            Map<String, String> entrypoints, Map<String, String> providers,
                            Map<String, List<String>> providerVersions, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
         this.license = license;
         this.loadOrder = loadOrder;
+        this.side = side;
+        this.accessTransformers = accessTransformers;
         this.containedDeps = containedDeps;
         this.entrypoints = entrypoints;
         this.providers = providers;
@@ -237,11 +284,102 @@ public final class JarDeclaration {
                     + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
         }
 
+        String sideText = asString(json.get("side"));
+        Side side = Side.parse(sideText);
+        if (side == null) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares an unknown \"side\": \"" + sideText.trim() + "\". Expected one of: both, client, server.");
+        }
+
         Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
-        return new JarDeclaration(schemaVersion, license.trim(), loadOrder,
+        return new JarDeclaration(schemaVersion, license.trim(), loadOrder, side,
+                parseAccessTransformers(json.get("at"), sourceName),
                 parseContainedDeps(json.get("containedDeps"), sourceName),
                 parseEntrypoints(json.get("entrypoints"), sourceName), providers,
                 parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+    }
+
+    /**
+     * Which side a jar is for, preferring its own declaration over the manifest attribute it replaces.
+     *
+     * <p>A manifest value nobody recognises is read as {@link Side#BOTH} with a warning: the attribute predates any
+     * validation, and refusing to start an otherwise working pack over a misspelt side would be a worse trade than
+     * loading the jar the way it was loaded before the value existed.
+     */
+    public static Side sideOf(@Nullable Attributes attributes, @Nullable JarDeclaration declaration) {
+        if (declaration != null) {
+            return declaration.side;
+        }
+        String value = attributes == null ? null : attributes.getValue(MANIFEST_SIDE);
+        Side side = Side.parse(value);
+        if (side == null) {
+            net.minecraftforge.fml.common.FMLLog.log.warn("The manifest declares ModSide: {}, which is neither BOTH,"
+                    + " CLIENT nor SERVER; reading it as BOTH", value);
+            return Side.BOTH;
+        }
+        return side;
+    }
+
+    /**
+     * The access transformer files a jar carries, as paths relative to {@code META-INF/}.
+     *
+     * <p>Same precedence as {@link #sideOf}: the declaration first, then the space-separated manifest attribute. The
+     * list shape is what the manifest could not express - an AT file name with a space in it stayed unrepresentable
+     * until now.
+     */
+    public static List<String> accessTransformersOf(@Nullable Attributes attributes, @Nullable JarDeclaration declaration) {
+        if (declaration != null && !declaration.accessTransformers.isEmpty()) {
+            return declaration.accessTransformers;
+        }
+        String value = attributes == null ? null : attributes.getValue(MANIFEST_ACCESS_TRANSFORMERS);
+        return splitPaths(value);
+    }
+
+    private static List<String> splitPaths(@Nullable String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> paths = new ArrayList<>();
+        for (String path : value.trim().split("\\s+")) {
+            if (!path.isBlank()) {
+                paths.add(path);
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    /**
+     * Reads {@code at}: the access transformer files this jar carries, relative to {@code META-INF/}.
+     *
+     * <p>An array element is one path and is never split, which is the one thing the manifest key could not express: a
+     * file name containing a space. A single string is still accepted and split on whitespace, because that is the
+     * shape the key it replaces had - porting a jar should not require rewriting the value it already carries.
+     */
+    private static List<String> parseAccessTransformers(JsonElement element, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return List.of();
+        }
+        if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+            return splitPaths(element.getAsString());
+        }
+        if (!element.isJsonArray()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"at\" as neither a string nor an array of strings.");
+        }
+        List<String> paths = new ArrayList<>();
+        for (JsonElement entry : element.getAsJsonArray()) {
+            if (entry == null || !entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a non-string entry in \"at\": " + entry);
+            }
+            String path = entry.getAsString().trim();
+            if (path.isEmpty()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares an empty entry in \"at\"; each entry is one file under META-INF/.");
+            }
+            paths.add(path);
+        }
+        return paths.isEmpty() ? List.of() : List.copyOf(paths);
     }
 
     /**
@@ -446,6 +584,19 @@ public final class JarDeclaration {
     /** @return where this jar wants to sit in coremod discovery order */
     public LoadOrder loadOrder() {
         return loadOrder;
+    }
+
+    /** @return the side this jar belongs to, {@link Side#BOTH} when it says nothing */
+    public Side side() {
+        return side;
+    }
+
+    /**
+     * @return the access transformer files this jar carries, as paths relative to {@code META-INF/}, in declaration
+     *         order; never {@code null}, empty when it declares none
+     */
+    public List<String> accessTransformers() {
+        return accessTransformers;
     }
 
     /**
