@@ -1,5 +1,5 @@
 /*
- * Cleanroom / Outlands addition. Same licence as the rest of FML (LGPL 2.1).
+ * Outlands addition. Same licence as the rest of FML (LGPL 2.1).
  */
 
 package net.minecraftforge.fml.common.patcher;

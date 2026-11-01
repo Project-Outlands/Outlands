@@ -48,7 +48,7 @@ public final class ParallelJarParse
     private static ExecutorService createPool()
     {
         ThreadFactory factory = runnable -> {
-            Thread thread = new Thread(runnable, "Cleanroom jar scan");
+            Thread thread = new Thread(runnable, "Outlands jar scan");
             thread.setDaemon(true);
             return thread;
         };

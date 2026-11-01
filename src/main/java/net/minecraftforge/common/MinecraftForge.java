@@ -84,7 +84,7 @@ public class MinecraftForge
     */
    public static void initialize()
    {
-       FMLLog.log.info("Cleanroom v{} Initialized", LoaderVersion.BUILD_VERSION);
+       FMLLog.log.info("Outlands v{} Initialized", LoaderVersion.BUILD_VERSION);
 
        OreDictionary.getOreName(0);
 

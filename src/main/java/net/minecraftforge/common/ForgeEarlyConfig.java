@@ -127,7 +127,7 @@ public class ForgeEarlyConfig {
 
     @Config.Comment("""
             Mods in this list have one or more of the problems list below:
-            - Integrated into Cleanroom so shouldn't load it from mods
+            - Integrated into Outlands so shouldn't load it from mods
             - Too invasive or hacky that it is unpatchable
             - Have a better replacement that compats e.g. JEID vs REID
             """)
@@ -170,7 +170,7 @@ public class ForgeEarlyConfig {
         public boolean USE_DEFAULT_TEXT = true;
         @Config.Comment("Window text color [RGB hex in int]")
         public int TEXT_COLOR;
-        @Config.Comment("Use cleanroom embed loading progressbar handling")
+        @Config.Comment("Use Outlands embed loading progressbar handling")
         public boolean UPDATE_WINDOWS_TASKBAR_PROGRESS = true;
         @Config.Comment("Disable flash after loaded")
         public boolean DISABLE_FLASH_AFTER_LOADED = false;

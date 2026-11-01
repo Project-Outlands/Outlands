@@ -18,22 +18,22 @@ import org.apache.logging.log4j.Logger;
  * Never modifies {@code org.lwjgl.**}: missing classes are provided separately, missing members go through adapters.
  *
  * <p>Which sources may be rewritten is decided by the mod markings of the early scan, see {@link ModSourceIndex}.
- * The point is not speed: a Cleanroom mod ({@code ModType: CRL}) is written against the LWJGL3 API, so rewriting it
+ * The point is not speed: a mod declaring {@code ModType: CRL} is written against the LWJGL3 API, so rewriting it
  * means second-guessing code that is already up to date. Everything else stays rewritten - non-mod sources included:
  * the OpenAL binding Minecraft itself ships ({@code paulscode/sound/libraries}) carries LWJGL2 call sites and only
  * works because this transformer converts them. The mode is selected by {@code -Dcrl.lwjgl2.filter}:
  * <ul>
  *   <li>{@code off} (default) - no classification at all, behave exactly like before;</li>
  *   <li>{@code measure} - transform as before, and report where the filter would have changed the outcome;</li>
- *   <li>{@code skip} - leave the classes of a Cleanroom mod alone, rewrite everything else.</li>
+ *   <li>{@code skip} - leave the classes of an Outlands mod alone, rewrite everything else.</li>
  * </ul>
  *
- * <p>{@code measure} answers the only question that matters for correctness: whether a Cleanroom mod is being
+ * <p>{@code measure} answers the only question that matters for correctness: whether an Outlands mod is being
  * rewritten today, i.e. whether there is anything to prevent at all.
  */
 public class Lwjgl2CompatTransformer implements IClassTransformer {
 
-    private static final Logger LOGGER = LogManager.getLogger("Cleanroom|lwjgl2compat");
+    private static final Logger LOGGER = LogManager.getLogger("Outlands|lwjgl2compat");
 
     private static final String MODE = System.getProperty("crl.lwjgl2.filter", "off");
     private static final boolean MEASURE = "measure".equals(MODE);
@@ -150,11 +150,11 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
             LOGGER.info("  skipped:   {}", SKIPPED);
         }
         if (!isEmpty(DROPPED)) {
-            LOGGER.info("  rewritten although a Cleanroom mod (a skip would drop these): {}", DROPPED);
+            LOGGER.info("  rewritten although an Outlands mod (a skip would drop these): {}", DROPPED);
             LOGGER.info("  sources:   {}", DROPPED_SOURCES);
         }
         if (!LOADER_REWRITTEN.isEmpty()) {
-            LOGGER.info("  Cleanroom mod classes rewritten: {}", LOADER_REWRITTEN);
+            LOGGER.info("  Outlands mod classes rewritten: {}", LOADER_REWRITTEN);
         }
     }
 

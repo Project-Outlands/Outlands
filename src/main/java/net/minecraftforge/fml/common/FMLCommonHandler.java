@@ -129,7 +129,7 @@ public class FMLCommonHandler
 
             @Override
             public String getLabel() {
-                return "Cleanroom Version";
+                return "Outlands Version";
             }
         });
 
@@ -242,7 +242,7 @@ public class FMLCommonHandler
             Builder<String> brd = ImmutableList.builder();
             brd.add(Loader.instance().getMCVersionString());
             brd.add(Loader.instance().getMCPVersionString());
-            brd.add("Cleanroom " + LoaderVersion.BUILD_VERSION);
+            brd.add("Outlands " + LoaderVersion.BUILD_VERSION);
             if (sidedDelegate!=null)
             {
                 brd.addAll(sidedDelegate.getAdditionalBrandingInformation());

@@ -184,7 +184,7 @@ public class ForgeVersion
 
     public static void startVersionCheck()
     {
-        new Thread("Cleanroom Version Check")
+        new Thread("Outlands Version Check")
         {
             @Override
             public void run()
@@ -218,7 +218,7 @@ public class ForgeVersion
                 for (int redirects = 0; redirects < MAX_HTTP_REDIRECTS; redirects++)
                 {
                     URLConnection c = currentUrl.openConnection();
-                    c.setRequestProperty("User-Agent", "Cleanroom/" + LoaderVersion.getVersion());
+                    c.setRequestProperty("User-Agent", "Outlands/" + LoaderVersion.getVersion());
                     if (c instanceof HttpURLConnection huc)
                     {
                         huc.setInstanceFollowRedirects(false);

@@ -589,7 +589,7 @@ public final class ModDiscoverer {
             for (Path derpMod : derpMods) {
                 FMLLog.log.error("Problem file: {}", derpMod.getFileName());
             }
-            throw new RuntimeException("Cleanroom detected files with .jar.zip as the extension! Check the logs for more information!");
+            throw new RuntimeException("Outlands detected files with .jar.zip as the extension! Check the logs for more information!");
         }
         if (!extractedPaths.isEmpty()) {
             FMLLog.log.error("Cleanroom detected META-INF directories. These look like extracted mod jars and cannot be loaded correctly.");
@@ -597,7 +597,7 @@ public final class ModDiscoverer {
             for (Path extractedPath : extractedPaths) {
                 FMLLog.log.error("Directory {} contains META-INF entries.", extractedPath.getFileName());
             }
-            throw new RuntimeException("Cleanroom detected extracted mod jars! Check the logs for more information!");
+            throw new RuntimeException("Outlands detected extracted mod jars! Check the logs for more information!");
         }
     }
 

@@ -17,9 +17,9 @@ public class LoaderContainer extends DummyModContainer {
         super(new ModMetadata());
         ModMetadata meta = this.getMetadata();
         meta.modId = "cleanroom";
-        meta.name = "Cleanroom";
+        meta.name = "Outlands";
         meta.description = """
-                Cleanroom is a 1.12.2 Forge fork, providing newer toolchain, new APIs and 99% compatibility.
+                Outlands is a 1.12.2 Forge fork, providing newer toolchain, new APIs and 99% compatibility.
                 Our plan is to make 1.12.2 up-to-date with latest toolchain while adding more feature to Forge & vanilla, so we don't need to care about higher versions' X point release * Y Mod API headache.
                 """;
         meta.version = LoaderVersion.VERSION;

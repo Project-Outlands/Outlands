@@ -35,7 +35,7 @@ final class ModSourceIndex {
         NON_MOD,
         /** A mod the Forge container type applies to: LWJGL2 call sites must be rewritten. */
         FORGE_MOD,
-        /** A mod that declares {@code ModType: CRL}, i.e. one written against Cleanroom's own LWJGL3 API. */
+        /** A mod that declares {@code ModType: CRL}, i.e. one written against the loader's own LWJGL3 API. */
         LOADER_MOD
     }
 
@@ -83,7 +83,7 @@ final class ModSourceIndex {
     /**
      * The classification of one early-scan record. {@code null} means the source was never scanned.
      *
-     * <p>Being a mod is decided by the scan alone; the manifest is consulted afterwards, only to tell a Cleanroom
+     * <p>Being a mod is decided by the scan alone; the manifest is consulted afterwards, only to tell an Outlands
      * mod apart from a Forge one. Most mods in the wild declare no {@code ModType} at all - plenty have no manifest
      * either - so the attribute can never be read as "this is not a mod".
      *

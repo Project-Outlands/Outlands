@@ -6,7 +6,7 @@ import net.minecraftforge.common.config.Config;
 public final class ModListConfig {
     @Config.Comment({
             "Whether to enable the mod list.",
-            "Disabling it stops Cleanroom from redirecting Forge's mod list calls."
+            "Disabling it stops Outlands from redirecting Forge's mod list calls."
     })
     @Config.LangKey("cleanroom.config.enable")
     public static boolean enable = true;

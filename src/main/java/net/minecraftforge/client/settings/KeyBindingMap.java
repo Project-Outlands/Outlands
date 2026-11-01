@@ -36,7 +36,7 @@ public class KeyBindingMap {
     private final IntHashMap<Collection<KeyBinding>> map = new IntHashMap<>();
 
     @Nullable
-    @Deprecated // Cleanroom: Use lookupActives
+    @Deprecated // Outlands: Use lookupActives
     public KeyBinding lookupActive(int keyCode) {
         final Set<KeyBinding> bindings = lookupActives(keyCode);
         return bindings.isEmpty() ? null : bindings.iterator().next();
