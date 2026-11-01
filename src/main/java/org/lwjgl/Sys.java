@@ -37,7 +37,7 @@ import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.Platform;
 import org.lwjgl.system.Pointer;
 
-import com.cleanroommc.common.CleanroomVersion;
+import net.minecraftforge.common.LoaderVersion;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.fml.common.FMLLog;
@@ -192,7 +192,7 @@ public class Sys {
 
     /** Publishes the loader identity to SDL; packs override the title and icon through Display. */
     private static void applyAppMetadata() {
-        SDL_SetAppMetadata("Outlands", CleanroomVersion.getBuildVersion(), "top.outlands.outlands");
+        SDL_SetAppMetadata("Outlands", LoaderVersion.getBuildVersion(), "top.outlands.outlands");
         SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_URL_STRING, "https://outlands.top");
         SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_CREATOR_STRING, "Outlands contributors");
         SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_TYPE_STRING, "game");

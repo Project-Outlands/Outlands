@@ -20,8 +20,8 @@
 package net.minecraftforge.fml.common.discovery;
 
 import net.minecraftforge.cleanmix.CleanMixModContainer;
-import net.minecraftforge.fml.common.CleanroomEnvironment;
-import net.minecraftforge.util.CleanroomLog;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
+import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.LanguageAdapterRegistry;
 import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
@@ -170,10 +170,10 @@ public final class ModDiscoverer {
                 try {
                     Launch.classLoader.addURL(mod.file().toURI().toURL());
                 } catch (MalformedURLException e) {
-                    CleanroomLog.get().error("Failed to manually load {} as a mixin mod {}.", mod.file().getName(), e);
+                    FMLLog.log.error("Failed to manually load {} as a mixin mod {}.", mod.file().getName(), e);
                 }
             }
-            CleanroomLog.get().debug("Submitting mixin container for {}", mod.file().getName());
+            FMLLog.log.debug("Submitting mixin container for {}", mod.file().getName());
             MixinBootstrap.getPlatform().addContainer(new ContainerHandleURI(mod.file().toURI()));
         }
         // TODO: evaluate if this is a good place for this
@@ -189,11 +189,11 @@ public final class ModDiscoverer {
         File modsDir = setupCoreModDir(minecraftDirectory);
         findDerpMods(modsDir);
 
-        CleanroomLog.get().debug("Discovering coremods");
+        FMLLog.log.debug("Discovering coremods");
         File containedDepsDir = new File(new File(Launch.minecraftHome, "mods"), ForgeVersion.mcVersion);
         for (DiscoveredMod discoveredMod : CoremodLoadOrder.sort(discoveredFiles.values(), this::loadOrderRank)) {
             if (discoveredMod.isDirectoryBased()) {
-                CleanroomLog.get().debug("Ignoring folder {} in coremod searching", discoveredMod.file().getAbsolutePath());
+                FMLLog.log.debug("Ignoring folder {} in coremod searching", discoveredMod.file().getAbsolutePath());
                 continue;
             }
             discoverCoreMod(classLoader, tweaker, discoveredMod, containedDepsDir);
@@ -215,22 +215,22 @@ public final class ModDiscoverer {
         List<File> nonModLibs = new ArrayList<>();
 
         List<ModContainer> mods = new ArrayList<>(builtInMods);
-        CleanroomLog.get().debug("Building injected Mod Containers {}", injectedContainers);
+        FMLLog.log.debug("Building injected Mod Containers {}", injectedContainers);
         for (String containerClass : injectedContainers) {
             ModContainer modContainer;
             try {
                 modContainer = (ModContainer) Class.forName(containerClass, true, modClassLoader).getConstructor().newInstance();
             } catch (Exception e) {
-                CleanroomLog.get().error("A problem occurred instantiating the injected mod container {}", containerClass, e);
+                FMLLog.log.error("A problem occurred instantiating the injected mod container {}", containerClass, e);
                 throw new LoaderException(e);
             }
             mods.add(new InjectedModContainer(modContainer, modContainer.getSource()));
         }
 
-        CleanroomLog.get().debug("Attempting to load mods contained in the minecraft jar file and associated classes");
+        FMLLog.log.debug("Attempting to load mods contained in the minecraft jar file and associated classes");
         Set<File> seenCandidates = new HashSet<>();
         addClasspathCandidates(modClassLoader, modCandidates, seenCandidates);
-        CleanroomLog.get().debug("Minecraft jar mods loaded successfully");
+        FMLLog.log.debug("Minecraft jar mods loaded successfully");
         addLibraryCandidates(modCandidates, seenCandidates);
         scanRecords.clear();
         modMetadata.clear();
@@ -249,7 +249,7 @@ public final class ModDiscoverer {
         // Minecraft Coder Pack
         mods.add(new InjectedModContainer(mcp, new File("minecraft.jar")));
         // Cleanroom
-        mods.add(new InjectedModContainer(new CleanroomContainer(), FMLSanityChecker.fmlLocation));
+        mods.add(new InjectedModContainer(new LoaderContainer(), FMLSanityChecker.fmlLocation));
         mods.add(new InjectedModContainer(new CleanMixModContainer(), CleanMixModContainer.location()));
         // Included Mods
         this.builtInMods.stream().map(mc -> new InjectedModContainer(mc, FMLSanityChecker.fmlLocation)).forEach(mods::add);
@@ -265,19 +265,19 @@ public final class ModDiscoverer {
                 continue;
             }
             if (CoreModManager.loadCoreModFromDiscoveredJar(Launch.classLoader, coremod, discovered.file())) {
-                CleanroomLog.get().warn("{} declares both a MixinTweaker TweakClass and FMLCorePlugin. Forge skips the coremod in this case and {} was loaded by Cleanroom.", discovered.file().getName(), coremod);
+                FMLLog.log.warn("{} declares both a MixinTweaker TweakClass and FMLCorePlugin. Forge skips the coremod in this case and {} was loaded by Cleanroom.", discovered.file().getName(), coremod);
             } else {
-                CleanroomLog.get().error("Failed to manually load coremod {} from {}.", coremod, discovered.file().getName());
+                FMLLog.log.error("Failed to manually load coremod {} from {}.", coremod, discovered.file().getName());
             }
             if (discovered.coreModContainsMod()) {
                 CoreModManager.getReparseableCoremods().add(discovered.file().getName());
-                CleanroomLog.get().warn("Added {} back to reparseable collection, ready to be identified as a mod.", discovered.file().getName());
+                FMLLog.log.warn("Added {} back to reparseable collection, ready to be identified as a mod.", discovered.file().getName());
             }
         }
     }
 
     private void discover() {
-        CleanroomLog.get().info("Discovering mods");
+        FMLLog.log.info("Discovering mods");
         long startTime = System.nanoTime();
 
         for (File candidate : LibraryManager.getCandidates()) {
@@ -293,8 +293,8 @@ public final class ModDiscoverer {
         }
 
         long elapsedMillis = (System.nanoTime() - startTime) / 1_000_000L;
-        CleanroomLog.get().info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);
-        CleanroomLog.get().debug("Discovered mod ids: {}", String.join(", ", modIdToFiles.keySet()));
+        FMLLog.log.info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);
+        FMLLog.log.debug("Discovered mod ids: {}", String.join(", ", modIdToFiles.keySet()));
     }
 
     private void scan(File file) {
@@ -331,7 +331,7 @@ public final class ModDiscoverer {
                     // The loader no longer honours this: distributing modified class files to overwrite the originals
                     // is what mixins exist for, and it never worked without also bypassing signatures. Say so once
                     // per jar instead of letting the jar silently do nothing.
-                    CleanroomLog.get().warn("{} declares the Bansoukou attribute, which this loader no longer supports; "
+                    FMLLog.log.warn("{} declares the Bansoukou attribute, which this loader no longer supports; "
                             + "the jar will load normally, but its class replacements will not be applied", file.getName());
                 }
                 if ("optifine.OptiFineForgeTweaker".equals(tweaker)) {
@@ -359,11 +359,11 @@ public final class ModDiscoverer {
                     JarDeclaration declaration = metadata.getJarDeclaration();
                     if (declaration != null) {
                         if (declaration.schemaVersion() > JarDeclaration.CURRENT_SCHEMA) {
-                            CleanroomLog.get().warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
+                            FMLLog.log.warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
                                     file.getName(), declaration.schemaVersion(), JarDeclaration.CURRENT_SCHEMA, JarDeclaration.CURRENT_SCHEMA);
                         }
                         if (!declaration.unknownKeys().isEmpty()) {
-                            CleanroomLog.get().warn("{} declares jar keys this loader does not understand: {}",
+                            FMLLog.log.warn("{} declares jar keys this loader does not understand: {}",
                                     file.getName(), declaration.unknownKeys());
                         }
                         // Collected here, instantiated only when a mod actually asks for the language: unlike the
@@ -371,7 +371,7 @@ public final class ModDiscoverer {
                         if (!declaration.providers().isEmpty()) {
                             LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
                         }
-                        CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
+                        FMLLog.log.debug("{} declares {}", file.getName(), declaration);
                     }
                 }
             }
@@ -403,7 +403,7 @@ public final class ModDiscoverer {
                 }
             }
         } catch (IOException e) {
-            CleanroomLog.get().error("Failed to read mod metadata from {}", absolute.getName(), e);
+            FMLLog.log.error("Failed to read mod metadata from {}", absolute.getName(), e);
         }
 
         DiscoveredMod info = new DiscoveredMod(
@@ -425,7 +425,7 @@ public final class ModDiscoverer {
 
     private void discoverCoreMod(LaunchClassLoader classLoader, FMLTweaker tweaker, DiscoveredMod discoveredMod, File containedDepsDir) {
         File file = discoveredMod.file();
-        CleanroomLog.get().debug("Examining for coremod candidacy {}", file.getName());
+        FMLLog.log.debug("Examining for coremod candidacy {}", file.getName());
         JarFile jar = null;
         Attributes attributes;
         String fmlCorePlugin;
@@ -436,8 +436,8 @@ public final class ModDiscoverer {
             }
 
             String modSide = attributes.getValue(LibraryManager.MODSIDE);
-            if (modSide != null && !"BOTH".equals(modSide) && !modSide.equals(CleanroomEnvironment.side().name())) {
-                CleanroomLog.get().debug("Skipping {}, as we're on {} side and the mod is on {} side", file.getName(), CleanroomEnvironment.side(), modSide);
+            if (modSide != null && !"BOTH".equals(modSide) && !modSide.equals(FMLLaunchHandler.side().name())) {
+                FMLLog.log.debug("Skipping {}, as we're on {} side and the mod is on {} side", file.getName(), FMLLaunchHandler.side(), modSide);
                 CoreModManager.getIgnoredMods().add(file.getName());
                 return;
             }
@@ -453,7 +453,7 @@ public final class ModDiscoverer {
                 // NonModDeps attribute asked for. What changed is where the fact comes from: the jar's own declaration
                 // says which of its bundled entries are libraries, instead of a jar-wide flag saying they all are.
                 addDeclaredLibrariesToClasspath(classLoader, file, containedDepsDir);
-                CleanroomLog.get().info("Cascading tweaker {} from {}", discoveredMod.tweaker(), file.getName());
+                FMLLog.log.info("Cascading tweaker {} from {}", discoveredMod.tweaker(), file.getName());
                 Integer sortOrder = Ints.tryParse(Strings.nullToEmpty(attributes.getValue("TweakOrder")));
                 CoreModManager.injectDiscoveredCascadingTweaker(file, discoveredMod.tweaker(), classLoader, tweaker, sortOrder == null ? 0 : sortOrder);
                 if (discoveredMod.mixinTweakerForceMod() || discoveredMod.coreModContainsMod()) {
@@ -465,7 +465,7 @@ public final class ModDiscoverer {
 
             String modType = discoveredMod.modType();
             if (!ManifestAttributes.FORGEMODTYPE.equals(modType) && !ManifestAttributes.CLEANROOMMODTYPE.equals(modType)) {
-                CleanroomLog.get().warn("Adding {} to the list of things to skip. It is not an FML or Cleanroom mod, it is of type: {}", file.getName(), modType);
+                FMLLog.log.warn("Adding {} to the list of things to skip. It is not an FML or Cleanroom mod, it is of type: {}", file.getName(), modType);
                 CoreModManager.getIgnoredMods().add(file.getName());
                 return;
             }
@@ -476,11 +476,11 @@ public final class ModDiscoverer {
             }
             if (isCorePluginBlacklisted(fmlCorePlugin)) {
                 CoreModManager.getIgnoredMods().add(file.getName());
-                CleanroomLog.get().warn("Loading plugin {} for mod {} is in the forge_early.cfg blacklist and won't be loaded.", fmlCorePlugin, file.getName());
+                FMLLog.log.warn("Loading plugin {} for mod {} is in the forge_early.cfg blacklist and won't be loaded.", fmlCorePlugin, file.getName());
                 return;
             }
         } catch (IOException ioe) {
-            CleanroomLog.get().error("Unable to read the jar file {} - ignoring", file.getName(), ioe);
+            FMLLog.log.error("Unable to read the jar file {} - ignoring", file.getName(), ioe);
             return;
         } finally {
             try {
@@ -496,14 +496,14 @@ public final class ModDiscoverer {
             classLoader.addURL(file.toURI().toURL());
 
             if (!discoveredMod.coreModContainsMod() && !discoveredMod.mixinTweakerForceMod()) {
-                CleanroomLog.get().trace("Adding {} to the list of known coremods, it will not be examined again", file.getName());
+                FMLLog.log.trace("Adding {} to the list of known coremods, it will not be examined again", file.getName());
                 CoreModManager.getIgnoredMods().add(file.getName());
             } else {
-                CleanroomLog.get().debug("Found FMLCorePluginContainsFMLMod marker in {}.", file.getName());
+                FMLLog.log.debug("Found FMLCorePluginContainsFMLMod marker in {}.", file.getName());
                 CoreModManager.getReparseableCoremods().add(file.getName());
             }
         } catch (MalformedURLException e) {
-            CleanroomLog.get().error("Unable to convert file {} into a URL, weird", file.getName(), e);
+            FMLLog.log.error("Unable to convert file {} into a URL, weird", file.getName(), e);
             return;
         }
 
@@ -527,7 +527,7 @@ public final class ModDiscoverer {
             if (LibraryManager.isBundledLibraryShadowed(source, dep)) {
                 // Not a failure: another jar bundles a higher version of the same library, and that one is on the
                 // classpath instead. Saying so at debug keeps the decision traceable without alarming anyone.
-                CleanroomLog.get().debug("{} bundles the library {}, which lost to another jar's higher version",
+                FMLLog.log.debug("{} bundles the library {}, which lost to another jar's higher version",
                         source.getName(), dep.id());
                 continue;
             }
@@ -536,7 +536,7 @@ public final class ModDiscoverer {
             if (library == null) {
                 // Said out loud rather than skipped: the jar promised the dependency and the coremod is about to run
                 // without it, which is the failure mode this early injection exists to prevent.
-                CleanroomLog.get().warn("{} declares the bundled library {}, but it is neither mounted nor extracted",
+                FMLLog.log.warn("{} declares the bundled library {}, but it is neither mounted nor extracted",
                         source.getName(), dep.path());
                 continue;
             }
@@ -581,21 +581,21 @@ public final class ModDiscoverer {
                 }
             });
         } catch (IOException e) {
-            CleanroomLog.get().error("Unable to scan {} for problematic mod files", directory.getName(), e);
+            FMLLog.log.error("Unable to scan {} for problematic mod files", directory.getName(), e);
         }
 
         if (!derpMods.isEmpty()) {
-            CleanroomLog.get().error("Cleanroom detected files with .jar.zip as the extension. These are usually failed downloads or jars renamed as zips. Download them again as .jar files before continuing.");
+            FMLLog.log.error("Cleanroom detected files with .jar.zip as the extension. These are usually failed downloads or jars renamed as zips. Download them again as .jar files before continuing.");
             for (Path derpMod : derpMods) {
-                CleanroomLog.get().error("Problem file: {}", derpMod.getFileName());
+                FMLLog.log.error("Problem file: {}", derpMod.getFileName());
             }
             throw new RuntimeException("Cleanroom detected files with .jar.zip as the extension! Check the logs for more information!");
         }
         if (!extractedPaths.isEmpty()) {
-            CleanroomLog.get().error("Cleanroom detected META-INF directories. These look like extracted mod jars and cannot be loaded correctly.");
-            CleanroomLog.get().error("Remove these extracted directories and add the jar directly into the mods directory.");
+            FMLLog.log.error("Cleanroom detected META-INF directories. These look like extracted mod jars and cannot be loaded correctly.");
+            FMLLog.log.error("Remove these extracted directories and add the jar directly into the mods directory.");
             for (Path extractedPath : extractedPaths) {
-                CleanroomLog.get().error("Directory {} contains META-INF entries.", extractedPath.getFileName());
+                FMLLog.log.error("Directory {} contains META-INF entries.", extractedPath.getFileName());
             }
             throw new RuntimeException("Cleanroom detected extracted mod jars! Check the logs for more information!");
         }
@@ -613,7 +613,7 @@ public final class ModDiscoverer {
                     modList.addAll(mods);
                 }
             } catch (LoaderException le) {
-                CleanroomLog.get().warn("Identified a problem with the mod candidate {}, ignoring this source", candidate.getModContainer(), le);
+                FMLLog.log.warn("Identified a problem with the mod candidate {}, ignoring this source", candidate.getModContainer(), le);
             }
         }
         return modList;
@@ -625,7 +625,7 @@ public final class ModDiscoverer {
             candidate.setMetadata(modMetadata.get(candidate.getModContainer().getAbsoluteFile()));
             modCandidates.add(candidate);
         } else {
-            CleanroomLog.get().trace("  Skipping already in list {}", candidate.getModContainer());
+            FMLLog.log.trace("  Skipping already in list {}", candidate.getModContainer());
         }
     }
 
@@ -640,13 +640,13 @@ public final class ModDiscoverer {
         for (File source : minecraftSources) {
             if (source.isFile()) {
                 if (knownLibraries.contains(source.getName()) || modClassLoader.isDefaultLibrary(source)) {
-                    CleanroomLog.get().trace("Skipping known library file {}", source.getAbsolutePath());
+                    FMLLog.log.trace("Skipping known library file {}", source.getAbsolutePath());
                 } else {
-                    CleanroomLog.get().debug("Found a minecraft related file at {}, examining for mod candidates", source.getAbsolutePath());
+                    FMLLog.log.debug("Found a minecraft related file at {}, examining for mod candidates", source.getAbsolutePath());
                     addCandidate(modCandidates, seen, new ModCandidate(source, source, ContainerType.JAR, false, true));
                 }
             } else if (source.isDirectory()) {
-                CleanroomLog.get().debug("Found a minecraft related directory at {}, collecting as developing mod", source.getAbsolutePath());
+                FMLLog.log.debug("Found a minecraft related directory at {}, collecting as developing mod", source.getAbsolutePath());
                 devPaths.add(source);
             }
         }
@@ -673,7 +673,7 @@ public final class ModDiscoverer {
                 continue;
             }
             for (File classDir : classDirs) {
-                CleanroomLog.get().debug("Adding path {} and {} as developing mod", classDir, resourcesDir);
+                FMLLog.log.debug("Adding path {} and {} as developing mod", classDir, resourcesDir);
                 addCandidate(modCandidates, seen, new ModCandidate(classDir, resourcesDir));
             }
         }
@@ -683,11 +683,11 @@ public final class ModDiscoverer {
         for (DiscoveredMod discoveredMod : discoveredFiles.values()) {
             File mod = discoveredMod.file();
             if (CoreModManager.getIgnoredMods().contains(mod.getName()) && !CoreModManager.getReparseableCoremods().contains(mod.getName())) {
-                CleanroomLog.get().trace("Skipping already parsed coremod or tweaker {}", mod.getName());
+                FMLLog.log.trace("Skipping already parsed coremod or tweaker {}", mod.getName());
             } else if (mod.isDirectory()) {
-                CleanroomLog.get().trace("Skipping directory {}", mod.getName());
+                FMLLog.log.trace("Skipping directory {}", mod.getName());
             } else {
-                CleanroomLog.get().debug("Found a candidate zip or jar file {}", mod.getName());
+                FMLLog.log.debug("Found a candidate zip or jar file {}", mod.getName());
                 addCandidate(modCandidates, seen, new ModCandidate(mod, mod, ContainerType.JAR));
             }
         }
@@ -707,14 +707,14 @@ public final class ModDiscoverer {
             try (FileInputStream input = new FileInputStream(externalManifest)) {
                 return new Manifest(input).getMainAttributes();
             } catch (IOException e) {
-                CleanroomLog.get().error("Error reading {} as an external manifest.", externalManifest.getAbsolutePath(), e);
+                FMLLog.log.error("Error reading {} as an external manifest.", externalManifest.getAbsolutePath(), e);
             }
         }
         try {
             Manifest manifest = jarFile.getManifest();
             return manifest == null ? null : manifest.getMainAttributes();
         } catch (IOException e) {
-            CleanroomLog.get().error("Error reading manifest from {}.", file.getAbsolutePath(), e);
+            FMLLog.log.error("Error reading manifest from {}.", file.getAbsolutePath(), e);
         }
         return null;
     }
@@ -738,7 +738,7 @@ public final class ModDiscoverer {
             // follow the current schema and then did not, so continuing would silently drop what it declared.
             throw e;
         } catch (Throwable t) {
-            CleanroomLog.get().error("Failed to parse mcmod.info for {}", file.getName(), t);
+            FMLLog.log.error("Failed to parse mcmod.info for {}", file.getName(), t);
             return null;
         } finally {
             IOUtils.closeQuietly(stream);
@@ -748,7 +748,7 @@ public final class ModDiscoverer {
     private static void collectModIds(File file, MetadataCollection metadata, Set<String> ids) {
         for (String id : metadata.getIds()) {
             if (id == null || id.isBlank()) {
-                CleanroomLog.get().warn("Skipping null/blank mod id from {}", file.getName());
+                FMLLog.log.warn("Skipping null/blank mod id from {}", file.getName());
                 continue;
             }
             ids.add(id);

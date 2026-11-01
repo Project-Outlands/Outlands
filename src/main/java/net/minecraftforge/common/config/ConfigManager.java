@@ -34,7 +34,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.common.config.Config.Comment;
 import net.minecraftforge.common.config.Config.LangKey;
 import net.minecraftforge.common.config.Config.Name;
@@ -421,7 +421,7 @@ public class ConfigManager
     {
         try
         {
-            return CleanroomEnvironment.side();
+            return FMLLaunchHandler.side();
         }
         catch (Throwable ignored)
         {

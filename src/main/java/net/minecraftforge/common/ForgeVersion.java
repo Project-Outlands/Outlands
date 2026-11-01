@@ -41,7 +41,7 @@ import org.apache.logging.log4j.Logger;
 
 import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
-import com.cleanroommc.common.CleanroomVersion;
+import net.minecraftforge.common.LoaderVersion;
 
 import net.minecraftforge.fml.common.InjectedModContainer;
 import net.minecraftforge.fml.common.Loader;
@@ -218,7 +218,7 @@ public class ForgeVersion
                 for (int redirects = 0; redirects < MAX_HTTP_REDIRECTS; redirects++)
                 {
                     URLConnection c = currentUrl.openConnection();
-                    c.setRequestProperty("User-Agent", "Cleanroom/" + CleanroomVersion.getVersion());
+                    c.setRequestProperty("User-Agent", "Cleanroom/" + LoaderVersion.getVersion());
                     if (c instanceof HttpURLConnection huc)
                     {
                         huc.setInstanceFollowRedirects(false);

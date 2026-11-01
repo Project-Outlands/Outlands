@@ -1,9 +1,9 @@
-package com.cleanroommc.common;
+package net.minecraftforge.common;
 
 /**
  * Use methods to avoid final field references being fixed in bytecode
  */
-public class CleanroomVersion {
+public class LoaderVersion {
     public static final String VERSION = "%VERSION%";
     public static final String BUILD_VERSION = "%BUILD_VERSION%";
     public static final String MOD_ID = "cleanroom";

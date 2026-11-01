@@ -23,9 +23,7 @@ import java.io.*;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
-import net.minecraftforge.fml.common.CleanroomEnvironment;
-import com.cleanroommc.common.CleanroomVersion;
-import net.minecraftforge.util.CleanroomLog;
+import net.minecraftforge.common.LoaderVersion;
 import com.llamalad7.mixinextras.MixinExtrasBootstrap;
 import net.minecraft.launchwrapper.LaunchClassLoader;
 import net.minecraftforge.fml.common.FMLLog;
@@ -39,7 +37,12 @@ import org.spongepowered.asm.launch.MixinBootstrap;
 public class FMLLaunchHandler
 {
     private static FMLLaunchHandler INSTANCE;
-    static Side side = CleanroomEnvironment.side();
+    static Side side;
+
+    /** The property a dev launcher (Unimined) uses to hand extra classpath entries to the loader. */
+    private static final String DEV_EXTRAPATH = "outlands.dev.extrapath";
+
+    private static final boolean DEOBFUSCATED_ENVIRONMENT = detectDeobfuscatedEnvironment();
     private LaunchClassLoader classLoader;
     private FMLTweaker tweaker;
     private File minecraftHome;
@@ -76,7 +79,7 @@ public class FMLLaunchHandler
         this.classLoader.addTransformerExclusion("org.spongepowered.asm.util.");
         this.classLoader.addTransformerExclusion("org.spongepowered.asm.lib.");
         this.classLoader.addTransformerExclusion("org.objectweb.asm.");
-        this.classLoader.addTransformerExclusion("com.cleanroommc.loader.");
+        this.classLoader.addTransformerExclusion("net.minecraftforge.fml.common.registry.FrozenRegistry");
         this.classLoader.addTransformerExclusion("net.minecraftforge.fml.relauncher.");
         this.classLoader.addTransformerExclusion("net.minecraftforge.classloading.");
         this.classLoader.addTransformerExclusion("net.minecraftforge.fml.common.asm.transformers.");
@@ -104,7 +107,7 @@ public class FMLLaunchHandler
         redirectStdOutputToLog();
         FMLLog.log.info("Forge Mod Loader version {}.{}.{}.{} for Minecraft {} loading", FMLInjectionData.major, FMLInjectionData.minor,
                 FMLInjectionData.rev, FMLInjectionData.build, FMLInjectionData.mccversion);
-        FMLLog.log.info("Cleanroom version {}", CleanroomVersion.BUILD_VERSION);
+        FMLLog.log.info("Cleanroom version {}", LoaderVersion.BUILD_VERSION);
         FMLLog.log.info("Java is {}, version {}, running on {}:{}:{}, installed at {}", System.getProperty("java.vm.name"), System.getProperty("java.version"), System.getProperty("os.name"), System.getProperty("os.arch"), System.getProperty("os.version"), System.getProperty("java.home"));
         FMLLog.log.debug("Removing LWJGL2 from Java classpath");
         System.setProperty("java.class.path", Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))
@@ -119,9 +122,9 @@ public class FMLLaunchHandler
         try
         {
             LibraryManager.setup(minecraftHome);
-            CleanroomLog.get().info("Initializing CleanMix...");
+            FMLLog.log.info("Initializing CleanMix...");
             MixinBootstrap.init();
-            CleanroomLog.get().info("Initializing MixinExtras...");
+            FMLLog.log.info("Initializing MixinExtras...");
             MixinExtrasBootstrap.init();
             CoreModManager.handleLaunch(minecraftHome, classLoader, tweaker);
         }
@@ -143,6 +146,21 @@ public class FMLLaunchHandler
         return side;
     }
 
+    /** Called by the tweaker, which is the only thing that knows which launcher started us. First writer wins. */
+    public static void setSide(Side side)
+    {
+        if (FMLLaunchHandler.side != null)
+        {
+            return;
+        }
+        FMLLaunchHandler.side = side;
+    }
+
+    /** @return the extra classpath a dev launcher passed in, or {@code null} outside a dev launch */
+    public static String devExtraPath()
+    {
+        return System.getProperty(DEV_EXTRAPATH);
+    }
 
     private void injectPostfixTransformers()
     {
@@ -156,6 +174,17 @@ public class FMLLaunchHandler
 
     public static boolean isDeobfuscatedEnvironment()
     {
-        return CleanroomEnvironment.isDev();
+        return DEOBFUSCATED_ENVIRONMENT;
+    }
+
+    /**
+     * A Gradle or Unimined start is the only thing that hands the loader srg-named or extra classpath, so the same
+     * two properties decide it as before; only the class they live in changed.
+     */
+    private static boolean detectDeobfuscatedEnvironment()
+    {
+        boolean deobfEnvironment = System.getProperty("net.minecraftforge.gradle.GradleStart.srg.srg-mcp") != null;
+        deobfEnvironment |= devExtraPath() != null;
+        return deobfEnvironment;
     }
 }

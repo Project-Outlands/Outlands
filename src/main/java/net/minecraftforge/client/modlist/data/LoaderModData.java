@@ -21,7 +21,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class CleanroomModData implements IModData {
+public class LoaderModData implements IModData {
     private static final ResourceLocation VERSION_CHECK_ICONS = new ResourceLocation("forge", "textures/gui/version_check_icons.png");
     private static final List<String> LIB_MODS = Arrays.asList(ModListConfig.libraryList);
     private static final List<String> IGNORED_DEPENDENCIES = Arrays.asList(ModListConfig.ignoredDependenciesList);
@@ -33,7 +33,7 @@ public class CleanroomModData implements IModData {
     private final Set<String> childMods;
     private final String modId;
 
-    public CleanroomModData(ModContainer info) {
+    public LoaderModData(ModContainer info) {
         this.info = info;
         this.metadata = info.getMetadata();
         this.type = this.analyzeType(info);

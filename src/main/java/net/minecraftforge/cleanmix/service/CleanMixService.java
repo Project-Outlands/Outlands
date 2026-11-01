@@ -1,7 +1,7 @@
 package net.minecraftforge.cleanmix.service;
 
 import net.minecraftforge.cleanmix.CleanMixModContainer;
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import com.google.common.base.Strings;
 import net.minecraft.launchwrapper.Launch;
@@ -46,7 +46,7 @@ public class CleanMixService extends AbstractMixinServiceLaunchWrapper {
 
     @Override
     public String getSideName() {
-        return CleanroomEnvironment.side().name();
+        return FMLLaunchHandler.side().name();
     }
 
     @Override

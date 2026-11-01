@@ -23,7 +23,7 @@ import net.minecraftforge.cleanmix.CleanMixHooks;
 import com.google.common.base.Strings;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraft.launchwrapper.ITweaker;
 import net.minecraft.launchwrapper.Launch;
@@ -177,7 +177,7 @@ public class CoreModManager {
         CoreModManager.mcDir = mcDir;
         CoreModManager.tweaker = tweaker;
 
-        deobfuscatedEnvironment = CleanroomEnvironment.isDev(); // TODO: check
+        deobfuscatedEnvironment = FMLLaunchHandler.isDeobfuscatedEnvironment(); // TODO: check
 
         if (!deobfuscatedEnvironment)
         {
@@ -218,7 +218,7 @@ public class CoreModManager {
 
         FMLLog.log.debug("All fundamental core mods are successfully located");
         // Add extra classpath in advanced so fml.coreMods.load works
-        String devExtraPath = net.minecraftforge.fml.common.CleanroomEnvironment.getDevExtraPath();
+        String devExtraPath = FMLLaunchHandler.devExtraPath();
         if (devExtraPath != null)
         {
             for (String path : devExtraPath.split(File.pathSeparator))

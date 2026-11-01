@@ -3,7 +3,7 @@ package net.minecraftforge.fml.common;
 import java.util.List;
 import java.util.Map;
 
-import com.cleanroommc.loader.Registry;
+import net.minecraftforge.fml.common.registry.FrozenRegistry;
 
 import net.minecraftforge.fml.common.discovery.JarDeclaration;
 
@@ -32,8 +32,8 @@ import javax.annotation.Nullable;
  */
 public final class LanguageAdapterRegistry {
 
-    private static final Registry<ILanguageAdapter> ADAPTERS =
-            new Registry<>("language adapters", ILanguageAdapter.class);
+    private static final FrozenRegistry<ILanguageAdapter> ADAPTERS =
+            new FrozenRegistry<>("language adapters", ILanguageAdapter.class);
 
     /** The adapter used for {@code java}. */
     private static final ILanguageAdapter JAVA = new ILanguageAdapter.JavaAdapter();

@@ -1,6 +1,6 @@
 package zone.rong.mixinbooter.util;
 
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 
 public class Environment {
 
@@ -9,11 +9,11 @@ public class Environment {
     }
 
     public static boolean inDev() {
-        return CleanroomEnvironment.isDev();
+        return FMLLaunchHandler.isDeobfuscatedEnvironment();
     }
 
     public static String side() {
-        return CleanroomEnvironment.side().name();
+        return FMLLaunchHandler.side().name();
     }
 
 }

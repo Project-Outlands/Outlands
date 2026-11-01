@@ -3,6 +3,7 @@ package net.minecraftforge.fml.common;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.fml.common.FMLLog;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 
 public class PatchModPresentChecker {
 
@@ -34,7 +35,7 @@ public class PatchModPresentChecker {
     }
 
     public static boolean isNotPresent() {
-        if (CleanroomEnvironment.isDev()) return false;
+        if (FMLLaunchHandler.isDeobfuscatedEnvironment()) return false;
         if (ForgeEarlyConfig.DISABLE_PATCH_MOD_CHECK) return false;
         if (!checkPerformed) performCheck();
         return !fuguePresent || !scalarPresent;

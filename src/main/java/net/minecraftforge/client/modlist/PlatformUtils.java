@@ -1,6 +1,6 @@
 package net.minecraftforge.client.modlist;
 
-import net.minecraftforge.client.modlist.data.CleanroomModData;
+import net.minecraftforge.client.modlist.data.LoaderModData;
 import net.minecraftforge.client.modlist.data.IModData;
 import net.minecraftforge.client.modlist.data.OptiFineModData;
 import net.minecraft.client.gui.GuiScreen;
@@ -32,7 +32,7 @@ public final class PlatformUtils {
                 dataList.add(new OptiFineModData(container));
                 continue;
             }
-            dataList.add(new CleanroomModData(container));
+            dataList.add(new LoaderModData(container));
         }
         return dataList;
     }

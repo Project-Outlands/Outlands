@@ -22,7 +22,7 @@ package net.minecraftforge.fml.common.launcher;
 import java.io.File;
 import java.util.List;
 
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.relauncher.Side;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -64,6 +64,6 @@ public class FMLServerTweaker extends FMLTweaker {
     @Override
     public void setSide()
     {
-        CleanroomEnvironment.setSide(Side.SERVER);
+        FMLLaunchHandler.setSide(Side.SERVER);
     }
 }

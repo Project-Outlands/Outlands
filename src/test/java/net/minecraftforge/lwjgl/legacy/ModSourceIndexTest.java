@@ -42,8 +42,8 @@ public class ModSourceIndexTest {
 
     @Test
     public void cleanroomModTypeWinsAmongMods() {
-        assertEquals(ModSourceIndex.Kind.CLEANROOM_MOD, ModSourceIndex.classify(mod("CRL", List.of("cleanroommod"), false)));
-        assertEquals(ModSourceIndex.Kind.CLEANROOM_MOD, ModSourceIndex.classify(mod("CRL", List.of(), true)));
+        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("cleanroommod"), false)));
+        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of(), true)));
     }
 
     @Test
@@ -57,7 +57,7 @@ public class ModSourceIndexTest {
         // sources that are not mods at all, keeps its rewrites (Minecraft's own OpenAL binding needs them)
         assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false)));
         assertEquals(ModSourceIndex.Kind.FORGE_MOD, ModSourceIndex.classify(mod("FML", List.of("renderlib"), false)));
-        assertEquals(ModSourceIndex.Kind.CLEANROOM_MOD, ModSourceIndex.classify(mod("CRL", List.of("codechickenlib"), false)));
+        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("codechickenlib"), false)));
     }
 
     @Test

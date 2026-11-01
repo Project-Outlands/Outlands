@@ -1,4 +1,4 @@
-package com.cleanroommc.loader;
+package net.minecraftforge.fml.common.registry;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
  *
  * @param <T> registered value type
  */
-public final class Registry<T> {
+public final class FrozenRegistry<T> {
 
     private final String name;
     private final Class<T> type;
@@ -44,7 +44,7 @@ public final class Registry<T> {
     private int size;
     private boolean frozen;
 
-    public Registry(String name, Class<T> type) {
+    public FrozenRegistry(String name, Class<T> type) {
         this.name = name;
         this.type = type;
     }

@@ -36,7 +36,7 @@ final class ModSourceIndex {
         /** A mod the Forge container type applies to: LWJGL2 call sites must be rewritten. */
         FORGE_MOD,
         /** A mod that declares {@code ModType: CRL}, i.e. one written against Cleanroom's own LWJGL3 API. */
-        CLEANROOM_MOD
+        LOADER_MOD
     }
 
     /**
@@ -98,7 +98,7 @@ final class ModSourceIndex {
             return Kind.NON_MOD;
         }
         return ManifestAttributes.CLEANROOMMODTYPE.equals(discovered.modType())
-                ? Kind.CLEANROOM_MOD
+                ? Kind.LOADER_MOD
                 : Kind.FORGE_MOD;
     }
 

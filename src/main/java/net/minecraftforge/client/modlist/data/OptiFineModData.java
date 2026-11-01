@@ -7,7 +7,7 @@ import net.minecraftforge.fml.common.ModContainer;
 
 import javax.annotation.Nullable;
 
-public class OptiFineModData extends CleanroomModData {
+public class OptiFineModData extends LoaderModData {
     private static final String VERSION_PREFIX = "OptiFine_1.12.2_";
     private final String version;
 

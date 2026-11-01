@@ -19,7 +19,7 @@
 
 package net.minecraftforge.fml.common.launcher;
 
-import net.minecraftforge.fml.common.CleanroomEnvironment;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import net.minecraft.launchwrapper.ITweaker;
@@ -194,6 +194,6 @@ public class FMLTweaker implements ITweaker {
 
     public void setSide()
     {
-        CleanroomEnvironment.setSide(Side.CLIENT);
+        FMLLaunchHandler.setSide(Side.CLIENT);
     }
 }

@@ -38,7 +38,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
-import com.cleanroommc.common.CleanroomVersion;
+import net.minecraftforge.common.LoaderVersion;
 import net.minecraft.crash.CrashReport;
 import net.minecraft.crash.CrashReportCategory;
 import net.minecraft.entity.item.EntityItem;
@@ -124,7 +124,7 @@ public class FMLCommonHandler
         registerCrashCallable(new ICrashCallable() {
             @Override
             public String call() {
-                return com.cleanroommc.common.CleanroomVersion.BUILD_VERSION;
+                return LoaderVersion.BUILD_VERSION;
             }
 
             @Override
@@ -242,7 +242,7 @@ public class FMLCommonHandler
             Builder<String> brd = ImmutableList.builder();
             brd.add(Loader.instance().getMCVersionString());
             brd.add(Loader.instance().getMCPVersionString());
-            brd.add("Cleanroom " + CleanroomVersion.BUILD_VERSION);
+            brd.add("Cleanroom " + LoaderVersion.BUILD_VERSION);
             if (sidedDelegate!=null)
             {
                 brd.addAll(sidedDelegate.getAdditionalBrandingInformation());
@@ -540,7 +540,7 @@ public class FMLCommonHandler
         List<String> modNames = Lists.newArrayListWithExpectedSize(3);
         modNames.add("fml");
         modNames.add(ForgeVersion.MOD_ID);
-        modNames.add(CleanroomVersion.MOD_ID);
+        modNames.add(LoaderVersion.MOD_ID);
 
         if (Loader.instance().getFMLBrandingProperties().containsKey("snooperbranding"))
         {

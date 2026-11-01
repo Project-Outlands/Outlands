@@ -1,4 +1,4 @@
-package com.cleanroommc.loader;
+package net.minecraftforge.fml.common.registry;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,21 +10,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Covers the two properties of {@link Registry} that a refactor could silently break: a duplicate id is a conflict
- * rather than an overwrite, and dropping the id index on {@link Registry#freeze()} must not break lookups.
+ * Covers the two properties of {@link FrozenRegistry} that a refactor could silently break: a duplicate id is a conflict
+ * rather than an overwrite, and dropping the id index on {@link FrozenRegistry#freeze()} must not break lookups.
  *
  * <p>The freeze path is the interesting one - it is a deliberate data-structure swap (map to array scan), so a bug
  * there shows up as a mod silently getting the wrong adapter, or none, after discovery ends.
  */
-class RegistryTest {
+class FrozenRegistryTest {
 
-    private static Registry<String> newRegistry() {
-        return new Registry<>("test entries", String.class);
+    private static FrozenRegistry<String> newRegistry() {
+        return new FrozenRegistry<>("test entries", String.class);
     }
 
     @Test
     void duplicateIdIsRejectedRatherThanOverwritten() {
-        Registry<String> registry = newRegistry();
+        FrozenRegistry<String> registry = newRegistry();
         registry.register("scala", "first");
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
@@ -39,7 +39,7 @@ class RegistryTest {
 
     @Test
     void registrationAfterFreezeIsRejected() {
-        Registry<String> registry = newRegistry();
+        FrozenRegistry<String> registry = newRegistry();
         registry.register("java", "adapter");
         registry.freeze();
 
@@ -50,7 +50,7 @@ class RegistryTest {
 
     @Test
     void lookupsStillWorkAfterTheIndexIsDropped() {
-        Registry<String> registry = newRegistry();
+        FrozenRegistry<String> registry = newRegistry();
         int scala = registry.register("scala", "scala-adapter");
         int kotlin = registry.register("kotlin", "kotlin-adapter");
         assertEquals(scala + 1, kotlin);
@@ -69,7 +69,7 @@ class RegistryTest {
 
     @Test
     void blankIdAndWrongTypeAreRejected() {
-        Registry<String> registry = newRegistry();
+        FrozenRegistry<String> registry = newRegistry();
         assertThrows(IllegalArgumentException.class, () -> registry.register("", "value"));
         assertThrows(IllegalArgumentException.class, () -> registry.register("  ", "value"));
         assertThrows(IllegalArgumentException.class, () -> registry.register("null-value", null));

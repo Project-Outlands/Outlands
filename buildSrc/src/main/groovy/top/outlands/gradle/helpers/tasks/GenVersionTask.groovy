@@ -7,7 +7,7 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 
 /**
- * Turns {@code templates/CleanroomVersion.java} into the {@code CleanroomVersion} class that the loader reports at
+ * Turns {@code templates/LoaderVersion.java} into the {@code LoaderVersion} class that the loader reports at
  * runtime.
  *
  * The version comes from {@code rootProject.version}, which the root build derives from the date (CalVer):
@@ -28,7 +28,7 @@ abstract class GenVersionTask extends DefaultTask {
 
     @InputFile
     File getTemplate() {
-        return project.rootProject.file('templates/CleanroomVersion.java')
+        return project.rootProject.file('templates/LoaderVersion.java')
     }
 
     /**
@@ -37,7 +37,7 @@ abstract class GenVersionTask extends DefaultTask {
      */
     @OutputFile
     File getVersionClass() {
-        return new File(project.layout.buildDirectory.get().asFile, 'generated/sources/cleanroomVersion/com/cleanroommc/common/CleanroomVersion.java')
+        return new File(project.layout.buildDirectory.get().asFile, 'generated/sources/loaderVersion/net/minecraftforge/common/LoaderVersion.java')
     }
 
     @TaskAction
