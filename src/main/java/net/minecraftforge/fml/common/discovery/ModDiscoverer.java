@@ -105,7 +105,6 @@ public final class ModDiscoverer {
     private final Map<File, JarScanRecord> scanRecords = new HashMap<>();
     private final Map<File, MetadataCollection> modMetadata = new HashMap<>();
     /** Bundled library id to the first declaration of it, for the report that two jars bundle different versions. */
-    private final Map<String, String> containedDepClaims = new HashMap<>();
     private final ASMDataTable asmDataTable = new ASMDataTable();
 
     private List<File> nonModLibs = List.of();
@@ -372,7 +371,6 @@ public final class ModDiscoverer {
                         if (!declaration.providers().isEmpty()) {
                             LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
                         }
-                        reportContainedDepClaims(file, declaration);
                         CleanroomLog.get().debug("{} declares {}", file.getName(), declaration);
                     }
                 }
@@ -513,29 +511,6 @@ public final class ModDiscoverer {
     }
 
     /**
-     * Reports bundled libraries that more than one jar claims with different versions.
-     *
-     * <p>1.12.2 has one class loader for every mod, so two versions of a library cannot both be on the classpath - only
-     * one of them can win, and which one used to be decided by extraction order. Saying so is the part that can be done
-     * without inventing a storage layout; choosing the winner needs the library directory that the contained-deps work
-     * builds.
-     */
-    private void reportContainedDepClaims(File file, JarDeclaration declaration) {
-        for (JarDeclaration.ContainedDep dep : declaration.containedDeps()) {
-            String key = dep.id();
-            String previous = containedDepClaims.get(key);
-            String current = dep.version() + " (" + file.getName() + ")";
-            if (previous == null) {
-                containedDepClaims.put(key, current);
-            } else if (!previous.startsWith(dep.version() + " ")) {
-                CleanroomLog.get().warn("Two jars bundle a library called \"{}\" with different versions: {} and {}."
-                        + " Only one version of a library can be on the classpath, so one of them will be shadowed.",
-                        key, previous, current);
-            }
-        }
-    }
-
-    /**
      * Puts the bundled entries a jar marked as libraries on the classpath, before its tweaker or coremod runs.
      *
      * <p>This is the job the {@code NonModDeps} manifest attribute used to do, at the same moment and for the same
@@ -549,6 +524,13 @@ public final class ModDiscoverer {
     private static void addDeclaredLibrariesToClasspath(LaunchClassLoader classLoader, File source, File containedDepsDir)
             throws MalformedURLException {
         for (JarDeclaration.ContainedDep dep : LibraryManager.declaredLibrariesOf(source)) {
+            if (LibraryManager.isBundledLibraryShadowed(source, dep)) {
+                // Not a failure: another jar bundles a higher version of the same library, and that one is on the
+                // classpath instead. Saying so at debug keeps the decision traceable without alarming anyone.
+                CleanroomLog.get().debug("{} bundles the library {}, which lost to another jar's higher version",
+                        source.getName(), dep.id());
+                continue;
+            }
             File extracted = LibraryManager.bundledLibraryNamed(new File(dep.path()).getName());
             if (extracted == null) {
                 // Said out loud rather than skipped: the jar promised the dependency and the coremod is about to run

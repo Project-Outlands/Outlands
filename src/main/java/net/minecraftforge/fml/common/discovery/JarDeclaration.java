@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraftforge.fml.common.LoaderException;
@@ -143,6 +145,30 @@ public final class JarDeclaration {
         public ContainedDep(String id, String version, String path) {
             this(id, version, path, ContainedDepKind.MOD);
         }
+
+        /** @return the entry's file name, which is what the loader sees on disk once it is extracted */
+        public String fileName() {
+            return path.substring(path.lastIndexOf('/') + 1);
+        }
+    }
+
+    /**
+     * Finds the declaration for a bundled entry.
+     *
+     * <p>Matched by full path or by file name: an entry may be looked up as {@code META-INF/libraries/x.jar} when the
+     * declaration said {@code x.jar}, and both spellings name the same thing inside the jar.
+     *
+     * @return the declared entry, or {@code null} when the declaration does not mention {@code path} at all
+     */
+    @Nullable
+    public ContainedDep depFor(String path) {
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        for (ContainedDep dep : containedDeps) {
+            if (dep.path().equals(path) || dep.fileName().equals(name)) {
+                return dep;
+            }
+        }
+        return null;
     }
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, List<ContainedDep> containedDeps,

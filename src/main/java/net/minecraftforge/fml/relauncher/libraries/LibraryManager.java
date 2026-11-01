@@ -49,6 +49,7 @@ import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.common.ForgeVersion;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.MetadataCollection;
+import net.minecraftforge.fml.common.discovery.BundledLibrarySelection;
 import net.minecraftforge.fml.common.discovery.JarDeclaration;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 
@@ -102,6 +103,12 @@ public class LibraryManager
      * running.
      */
     private static boolean deferringBundledDeps;
+
+    /**
+     * Which bundled copy of each library goes on the classpath. Computed once, immediately before extraction, because
+     * every candidate has to be known before any of them can be chosen.
+     */
+    private static BundledLibrarySelection bundledSelection = BundledLibrarySelection.empty();
     /** The list bundled jars are registered with once extraction runs, kept from setup so the two phases agree. */
     private static ModList deferredModList;
 
@@ -177,6 +184,12 @@ public class LibraryManager
         }
         List<File> pending = new ArrayList<>(pendingBundledDeps);
         pendingBundledDeps.clear();
+
+        bundledSelection = BundledLibrarySelection.select(collectLibraryClaims(pending));
+        for (String note : bundledSelection.notes())
+        {
+            FMLLog.log.warn(note);
+        }
 
         File mods = new File(minecraftHome, "mods");
         File mods_ver = new File(mods, ForgeVersion.mcVersion);
@@ -271,12 +284,65 @@ public class LibraryManager
     }
 
     /**
-     * @return the bundled entries {@code source} declares as libraries, in declaration order; empty when it declares none
-     *         or has no metadata
+     * Reads every pending jar's declarations and returns the libraries they claim to bundle.
+     *
+     * <p>Reads once, before anything is extracted, because choosing a winner needs all the candidates at the same time.
+     * That is the whole reason this is a separate pass rather than a check at extraction time.
      */
+    private static List<BundledLibrarySelection.Claim> collectLibraryClaims(List<File> pending)
+    {
+        List<BundledLibrarySelection.Claim> claims = new ArrayList<>();
+        for (File file : pending)
+        {
+            if (!file.isFile())
+            {
+                continue;
+            }
+            try (JarFile jar = new JarFile(file))
+            {
+                JarDeclaration declaration = declaredContainedDeps(jar);
+                if (declaration == null)
+                {
+                    continue;
+                }
+                for (JarDeclaration.ContainedDep dep : declaration.containedDeps())
+                {
+                    if (dep.kind() == JarDeclaration.ContainedDepKind.LIB)
+                    {
+                        claims.add(claimOf(dep, file.getName()));
+                    }
+                }
+            }
+            catch (IOException e)
+            {
+                FMLLog.log.debug("Could not read the bundled dependency declarations of {}", file.getName(), e);
+            }
+        }
+        return claims;
+    }
+
+    private static BundledLibrarySelection.Claim claimOf(JarDeclaration.ContainedDep dep, String sourceName)
+    {
+        return new BundledLibrarySelection.Claim(dep.id(), dep.version(), dep.path(), sourceName);
+    }
+
     /**
-     * @return where a bundled library called {@code fileName} was extracted, or {@code null} when no declaration claimed
-     *         it. Searched by name because the early injection is driven by the declaration, which may name a path inside
+     * @return whether {@code dep}, declared by {@code source}, lost to another jar's copy of the same library and is
+     *         therefore deliberately absent from the classpath. Calls out the difference between "another version won"
+     *         and "nothing extracted it", which are the same absence and very different problems.
+     */
+    public static boolean isBundledLibraryShadowed(File source, JarDeclaration.ContainedDep dep)
+    {
+        return dep.kind() == JarDeclaration.ContainedDepKind.LIB
+                && bundledSelection.isShadowed(claimOf(dep, source.getName()));
+    }
+
+    /**
+     * @return where a bundled library called {@code fileName} was extracted, or {@code null} when nothing was extracted
+     *         under that name - either because no declaration claimed it, or because another jar's copy of the same
+     *         library won the version comparison (see {@link #isBundledLibraryShadowed}).
+     *         <p>
+     *         Searched by name because the early injection is driven by the declaration, which may name a path inside
      *         the bundling jar while what lands on disk is only the file name.
      */
     @javax.annotation.Nullable
@@ -363,28 +429,6 @@ public class LibraryManager
         return readAll(jar.getInputStream(entry));
     }
 
-    /**
-     * Extracts a bundled library that carries no coordinates, into {@code libraries/contained/<sha1>.jar}.
-     *
-     * <p>Content-addressed on purpose: the file name is the only identity a coordinate-less library has, and two jars
-     * bundling different builds under the same name must not overwrite each other. It also makes the operation
-     * idempotent, so nothing has to remember what was extracted last run.
-     *
-     * <p>The directory is deliberately outside {@code mods/}: what lives there is scanned as mod candidates, and a
-     * bundled library is not one. The extracted file is offered to the candidate list directly instead.
-     */
-    /**
-     * Extracts a bundled jar that carries no coordinates, into
-     * {@code libraries/<id>/<version>/<sha1-12>-<name>.jar}.
-     *
-     * <p>Structured by id and version so the choice between two bundled versions is visible in the file listing, and so
-     * the directory says which one is in use rather than leaving it to whichever was extracted first. The hash keeps the
-     * operation idempotent and stops two builds under one file name from overwriting each other.
-     *
-     * <p>The directory is deliberately outside {@code mods/}: what lives there is scanned as mod candidates in its own
-     * right, and a bundled jar - which is often a prerequisite mod rather than a library - has to be loaded through the
-     * same pipeline that its declaration describes, not because it happened to sit in a folder.
-     */
     /**
      * Extracts one bundled jar next to the mods, where it has always been.
      *
@@ -498,6 +542,16 @@ public class LibraryManager
                 {
                     FMLLog.log.error("Contained Dep is not in the jar: {}", dep);
                     throw new IllegalStateException("Invalid contained dep, Missing from jar: " + dep);
+                }
+
+                // Another jar bundles a higher version of this library; extracting this copy would put two versions on
+                // one class loader, where which one is visible depends on lookup order.
+                JarDeclaration.ContainedDep declared = declaration == null ? null : declaration.depFor(dep);
+                if (declared != null && isBundledLibraryShadowed(new File(jar.getName()), declared))
+                {
+                    FMLLog.log.debug("Not extracting {} from {}: a higher version of \"{}\" is bundled elsewhere ({})",
+                            dep, new File(jar.getName()).getName(), declared.id(), bundledSelection.winnerVersion(declared.id()));
+                    continue;
                 }
 
                 String depEndName = new File(dep).getName(); // extract last part of name
