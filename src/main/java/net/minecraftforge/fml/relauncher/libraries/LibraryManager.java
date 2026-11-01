@@ -432,8 +432,25 @@ public class LibraryManager
         }
         try (InputStream in = jar.getInputStream(modInfo))
         {
-            return MetadataCollection.from(in, jar.getName()).getJarDeclaration();
+            return declarationOf(readAll(in), jar.getName());
         }
+    }
+
+    /**
+     * Parses the {@code jar} section out of raw {@code mcmod.info} bytes, or returns {@code null} when there is none.
+     *
+     * <p>Runs for every jar in the mods directory while the classpath is assembled, and the overwhelming majority of
+     * those files predate the section. Searching the text for the section name first turns that majority into one
+     * pass over a few kilobytes; a false positive only costs the parse that would have happened without the check.
+     */
+    @javax.annotation.Nullable
+    static JarDeclaration declarationOf(byte[] mcmodInfo, String sourceName)
+    {
+        if (new String(mcmodInfo, java.nio.charset.StandardCharsets.UTF_8).indexOf("\"jar\"") < 0)
+        {
+            return null;
+        }
+        return MetadataCollection.from(new ByteArrayInputStream(mcmodInfo), sourceName).getJarDeclaration();
     }
 
     private static Pair<Artifact, byte[]> extractPacked(File file, ModList modlist, File... modDirs)
@@ -537,32 +554,25 @@ public class LibraryManager
 
     private static Pair<Artifact, byte[]> extractPacked(JarFile jar, ModList modlist, File... modDirs) throws IOException
     {
-        Attributes attrs;
-        if (jar.getManifest() == null)
-            return null;
+        // A jar needs no manifest to bundle anything: the declaration in its mcmod.info is a complete statement on its
+        // own, and it is the only one available to a jar that carries no manifest at all.
+        Attributes attrs = jar.getManifest() == null ? null : jar.getManifest().getMainAttributes();
 
-        JarEntry manifest_entry = jar.getJarEntry(JarFile.MANIFEST_NAME);
-        if (manifest_entry == null)
-            manifest_entry = jar.stream().filter(e -> JarFile.MANIFEST_NAME.equals(e.getName().toUpperCase(Locale.ENGLISH))).findFirst().get(); //We know that getManifest returned non-null so we know there is *some* entry that matches the manifest file. So we dont need to empty check.
-
-        attrs = jar.getManifest().getMainAttributes();
-
-        String modSide = attrs.getValue(LibraryManager.MODSIDE);
+        String modSide = attrs == null ? null : attrs.getValue(LibraryManager.MODSIDE);
         if (modSide != null && !"BOTH".equals(modSide) && !FMLLaunchHandler.side().name().equals(modSide))
             return null;
 
-        if (deferringBundledDeps && attrs.containsKey(MODCONTAINSDEPS))
+        JarDeclaration declaration = declaredContainedDeps(jar);
+        List<String> bundled = containedDepPaths(attrs, declaration, jar.getName());
+        if (!bundled.isEmpty() && deferringBundledDeps)
         {
             // Extraction is an assembly step. Record the jar and let the first candidate request do it, so a directory is
             // not rewritten while it is being cleaned and the work happens once, at the moment it matters.
             pendingBundledDeps.add(new File(jar.getName()).getAbsoluteFile());
         }
-        else if (attrs.containsKey(MODCONTAINSDEPS))
+        else if (!bundled.isEmpty())
         {
-            // The jar's own declaration says which entries are libraries. The manifest key only lists paths, so an entry
-            // without a declaration is treated as a mod - which is what it always was.
-            JarDeclaration declaration = declaredContainedDeps(jar);
-            for (String dep : attrs.getValue(MODCONTAINSDEPS).split(" "))
+            for (String dep : bundled)
             {
                 if (!dep.endsWith(".jar"))
                 {
@@ -709,13 +719,71 @@ public class LibraryManager
             }
         }
 
-        if (attrs.containsKey(MAVEN_ARTIFACT))
+        if (attrs != null && attrs.containsKey(MAVEN_ARTIFACT))
         {
             Artifact artifact = readArtifact(modlist.getRepository(), attrs);
             modlist.add(artifact);
-            return Pair.of(artifact, readAll(jar.getInputStream(manifest_entry)));
+            JarEntry manifestEntry = manifestEntry(jar);
+            return manifestEntry == null ? null : Pair.of(artifact, readAll(jar.getInputStream(manifestEntry)));
         }
         return null;
+    }
+
+    /**
+     * The entries this jar says it bundles, in the order they should be extracted.
+     *
+     * <p>The declaration wins when it exists. It is the form that can also say <em>what</em> each entry is, and the
+     * only one available to a jar with no manifest. The legacy manifest key stays as the fallback for every jar
+     * written before the section existed - and for the plain library jars that will never have one.
+     *
+     * <p>Disagreeing with each other is reported rather than resolved silently: a jar that migrated to the declaration
+     * but left a stale key behind would otherwise drop entries with no trace.
+     */
+    static List<String> containedDepPaths(Attributes attrs, JarDeclaration declaration, String jarName)
+    {
+        List<String> declared = new ArrayList<>();
+        if (declaration != null)
+        {
+            for (JarDeclaration.ContainedDep dep : declaration.containedDeps())
+            {
+                declared.add(dep.path());
+            }
+        }
+
+        List<String> legacy = new ArrayList<>();
+        String value = attrs == null ? null : attrs.getValue(MODCONTAINSDEPS);
+        if (value != null)
+        {
+            for (String path : value.split(" "))
+            {
+                if (!path.isBlank())
+                {
+                    legacy.add(path);
+                }
+            }
+        }
+
+        if (declared.isEmpty())
+        {
+            return legacy;
+        }
+        if (!legacy.isEmpty() && !Set.copyOf(declared).equals(Set.copyOf(legacy)))
+        {
+            FMLLog.log.warn("{} declares its bundled entries twice and the two lists differ: mcmod.info says {}, the"
+                    + " ContainedDeps manifest attribute says {}. The mcmod.info declaration wins.", jarName, declared, legacy);
+        }
+        return declared;
+    }
+
+    /** The jar's manifest entry, matched the way {@link JarFile#getManifest()} matches it. */
+    private static JarEntry manifestEntry(JarFile jar)
+    {
+        JarEntry entry = jar.getJarEntry(JarFile.MANIFEST_NAME);
+        if (entry != null)
+        {
+            return entry;
+        }
+        return jar.stream().filter(e -> JarFile.MANIFEST_NAME.equalsIgnoreCase(e.getName())).findFirst().orElse(null);
     }
 
     private static Artifact readArtifact(Repository repo, Attributes meta)
