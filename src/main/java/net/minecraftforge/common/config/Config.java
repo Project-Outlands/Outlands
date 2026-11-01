@@ -35,8 +35,28 @@ public @interface Config
     /**
      * A user friendly name for the config file,
      * the default will be modid
+     * <p>
+     * This is a path relative to the {@link Storage storage} root, so {@code "sodium/quality"} puts the file in a
+     * {@code sodium} subdirectory. Only the file name part is touched by the format rules; the directories are used as
+     * written.
      */
     String name() default "";
+
+    /**
+     * Which directory tree this config lives in.
+     * <p>
+     * {@link Storage#INSTANCE} is the historical behaviour and what almost every config wants: a file inside the
+     * instance's {@code config/}. {@link Storage#USER} is for the kind of setting a player tunes once per machine and
+     * is annoyed to retune in every instance - render quality being the usual one.
+     * <p>
+     * A {@link Storage#USER} file is outside {@code config/}, so a modpack cannot patch it with {@code custom_config/}:
+     * that layer only mirrors files it can find under {@code config/}. This is deliberate - the whole point of the file
+     * is that it belongs to the player rather than to the pack.
+     * <p>
+     * There is no migration between the two. Moving a shipped config to {@link Storage#USER} leaves the old
+     * {@code config/} file unused, and the loader says so in the log rather than deleting or copying anything.
+     */
+    Storage storage() default Storage.INSTANCE;
 
     /**
      * The type this is, right now the only value is INSTANCE.
@@ -147,6 +167,27 @@ public @interface Config
         private boolean isStatic = true;
         Type(boolean isStatic) { this.isStatic = isStatic; }
         public boolean isStatic(){ return this.isStatic; }
+    }
+
+    /**
+     * Where the file is looked for. The root is all this chooses: {@link #name} still supplies the relative path and
+     * {@link #format} still supplies the extension.
+     */
+    enum Storage
+    {
+        /** {@code <instance>/config/}. The default, and byte-for-byte the historical layout. */
+        INSTANCE,
+
+        /**
+         * A per-user directory outside the instance, shared by every instance running as the same user.
+         * <p>
+         * The location is the platform's - {@code %APPDATA%} on Windows, {@code ~/.config} (or {@code $XDG_CONFIG_HOME})
+         * elsewhere - so it needs no absolute path in the annotation and stays inside what a sandboxed launcher allows.
+         * <p>
+         * On a dedicated server this directory means whatever the account the server runs as means; there is no
+         * per-user notion to appeal to there, so nothing special is done about it.
+         */
+        USER
     }
 
     /**

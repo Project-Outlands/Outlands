@@ -23,6 +23,16 @@ public interface ConfigEnvironment {
     /** The {@code config/} directory itself - the parent of every instance-level config file. */
     File configDir();
 
+    /**
+     * The per-user directory {@link Config.Storage#USER} configs live under, shared by every instance running as the
+     * same user.
+     *
+     * @return the directory, or {@code null} when this platform offers no answer (no {@code user.home}, no
+     *         {@code %APPDATA%}). Callers fall back to {@link #configDir()}, so an unresolvable machine still runs.
+     */
+    @Nullable
+    File userConfigDir();
+
     /** The class loader mod {@code @Config} classes are loaded with. */
     ClassLoader modClassLoader();
 

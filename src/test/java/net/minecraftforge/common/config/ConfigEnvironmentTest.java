@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import net.minecraftforge.fml.relauncher.Side;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,11 +37,25 @@ class ConfigEnvironmentTest {
         public static int count = 1;
     }
 
+    @Config(modid = "sharedmod", storage = Config.Storage.USER)
+    static class UserStoredConfig {
+        public static int count = 1;
+    }
+
     private static ConfigEnvironment environment(Path root, ClassLoader loader) {
+        return environment(root, null, loader);
+    }
+
+    private static ConfigEnvironment environment(Path root, Path userRoot, ClassLoader loader) {
         return new ConfigEnvironment() {
             @Override
             public File configDir() {
                 return root.resolve("config").toFile();
+            }
+
+            @Override
+            public File userConfigDir() {
+                return userRoot == null ? null : userRoot.toFile();
             }
 
             @Override
@@ -98,6 +113,64 @@ class ConfigEnvironmentTest {
         assertEquals(1, first.getCategory("general").get("count").getInt());
         assertEquals(2, second.getCategory("general").get("count").getInt());
         assertSame(Config.Format.CFG, Config.Format.byExtension("cfg"));
+    }
+
+    /**
+     * The reason {@link Config.Storage#USER} exists: one file for every instance on the machine. The instance's own
+     * {@code config/} still holds a file of the same name and is simply not this config.
+     */
+    @Test
+    void aUserStoredConfigIgnoresTheInstanceFile(@TempDir Path root) throws IOException {
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("user"));
+        Files.write(root.resolve("config/sharedmod.cfg"), "general {\n    I:count=1\n}\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("user/sharedmod.cfg"), "general {\n    I:count=5\n}\n".getBytes(StandardCharsets.UTF_8));
+
+        ConfigManager.setEnvironment(environment(root, root.resolve("user"), getClass().getClassLoader()));
+        Configuration cfg = ConfigManager.getConfiguration(UserStoredConfig.class.getAnnotation(Config.class));
+
+        assertEquals(5, cfg.getCategory("general").get("count").getInt(), "the user-level file is the one read");
+        assertEquals(root.resolve("user/sharedmod.cfg").toFile().getAbsolutePath(),
+                cfg.getConfigFile().getAbsolutePath());
+    }
+
+    /**
+     * No per-user directory means the file still has to live somewhere: failing the load would take the game down over
+     * a convenience, and pretending nothing happened would hide where the file went.
+     */
+    @Test
+    void withoutAUserDirectoryTheInstanceDirectoryIsUsed(@TempDir Path root) throws IOException {
+        Files.createDirectories(root.resolve("config"));
+        Files.write(root.resolve("config/sharedmod.cfg"), "general {\n    I:count=3\n}\n".getBytes(StandardCharsets.UTF_8));
+
+        ConfigManager.setEnvironment(environment(root, getClass().getClassLoader()));
+        Configuration cfg = ConfigManager.getConfiguration(UserStoredConfig.class.getAnnotation(Config.class));
+
+        assertEquals(3, cfg.getCategory("general").get("count").getInt());
+        assertEquals(root.resolve("config/sharedmod.cfg").toFile().getAbsolutePath(),
+                cfg.getConfigFile().getAbsolutePath());
+    }
+
+    /** A user-level file is outside {@code config/}, so no modpack patch can exist for it. */
+    @Test
+    void aUserStoredConfigHasNoPatchLayer(@TempDir Path root) {
+        ConfigManager.setEnvironment(environment(root, root.resolve("user"), getClass().getClassLoader()));
+        assertNull(ConfigManager.getConfiguration(UserStoredConfig.class.getAnnotation(Config.class)).getPatchLayer());
+    }
+
+    /** The escape hatch: a pack or a container pins the directory instead of relying on the home directory. */
+    @Test
+    void theUserConfigDirectoryCanBeOverridden() {
+        String previous = System.getProperty("cleanroom.userConfigDir");
+        try {
+            System.setProperty("cleanroom.userConfigDir", "/pinned/here");
+            assertEquals(new File("/pinned/here"), ConfigManager.findUserConfigDir());
+        } finally {
+            if (previous == null)
+                System.clearProperty("cleanroom.userConfigDir");
+            else
+                System.setProperty("cleanroom.userConfigDir", previous);
+        }
     }
 
     /**
