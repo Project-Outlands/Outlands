@@ -61,34 +61,34 @@ ALIAS	org/lwjgl/opengl/ARBBufferObject	glBufferSubDataARB	(IJLjava/nio/DoubleBuf
 #
 # ---------------------------------------------------------------- CTOR
 # new PointerBuffer(ByteBuffer) -> allocation of the subclass that keeps the container, as LWJGL2 did
-CTOR	org/lwjgl/PointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/ShimPointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	-
+CTOR	org/lwjgl/PointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	net/minecraftforge/lwjgl/legacy/ShimPointerBuffer	<init>	(Ljava/nio/ByteBuffer;)V	-
 #
 # ---------------------------------------------------------------- ADAPTER
 # both-exist classes: LWJGL3 dropped the member, the adapter rebuilds it from the modern API
-ADAPTER	org/lwjgl/PointerBuffer	getBuffer	()Ljava/nio/ByteBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	getBuffer	(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;	-
-ADAPTER	org/lwjgl/PointerBuffer	position	(I)Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	position	(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;	-
-ADAPTER	org/lwjgl/PointerBuffer	flip	()Lorg/lwjgl/PointerBuffer;	com/cleanroommc/lwjgl/legacy/L2Adapters	flip	(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;	-
-ADAPTER	org/lwjgl/openal/AL	create	()V	com/cleanroommc/lwjgl/legacy/L2Adapters	alCreate	()V	-
-ADAPTER	org/lwjgl/openal/AL	isCreated	()Z	com/cleanroommc/lwjgl/legacy/L2Adapters	isCreated	()Z	-
-ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformSize	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformSize	(II)I	-
-ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformType	(II)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniformType	(II)I	-
-ADAPTER	org/lwjgl/opengl/GL20	glShaderSource	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
-ADAPTER	org/lwjgl/opengl/ARBShaderObjects	glShaderSourceARB	(ILjava/nio/ByteBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
-ADAPTER	org/lwjgl/openal/AL	getDevice	()Lorg/lwjgl/openal/ALCdevice;	com/cleanroommc/lwjgl/legacy/L2Adapters	getDevice	()Lorg/lwjgl/openal/ALCdevice;	-
-ADAPTER	org/lwjgl/openal/ALC10	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	-
-ADAPTER	org/lwjgl/openal/ALC10	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	com/cleanroommc/lwjgl/legacy/L2Adapters	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	-
-ADAPTER	org/lwjgl/openal/ALC10	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	-
-ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(III)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniform	(III)Ljava/lang/String;	-
-ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	-
-ADAPTER	org/lwjgl/opengl/KHRDebug	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
-ADAPTER	org/lwjgl/opengl/GL43	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
-ADAPTER	org/lwjgl/opengl/ARBDebugOutput	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	-
-ADAPTER	org/lwjgl/opengl/AMDDebugOutput	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	-
-ADAPTER	org/lwjgl/opengl/GL32	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	com/cleanroommc/lwjgl/legacy/L2Adapters	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	-
-ADAPTER	org/lwjgl/opengl/GL32	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	-
-ADAPTER	org/lwjgl/opengl/GL32	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	-
-ADAPTER	org/lwjgl/opengl/GL32	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	com/cleanroommc/lwjgl/legacy/L2Adapters	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	-
-ADAPTER	org/lwjgl/opengl/GL32	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	com/cleanroommc/lwjgl/legacy/L2Adapters	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	-
+ADAPTER	org/lwjgl/PointerBuffer	getBuffer	()Ljava/nio/ByteBuffer;	net/minecraftforge/lwjgl/legacy/L2Adapters	getBuffer	(Lorg/lwjgl/PointerBuffer;)Ljava/nio/ByteBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	position	(I)Lorg/lwjgl/PointerBuffer;	net/minecraftforge/lwjgl/legacy/L2Adapters	position	(Lorg/lwjgl/PointerBuffer;I)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/PointerBuffer	flip	()Lorg/lwjgl/PointerBuffer;	net/minecraftforge/lwjgl/legacy/L2Adapters	flip	(Lorg/lwjgl/PointerBuffer;)Lorg/lwjgl/PointerBuffer;	-
+ADAPTER	org/lwjgl/openal/AL	create	()V	net/minecraftforge/lwjgl/legacy/L2Adapters	alCreate	()V	-
+ADAPTER	org/lwjgl/openal/AL	isCreated	()Z	net/minecraftforge/lwjgl/legacy/L2Adapters	isCreated	()Z	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformSize	(II)I	net/minecraftforge/lwjgl/legacy/L2Adapters	glGetActiveUniformSize	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniformType	(II)I	net/minecraftforge/lwjgl/legacy/L2Adapters	glGetActiveUniformType	(II)I	-
+ADAPTER	org/lwjgl/opengl/GL20	glShaderSource	(ILjava/nio/ByteBuffer;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
+ADAPTER	org/lwjgl/opengl/ARBShaderObjects	glShaderSourceARB	(ILjava/nio/ByteBuffer;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glShaderSource	(ILjava/nio/ByteBuffer;)V	-
+ADAPTER	org/lwjgl/openal/AL	getDevice	()Lorg/lwjgl/openal/ALCdevice;	net/minecraftforge/lwjgl/legacy/L2Adapters	getDevice	()Lorg/lwjgl/openal/ALCdevice;	-
+ADAPTER	org/lwjgl/openal/ALC10	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	net/minecraftforge/lwjgl/legacy/L2Adapters	alcGetString	(Lorg/lwjgl/openal/ALCdevice;I)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/openal/ALC10	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	net/minecraftforge/lwjgl/legacy/L2Adapters	alcIsExtensionPresent	(Lorg/lwjgl/openal/ALCdevice;Ljava/lang/String;)Z	-
+ADAPTER	org/lwjgl/openal/ALC10	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	alcGetInteger	(Lorg/lwjgl/openal/ALCdevice;ILjava/nio/IntBuffer;)V	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(III)Ljava/lang/String;	net/minecraftforge/lwjgl/legacy/L2Adapters	glGetActiveUniform	(III)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/opengl/GL20	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	net/minecraftforge/lwjgl/legacy/L2Adapters	glGetActiveUniform	(IIILjava/nio/IntBuffer;)Ljava/lang/String;	-
+ADAPTER	org/lwjgl/opengl/KHRDebug	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
+ADAPTER	org/lwjgl/opengl/GL43	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glDebugMessageCallback	(Lorg/lwjgl/opengl/KHRDebugCallback;)V	-
+ADAPTER	org/lwjgl/opengl/ARBDebugOutput	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glDebugMessageCallbackARB	(Lorg/lwjgl/opengl/ARBDebugOutputCallback;)V	-
+ADAPTER	org/lwjgl/opengl/AMDDebugOutput	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glDebugMessageCallbackAMD	(Lorg/lwjgl/opengl/AMDDebugOutputCallback;)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	net/minecraftforge/lwjgl/legacy/L2Adapters	glFenceSync	(II)Lorg/lwjgl/opengl/GLSync;	-
+ADAPTER	org/lwjgl/opengl/GL32	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	net/minecraftforge/lwjgl/legacy/L2Adapters	glGetSynci	(Lorg/lwjgl/opengl/GLSync;I)I	-
+ADAPTER	org/lwjgl/opengl/GL32	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	net/minecraftforge/lwjgl/legacy/L2Adapters	glDeleteSync	(Lorg/lwjgl/opengl/GLSync;)V	-
+ADAPTER	org/lwjgl/opengl/GL32	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	net/minecraftforge/lwjgl/legacy/L2Adapters	glClientWaitSync	(Lorg/lwjgl/opengl/GLSync;IJ)I	-
 # the typed suffix family is ambiguous here (iv vs uiv), so pin the signed form
 RENAME	org/lwjgl/opengl/GL15	glGetQueryObject	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectiv	(IILjava/nio/IntBuffer;)V	-
 RENAME	org/lwjgl/opengl/GL15	glGetQueryObjectu	(IILjava/nio/IntBuffer;)V	org/lwjgl/opengl/GL15	glGetQueryObjectuiv	(IILjava/nio/IntBuffer;)V	-
