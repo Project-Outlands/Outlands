@@ -55,6 +55,25 @@ public class ModClassLoader extends URLClassLoader
         this.sources = Lists.newArrayList();
     }
 
+    /**
+     * Adds a class path entry that is not a file on disk, such as a library mounted inside another jar.
+     *
+     * <p>Skips entries that are already there. A bundled library is registered twice - once by the early injection that
+     * has to beat a coremod's {@code injectIntoClassLoader}, and once with the rest of the mods - and adding the same
+     * URL twice would only make every class lookup walk the same jar again.
+     */
+    public void addURL(URL url)
+    {
+        for (URL existing : mainClassLoader.getURLs())
+        {
+            if (existing.equals(url))
+            {
+                return;
+            }
+        }
+        mainClassLoader.addURL(url);
+    }
+
     public void addFile(File modFile) throws MalformedURLException
     {
         mainClassLoader.addURL(modFile.getAbsoluteFile().toURI().toURL());

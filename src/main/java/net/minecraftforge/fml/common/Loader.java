@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Reader;
+import java.net.URL;
 import java.io.Writer;
 import java.net.MalformedURLException;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +42,7 @@ import net.minecraftforge.cleanmix.CleanMixHooks;
 import net.minecraftforge.client.LoadingTracker;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
+import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
 import net.minecraftforge.fml.common.discovery.IdentifiedMods;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraft.util.ResourceLocation;
@@ -511,6 +513,13 @@ public class Loader
         ModAPIManager.INSTANCE.cleanupAPIContainers(modController.getActiveModList());
         ModAPIManager.INSTANCE.cleanupAPIContainers(mods);
         mods = ImmutableList.copyOf(mods);
+        // Bundled libraries that are served straight out of their parent jar. Ordinary mods have no other way in: the
+        // extracted-file path reaches the class path through nonModLibs, and a mounted library is not a file at all.
+        for (URL mounted : LibraryManager.mountedLibraries())
+        {
+            FMLLog.log.info("Mounting the bundled library {} onto the classpath.", mounted);
+            modClassLoader.addURL(mounted);
+        }
         for (File nonMod : identifiedMods.nonModLibs())
         {
             if (nonMod.isFile())

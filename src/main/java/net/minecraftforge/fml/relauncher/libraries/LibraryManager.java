@@ -21,11 +21,13 @@ package net.minecraftforge.fml.relauncher.libraries;
 
 import java.io.*;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.security.CodeSource;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -109,6 +111,13 @@ public class LibraryManager
      * every candidate has to be known before any of them can be chosen.
      */
     private static BundledLibrarySelection bundledSelection = BundledLibrarySelection.empty();
+
+    /**
+     * Bundled libraries that are served straight out of their parent jar rather than extracted.
+     *
+     * <p>Keyed by the file name the declaration names, which is also how the early injection looks them up.
+     */
+    private static final Map<String, URL> mountedLibraries = new LinkedHashMap<>();
     /** The list bundled jars are registered with once extraction runs, kept from setup so the two phases agree. */
     private static ModList deferredModList;
 
@@ -190,6 +199,10 @@ public class LibraryManager
         {
             FMLLog.log.warn(note);
         }
+        // Named once per launch so a bug report says which mode produced it.
+        FMLLog.log.info("Bundled libraries are handled by {}", NestedLibraryJars.enabled()
+                ? "serving them from inside their parent jar (no extraction)"
+                : "extracting them next to the mods (-Dcleanroom.nestedJars=extract)");
 
         File mods = new File(minecraftHome, "mods");
         File mods_ver = new File(mods, ForgeVersion.mcVersion);
@@ -335,6 +348,29 @@ public class LibraryManager
     {
         return dep.kind() == JarDeclaration.ContainedDepKind.LIB
                 && bundledSelection.isShadowed(claimOf(dep, source.getName()));
+    }
+
+    /**
+     * @return the classpath URL for a bundled library, whether it is mounted inside its parent jar or extracted to disk,
+     *         or {@code null} when neither exists
+     */
+    @javax.annotation.Nullable
+    public static URL bundledLibraryUrl(File source, JarDeclaration.ContainedDep dep)
+            throws java.net.MalformedURLException
+    {
+        URL mounted = mountedLibraries.get(dep.fileName());
+        if (mounted != null)
+        {
+            return mounted;
+        }
+        File extracted = bundledLibraryNamed(dep.fileName());
+        return extracted == null ? null : extracted.getAbsoluteFile().toURI().toURL();
+    }
+
+    /** @return the bundled libraries that are served from inside their parent jar, in the order they were found */
+    public static List<URL> mountedLibraries()
+    {
+        return List.copyOf(mountedLibraries.values());
     }
 
     /**
@@ -552,6 +588,21 @@ public class LibraryManager
                     FMLLog.log.debug("Not extracting {} from {}: a higher version of \"{}\" is bundled elsewhere ({})",
                             dep, new File(jar.getName()).getName(), declared.id(), bundledSelection.winnerVersion(declared.id()));
                     continue;
+                }
+
+                // A declared library never has to touch the disk: the class loader can read it out of this jar. This is
+                // the whole point of NestedLibraryJars, and the reason nothing else in this loop needs to change.
+                if (declared != null && declared.kind() == JarDeclaration.ContainedDepKind.LIB && NestedLibraryJars.enabled())
+                {
+                    URL mounted = NestedLibraryJars.urlFor(new File(jar.getName()), dep);
+                    if (mounted != null)
+                    {
+                        mountedLibraries.put(declared.fileName(), mounted);
+                        FMLLog.log.debug("Mounted the bundled library {} from {} without extracting it", dep, new File(jar.getName()).getName());
+                        continue;
+                    }
+                    FMLLog.log.warn("{} declares the bundled library {}, but the entry is missing; extracting instead",
+                            new File(jar.getName()).getName(), dep);
                 }
 
                 String depEndName = new File(dep).getName(); // extract last part of name

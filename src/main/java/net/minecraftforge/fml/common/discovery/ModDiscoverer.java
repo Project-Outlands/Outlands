@@ -531,15 +531,16 @@ public final class ModDiscoverer {
                         source.getName(), dep.id());
                 continue;
             }
-            File extracted = LibraryManager.bundledLibraryNamed(new File(dep.path()).getName());
-            if (extracted == null) {
+            // Either a URL into the parent jar or a file that was extracted beside the mods, depending on the mode.
+            java.net.URL library = LibraryManager.bundledLibraryUrl(source, dep);
+            if (library == null) {
                 // Said out loud rather than skipped: the jar promised the dependency and the coremod is about to run
                 // without it, which is the failure mode this early injection exists to prevent.
-                CleanroomLog.get().warn("{} declares the bundled library {}, but it was not extracted",
+                CleanroomLog.get().warn("{} declares the bundled library {}, but it is neither mounted nor extracted",
                         source.getName(), dep.path());
                 continue;
             }
-            classLoader.addURL(extracted.getAbsoluteFile().toURI().toURL());
+            classLoader.addURL(library);
         }
     }
 
