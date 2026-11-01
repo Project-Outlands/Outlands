@@ -304,7 +304,10 @@ public final class ModDiscoverer {
             return;
         }
         if (!isArchive(absolute)) {
-            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, false, false, false, null, null);
+            // A candidate that is not an archive is a directory on the classpath: the output directory of the module
+            // being developed, built against the current environment. It has no metadata to parse and no LWJGL2 code
+            // to rewrite, so it is the one source classified as modern without a declaration.
+            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, true, false, false, false, null, null);
             discoveredFiles.put(absolute, info);
             return;
         }
@@ -313,6 +316,7 @@ public final class ModDiscoverer {
         Set<String> modIds = new LinkedHashSet<>();
         String modType = ManifestAttributes.FORGEMODTYPE;
         String coremod = null, tweaker = null;
+        boolean modernMetadata = false;
         boolean hasMixinManifestAttributes = false, mixinTweakerForceMod = false, coreModContainsMod = false;
 
         try (JarFile jarFile = new JarFile(absolute)) {
@@ -358,6 +362,9 @@ public final class ModDiscoverer {
                     }
                     JarDeclaration declaration = metadata.getJarDeclaration();
                     if (declaration != null) {
+                        // Declaring the section is the jar putting itself in the current world: current metadata schema,
+                        // current environment, no LWJGL2 API. That is what the LWJGL2 filter reads, see DiscoveredMod.
+                        modernMetadata = true;
                         if (declaration.schemaVersion() > JarDeclaration.CURRENT_SCHEMA) {
                             FMLLog.log.warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
                                     file.getName(), declaration.schemaVersion(), JarDeclaration.CURRENT_SCHEMA, JarDeclaration.CURRENT_SCHEMA);
@@ -411,6 +418,7 @@ public final class ModDiscoverer {
                 attributes,
                 List.copyOf(modIds),
                 modType,
+                modernMetadata,
                 hasMixinManifestAttributes,
                 mixinTweakerForceMod,
                 coreModContainsMod,
@@ -463,6 +471,9 @@ public final class ModDiscoverer {
                 return;
             }
 
+            // The last reader of ModType, kept as it was: a jar built for a different loader is ignored rather than
+            // rejected. It says nothing about the code inside - a jar declaring CRL was written while both LWJGL
+            // generations were reachable - so the LWJGL2 filter decides on modernMetadata instead.
             String modType = discoveredMod.modType();
             if (!ManifestAttributes.FORGEMODTYPE.equals(modType) && !ManifestAttributes.CLEANROOMMODTYPE.equals(modType)) {
                 FMLLog.log.warn("Adding {} to the list of things to skip. It is not an FML or Outlands mod, it is of type: {}", file.getName(), modType);

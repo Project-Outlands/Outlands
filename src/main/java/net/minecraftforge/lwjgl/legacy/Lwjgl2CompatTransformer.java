@@ -18,18 +18,20 @@ import org.apache.logging.log4j.Logger;
  * Never modifies {@code org.lwjgl.**}: missing classes are provided separately, missing members go through adapters.
  *
  * <p>Which sources may be rewritten is decided by the mod markings of the early scan, see {@link ModSourceIndex}.
- * The point is not speed: a mod declaring {@code ModType: CRL} is written against the LWJGL3 API, so rewriting it
- * means second-guessing code that is already up to date. Everything else stays rewritten - non-mod sources included:
- * the OpenAL binding Minecraft itself ships ({@code paulscode/sound/libraries}) carries LWJGL2 call sites and only
- * works because this transformer converts them. The mode is selected by {@code -Doutlands.lwjgl2.filter}:
+ * The point is not speed: a jar that declares the current {@code mcmod.info} schema was built against an environment
+ * that offers no LWJGL2 API, so rewriting it means second-guessing code that is already up to date. Everything else
+ * stays rewritten, including jars declaring {@code ModType: CRL} - those were written while both generations were
+ * reachable. Non-mod sources stay rewritten too: the OpenAL binding Minecraft itself ships
+ * ({@code paulscode/sound/libraries}) carries LWJGL2 call sites and only works because this transformer converts
+ * them. The mode is selected by {@code -Doutlands.lwjgl2.filter}:
  * <ul>
  *   <li>{@code off} (default) - no classification at all, behave exactly like before;</li>
  *   <li>{@code measure} - transform as before, and report where the filter would have changed the outcome;</li>
- *   <li>{@code skip} - leave the classes of an Outlands mod alone, rewrite everything else.</li>
+ *   <li>{@code skip} - leave the classes of a modern mod alone, rewrite everything else.</li>
  * </ul>
  *
- * <p>{@code measure} answers the only question that matters for correctness: whether an Outlands mod is being
- * rewritten today, i.e. whether there is anything to prevent at all.
+ * <p>{@code measure} answers the only question that matters for correctness: whether a modern mod is being rewritten
+ * today, i.e. whether its declaration and its bytecode agree at all.
  */
 public class Lwjgl2CompatTransformer implements IClassTransformer {
 
@@ -63,10 +65,10 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
     private static final Map<ModSourceIndex.Kind, LongAdder> SEEN = counters();
     private static final Map<ModSourceIndex.Kind, LongAdder> SKIPPED = counters();
     private static final Map<ModSourceIndex.Kind, LongAdder> REWRITTEN = counters();
-    /** Classes a skip would have dropped although this transformer rewrote them; the false-negative evidence. */
-    private static final Map<ModSourceIndex.Kind, LongAdder> DROPPED = counters();
-    private static final Set<String> DROPPED_SOURCES = ConcurrentHashMap.newKeySet();
-    private static final Set<String> LOADER_REWRITTEN = ConcurrentHashMap.newKeySet();
+    /** Classes a modern mod should never have had; their presence means the declaration and the bytecode disagree. */
+    private static final Map<ModSourceIndex.Kind, LongAdder> MODERN_REWRITTEN = counters();
+    private static final Set<String> MODERN_SOURCES = ConcurrentHashMap.newKeySet();
+    private static final Set<String> MODERN_CLASSES = ConcurrentHashMap.newKeySet();
     private static final LongAdder CLASSIFIED = new LongAdder();
     private static final AtomicInteger SINCE_REPORT = new AtomicInteger();
     private static final AtomicBoolean ANNOUNCED = new AtomicBoolean();
@@ -97,7 +99,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
                 SINCE_REPORT.set(0);
                 report();
             }
-            if (SKIP && kind == ModSourceIndex.Kind.LOADER_MOD) {
+            if (SKIP && kind == ModSourceIndex.Kind.MODERN) {
                 SKIPPED.get(kind).increment();
                 return basicClass;
             }
@@ -113,17 +115,18 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
             }
             if (CLASSIFY) {
                 REWRITTEN.get(kind).increment();
-                if (kind == ModSourceIndex.Kind.LOADER_MOD) {
-                    // An Outlands mod class was rewritten: exactly the redundant work the filter exists to prevent.
-                    // Report it immediately, one line per source, so a short run leaves evidence instead of
-                    // depending on a periodic summary.
-                    DROPPED.get(kind).increment();
+                if (kind == ModSourceIndex.Kind.MODERN) {
+                    // A jar that declares the current schema should not reference LWJGL2 members at all. Report it
+                    // immediately, one line per source, so a short run leaves evidence instead of depending on the
+                    // periodic summary. With skip on, such a class was dropped before reaching here.
+                    MODERN_REWRITTEN.get(kind).increment();
                     String source = describeSource(internal);
-                    if (DROPPED_SOURCES.size() < SOURCE_SAMPLES && DROPPED_SOURCES.add(source)) {
-                        LOGGER.info("rewrote {} class {} from {}", kind, internal, source);
+                    if (MODERN_SOURCES.size() < SOURCE_SAMPLES && MODERN_SOURCES.add(source)) {
+                        LOGGER.warn("{} class {} references an LWJGL2 member although its jar declares the current"
+                                + " metadata schema, from {}", kind, internal, source);
                     }
-                    if (LOADER_REWRITTEN.size() < SOURCE_SAMPLES) {
-                        LOADER_REWRITTEN.add(internal);
+                    if (MODERN_CLASSES.size() < SOURCE_SAMPLES) {
+                        MODERN_CLASSES.add(internal);
                     }
                 }
             }
@@ -149,12 +152,12 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
         if (SKIP) {
             LOGGER.info("  skipped:   {}", SKIPPED);
         }
-        if (!isEmpty(DROPPED)) {
-            LOGGER.info("  rewritten although an Outlands mod (a skip would drop these): {}", DROPPED);
-            LOGGER.info("  sources:   {}", DROPPED_SOURCES);
+        if (!isEmpty(MODERN_REWRITTEN)) {
+            LOGGER.warn("  rewritten although their jar declares the current schema: {}", MODERN_REWRITTEN);
+            LOGGER.warn("  sources:   {}", MODERN_SOURCES);
         }
-        if (!LOADER_REWRITTEN.isEmpty()) {
-            LOGGER.info("  Outlands mod classes rewritten: {}", LOADER_REWRITTEN);
+        if (!MODERN_CLASSES.isEmpty()) {
+            LOGGER.warn("  modern mod classes referencing LWJGL2 members: {}", MODERN_CLASSES);
         }
     }
 

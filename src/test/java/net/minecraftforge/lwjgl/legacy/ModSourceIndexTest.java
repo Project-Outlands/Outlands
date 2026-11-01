@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * The policy the LWJGL2 transformer applies: whose classes may be rewritten.
+ *
+ * <p>Two separate questions decide it. The scan decides what is a mod at all; the {@code mcmod.info} decides whether
+ * that mod was built against an environment that still offers the LWJGL2 API.
  */
 public class ModSourceIndexTest {
 
@@ -24,40 +27,47 @@ public class ModSourceIndexTest {
     @Test
     public void manifestModTypeAloneIsNotEnough() {
         // a jar scanned but without any mod marking: ModType defaults to FML, which must not make it a mod
-        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false)));
-        // nor does an explicit CRL make a non-mod into an Outlands mod: the scan decides what is a mod
-        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("CRL", List.of(), false)));
+        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false, false)));
+        // nor does an explicit CRL make a non-mod into a modern one: the scan decides what is a mod
+        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("CRL", List.of(), false, true)));
     }
 
     @Test
-    public void modIdsMakeItAForgeMod() {
-        assertEquals(ModSourceIndex.Kind.FORGE_MOD, ModSourceIndex.classify(mod("FML", List.of("sample"), false)));
+    public void modsWithoutCurrentMetadataAreLegacy() {
+        // FML, no manifest at all, and CRL alike: all of them were written while both LWJGL generations were reachable
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("FML", List.of("sample"), false, false)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("FML", List.of("legacy"), false, false)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("CRL", List.of("old"), false, false)));
     }
 
     @Test
-    public void modWithoutModTypeOrManifestIsStillAForgeMod() {
-        // neither attribute exists in the wild for most mods; the mod id from mcmod.info or @Mod is what counts
-        assertEquals(ModSourceIndex.Kind.FORGE_MOD, ModSourceIndex.classify(mod("FML", List.of("legacy"), false)));
+    public void loaderModTypeNoLongerSkipsRewriting() {
+        // the reason this policy exists: a jar that declared ModType: CRL could call both APIs, so its LWJGL2 call
+        // sites are exactly what this transformer is for
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("CRL", List.of("loadermod"), false, false)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("CRL", List.of(), true, false)));
     }
 
     @Test
-    public void loaderModTypeWinsAmongMods() {
-        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("loadermod"), false)));
-        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of(), true)));
+    public void currentMetadataSchemaIsTheOnlyThingThatSkips() {
+        assertEquals(ModSourceIndex.Kind.MODERN, ModSourceIndex.classify(mod("FML", List.of("modern"), false, true)));
+        assertEquals(ModSourceIndex.Kind.MODERN, ModSourceIndex.classify(mod("CRL", List.of("modern"), false, true)));
+        // metadata does not decide what a mod is, only how to treat one
+        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false, true)));
     }
 
     @Test
     public void mixinOrCoremodMarkingMakesItAMod() {
-        assertEquals(ModSourceIndex.Kind.FORGE_MOD, ModSourceIndex.classify(mod("FML", List.of(), true)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("FML", List.of(), true, false)));
+        assertEquals(ModSourceIndex.Kind.MODERN, ModSourceIndex.classify(mod("FML", List.of(), true, true)));
     }
 
     @Test
-    public void onlyLoaderModsAreLeftAlone() {
-        // the filter may only skip what is known to be written against the LWJGL3 API; everything else, including
-        // sources that are not mods at all, keeps its rewrites (Minecraft's own OpenAL binding needs them)
-        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false)));
-        assertEquals(ModSourceIndex.Kind.FORGE_MOD, ModSourceIndex.classify(mod("FML", List.of("renderlib"), false)));
-        assertEquals(ModSourceIndex.Kind.LOADER_MOD, ModSourceIndex.classify(mod("CRL", List.of("codechickenlib"), false)));
+    public void everythingButModernModsKeepsItsRewrites() {
+        // Minecraft's own OpenAL binding needs the rewrite and is not a mod at all
+        assertEquals(ModSourceIndex.Kind.NON_MOD, ModSourceIndex.classify(mod("FML", List.of(), false, false)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("FML", List.of("renderlib"), false, false)));
+        assertEquals(ModSourceIndex.Kind.LEGACY, ModSourceIndex.classify(mod("CRL", List.of("codechickenlib"), false, false)));
     }
 
     @Test
@@ -81,7 +91,7 @@ public class ModSourceIndexTest {
         }
     }
 
-    private static DiscoveredMod mod(String modType, List<String> modIds, boolean mixinAttributes) {
-        return new DiscoveredMod(SOURCE, null, modIds, modType, mixinAttributes, false, false, null, null);
+    private static DiscoveredMod mod(String modType, List<String> modIds, boolean mixinAttributes, boolean modernMetadata) {
+        return new DiscoveredMod(SOURCE, null, modIds, modType, modernMetadata, mixinAttributes, false, false, null, null);
     }
 }
