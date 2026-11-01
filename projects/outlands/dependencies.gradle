@@ -38,6 +38,9 @@ configurations {
     }
 }
 
+// Also expanded into cleanmix.info by build.gradle, so it is named once here rather than twice.
+ext.cleanmixVersion = '0.7.4'
+
 dependencies {
     lwjglLibraries[0].each {
         lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
@@ -57,10 +60,11 @@ dependencies {
     }
 
     // Config formats. These are loader-level libraries, so they belong on the launcher classpath rather than inside
-    // any jar: config files are read before mods are constructed.
-    installer "org.tomlj:tomlj:$props.tomlj_version"
-    installer "com.typesafe:config:$props.typesafe_config_version"
-    installer "org.snakeyaml:snakeyaml-engine:$props.snakeyaml_engine_version"
+    // any jar: config files are read before mods are constructed. The versions are inline: a property in
+    // gradle.properties only earns its keep when several dependencies are upgraded together.
+    installer 'org.tomlj:tomlj:2.2.0'
+    installer 'com.typesafe:config:1.4.9'
+    installer 'org.snakeyaml:snakeyaml-engine:2.10'
 
     // ASM
     installer "org.ow2.asm:asm:$props.asm_version"
@@ -163,7 +167,7 @@ dependencies {
     installer 'ca.weblite:java-objc-bridge:1.2'
 
     // Mixin
-    installer "com.cleanroommc:cleanmix:$props.cleanmix_version"
+    installer "com.cleanroommc:cleanmix:$cleanmixVersion"
     installer annotationProcessor('com.cleanroommc:mixinextras-common:0.5.5')
 
     testImplementation platform('org.junit:junit-bom:6.1.3')

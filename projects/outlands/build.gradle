@@ -215,9 +215,9 @@ processResources {
     from(mcpBase.obf2Srg) {
         rename { "deobf_data-${props.minecraft_version}.tsrg" }
     }
-    inputs.property 'cleanmix_version', props.cleanmix_version
+    inputs.property 'cleanmix_version', project.ext.cleanmixVersion
     filesMatching('cleanmix.info') {
-        expand cleanmix_version: props.cleanmix_version
+        expand cleanmix_version: project.ext.cleanmixVersion
     }
 }
 

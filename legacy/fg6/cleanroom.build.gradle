@@ -401,7 +401,7 @@ dependencies {
     installer 'ca.weblite:java-objc-bridge:1.2'
 
     // Mixin
-    installer "com.cleanroommc:cleanmix:$props.cleanmix_version"
+    installer "com.cleanroommc:cleanmix:${project.ext.cleanmixVersion}"
     installer annotationProcessor('com.cleanroommc:mixinextras-common:0.5.5')
 
     testImplementation platform('org.junit:junit-bom:6.1.3')
@@ -411,9 +411,9 @@ dependencies {
 }
 
 processResources {
-    inputs.property 'cleanmix_version', props.cleanmix_version
+    inputs.property 'cleanmix_version', project.ext.cleanmixVersion
     filesMatching('cleanmix.info') {
-        expand cleanmix_version: props.cleanmix_version
+        expand cleanmix_version: project.ext.cleanmixVersion
     }
 }
 
