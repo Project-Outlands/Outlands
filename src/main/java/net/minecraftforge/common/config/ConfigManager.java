@@ -58,6 +58,7 @@ public class ConfigManager
     private static final Map<Class<?>, Configuration> CLASS_TO_CONFIG = Maps.newHashMap();
     /** Absolute paths already mentioned in a startup log line, so a file is only explained once. */
     private static final Set<String> WARNED_RESOLUTIONS = Sets.newHashSet();
+    private static ConfigEnvironment environment;
 
     static
     {
@@ -160,8 +161,8 @@ public class ConfigManager
     public static void sync(String modid, Config.Type type)
     {
         FMLLog.log.debug("Attempting to inject @Config classes into {} for type {}", modid, type);
-        ClassLoader mcl = Loader.instance().getModClassLoader();
-        File configDir = Loader.instance().getConfigDir();
+        ClassLoader mcl = environment().modClassLoader();
+        File configDir = environment().configDir();
         Multimap<Config.Type, ASMData> map = asm_data.get(modid);
 
         if (map == null)
@@ -194,7 +195,7 @@ public class ConfigManager
 
                 Config.Format declared = config != null ? config.format() : null;
                 Configuration cfg = configuration(ConfigFileResolver.resolve(configDir, modid, name, declared));
-                sync(cfg, cls, modid, category, !Loader.instance().hasReachedState(LoaderState.AVAILABLE), null);
+                sync(cfg, cls, modid, category, environment().loading(), null);
 
                 cfg.save();
                 touched.add(cfg);
@@ -212,6 +213,56 @@ public class ConfigManager
             ConfigPatch.reportUnused(cfg);
     }
 
+    /**
+     * Tells the config subsystem what it is running inside. The loader does this once it knows its directories; until
+     * then a loader-backed default is used so that early calls behave exactly as before.
+     */
+    public static void setEnvironment(ConfigEnvironment env)
+    {
+        environment = env;
+    }
+
+    static ConfigEnvironment environment()
+    {
+        ConfigEnvironment env = environment;
+        if (env != null)
+            return env;
+
+        if (fallback == null)
+            fallback = new LoaderEnvironment();
+        return fallback;
+    }
+
+    private static ConfigEnvironment fallback;
+
+    /** The pre-injection behaviour, kept in one place instead of at every call site. */
+    private static final class LoaderEnvironment implements ConfigEnvironment
+    {
+        @Override
+        public File configDir()
+        {
+            return Loader.instance().getConfigDir();
+        }
+
+        @Override
+        public ClassLoader modClassLoader()
+        {
+            return Loader.instance().getModClassLoader();
+        }
+
+        @Override
+        public boolean loading()
+        {
+            return !Loader.instance().hasReachedState(LoaderState.AVAILABLE);
+        }
+
+        @Override
+        public Side side()
+        {
+            return currentSide();
+        }
+    }
+
     public static Class<?>[] getModConfigClasses(String modid)
     {
         return (MOD_CONFIG_CLASSES.containsKey(modid) ? MOD_CONFIG_CLASSES.get(modid).toArray(new Class<?>[0]) : new Class<?>[0]);
@@ -226,7 +277,7 @@ public class ConfigManager
     //                    INTERNAL
     // =======================================================
     static Configuration getConfiguration(Config annotation) {
-        return configuration(ConfigFileResolver.resolve(Loader.instance().getConfigDir(), annotation));
+        return configuration(ConfigFileResolver.resolve(environment().configDir(), annotation));
     }
 
     /**
@@ -238,17 +289,12 @@ public class ConfigManager
      */
     private static Configuration configuration(ConfigFileResolver.Target target)
     {
-        if (target.format() != Config.Format.CFG)
-            throw new UnsupportedOperationException(String.format(
-                    "The config file %s is declared as %s, but no codec for that format exists yet: keep it as CFG for now",
-                    target.file().getName(), target.format()));
-
         warnAboutResolution(target);
 
         Configuration cfg = CONFIGS.get(target.file().getAbsolutePath());
         if (cfg == null)
         {
-            cfg = new Configuration(target.file());
+            cfg = new Configuration(target.file(), target.format());
             cfg.load();
             cfg.setPatchLayer(ConfigPatch.load(target.file()));
             CONFIGS.put(target.file().getAbsolutePath(), cfg);
@@ -484,7 +530,7 @@ public class ConfigManager
         String modId = config.modid();
         Set<Class<?>> modConfigClasses = MOD_CONFIG_CLASSES.computeIfAbsent(modId, k -> Sets.newHashSet());
         modConfigClasses.add(configClass);
-        Configuration cfg = configuration(ConfigFileResolver.resolve(Loader.instance().getConfigDir(), config));
+        Configuration cfg = configuration(ConfigFileResolver.resolve(environment().configDir(), config));
         sync(cfg, configClass, modId, config.category(), true, null);
         cfg.save();
         

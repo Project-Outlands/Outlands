@@ -28,10 +28,10 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.StringWriter;
 import java.io.OutputStreamWriter;
 import java.io.PushbackInputStream;
 import java.io.Reader;
@@ -56,7 +56,6 @@ import net.minecraftforge.fml.client.config.GuiConfigEntries;
 import net.minecraftforge.fml.client.config.GuiConfigEntries.IConfigEntry;
 import net.minecraftforge.fml.client.config.IConfigElement;
 import net.minecraftforge.fml.common.FMLLog;
-import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.relauncher.FMLInjectionData;
 import org.apache.commons.io.IOUtils;
 
@@ -84,6 +83,8 @@ public class Configuration
     private Map<String, ConfigCategory> categories = new TreeMap<String, ConfigCategory>();
     /** The optional {@code custom_config} patch layer for this file; attached after reading it. */
     private ConfigPatch.Layer patchLayer;
+    /** The syntax of this file. Everything that touches the text dispatches on it. */
+    private final Config.Format format;
     private Map<String, Configuration> children = new TreeMap<String, Configuration>();
 
     private boolean caseSensitiveCustomCategories;
@@ -99,20 +100,30 @@ public class Configuration
         NEW_LINE = System.getProperty("line.separator");
     }
 
-    public Configuration(){}
+    public Configuration()
+    {
+        this.format = Config.Format.CFG;
+    }
 
     /**
      * Create a configuration file for the file given in parameter.
      */
     public Configuration(File file)
     {
-        this(file, null);
+        this.format = Config.Format.CFG;
+        runConfiguration(file, null, this.format);
+    }
+
+    public Configuration(File file, Config.Format format)
+    {
+        this.format = format;
+        runConfiguration(file, null, format);
     }
 
     /**
      * Create a configuration file for the file given in parameter with the provided config version number.
      */
-    private void runConfiguration(File file, String configVersion)
+    private void runConfiguration(File file, String configVersion, Config.Format format)
     {
         this.file = file;
         this.definedConfigVersion = configVersion;
@@ -152,13 +163,21 @@ public class Configuration
 
     public Configuration(File file, String configVersion)
     {
-        runConfiguration(file, configVersion);
+        this.format = Config.Format.CFG;
+        runConfiguration(file, configVersion, this.format);
+    }
+
+    public Configuration(File file, String configVersion, Config.Format format)
+    {
+        this.format = format;
+        runConfiguration(file, configVersion, format);
     }
 
     public Configuration(File file, String configVersion, boolean caseSensitiveCustomCategories)
     {
+        this.format = Config.Format.CFG;
         this.caseSensitiveCustomCategories = caseSensitiveCustomCategories;
-        runConfiguration(file, configVersion);
+        runConfiguration(file, configVersion, this.format);
     }
 
     public Configuration(File file, boolean caseSensitiveCustomCategories)
@@ -841,6 +860,25 @@ public class Configuration
             return;
         }
 
+        IConfigCodec codec = file == null ? null : ConfigCodecs.forFormat(format);
+        if (codec == null)
+        {
+            loadCfg();
+            return;
+        }
+
+        // A missing file means "everything is the default", which the annotation model materialises on save. The
+        // codec only adds what the file actually says, so an older file cannot delete keys added since.
+        if (!file.isFile())
+        {
+            return;
+        }
+
+        codec.read(this, file);
+    }
+
+    private void loadCfg()
+    {
         BufferedReader buffer = null;
         UnicodeInputStreamReader input = null;
         try
@@ -1094,50 +1132,51 @@ public class Configuration
             return;
         }
 
+        if (file == null || (file.exists() && !file.canWrite()))
+        {
+            return;
+        }
+
         try
         {
-            if (file.getParentFile() != null)
-            {
-                file.getParentFile().mkdirs();
-            }
+            IConfigCodec codec = ConfigCodecs.forFormat(format);
+            if (codec != null && !codec.rewriteable() && file.exists())
+                return; // materialise once, never rewrite: see IConfigCodec.rewriteable()
 
-            if (!file.exists() && !file.createNewFile())
-            {
-                return;
-            }
-
-            if (file.canWrite())
-            {
-                FileOutputStream fos = new FileOutputStream(file);
-                BufferedWriter buffer = new BufferedWriter(new OutputStreamWriter(fos, defaultEncoding));
-
-                buffer.write("# Configuration file" + NEW_LINE + NEW_LINE);
-
-                if (this.definedConfigVersion != null)
-                    buffer.write(CONFIG_VERSION_MARKER + ": " + this.definedConfigVersion + NEW_LINE + NEW_LINE);
-
-                if (children.isEmpty())
-                {
-                    save(buffer);
-                }
-                else
-                {
-                    for (Map.Entry<String, Configuration> entry : children.entrySet())
-                    {
-                        buffer.write("START: \"" + entry.getKey() + "\"" + NEW_LINE);
-                        entry.getValue().save(buffer);
-                        buffer.write("END: \"" + entry.getKey() + "\"" + NEW_LINE + NEW_LINE);
-                    }
-                }
-
-                buffer.close();
-                fos.close();
-            }
+            ConfigFile.writeAtomic(file, codec == null ? saveCfgToString() : codec.write(this));
         }
         catch (IOException e)
         {
             FMLLog.log.error("Error while saving config {}.", fileName, e);
         }
+    }
+
+    private String saveCfgToString() throws IOException
+    {
+        StringWriter text = new StringWriter();
+        BufferedWriter buffer = new BufferedWriter(text);
+
+        buffer.write("# Configuration file" + NEW_LINE + NEW_LINE);
+
+        if (this.definedConfigVersion != null)
+            buffer.write(CONFIG_VERSION_MARKER + ": " + this.definedConfigVersion + NEW_LINE + NEW_LINE);
+
+        if (children.isEmpty())
+        {
+            save(buffer);
+        }
+        else
+        {
+            for (Map.Entry<String, Configuration> entry : children.entrySet())
+            {
+                buffer.write("START: \"" + entry.getKey() + "\"" + NEW_LINE);
+                entry.getValue().save(buffer);
+                buffer.write("END: \"" + entry.getKey() + "\"" + NEW_LINE + NEW_LINE);
+            }
+        }
+
+        buffer.close();
+        return text.toString();
     }
 
     private void save(BufferedWriter out) throws IOException
@@ -1316,7 +1355,7 @@ public class Configuration
 
     public static void enableGlobalConfig()
     {
-        PARENT = new Configuration(new File(Loader.instance().getConfigDir(), "global.cfg"));
+        PARENT = new Configuration(new File(ConfigManager.environment().configDir(), "global.cfg"));
         PARENT.load();
     }
 
