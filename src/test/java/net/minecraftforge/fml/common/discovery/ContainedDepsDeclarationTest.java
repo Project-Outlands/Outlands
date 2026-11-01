@@ -3,6 +3,7 @@ package net.minecraftforge.fml.common.discovery;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 import net.minecraftforge.fml.common.LoaderException;
 import net.minecraftforge.fml.common.MetadataCollection;
@@ -137,5 +138,18 @@ class ContainedDepsDeclarationTest {
     @Test
     void containedDepsAreNotReportedAsUnknownKeys() {
         assertTrue(declaration(",\"containedDeps\":[{\"path\":\"libs/a.jar\"}]").unknownKeys().isEmpty());
+    }
+
+    /**
+     * Coordinates stay in the manifest. A jar's own maven identity is {@code Maven-Artifact}, and the jars that carry
+     * one are usually plain libraries with no {@code mcmod.info} - so accepting coordinates here would suggest a
+     * metadata section is required for jars that have nobody to add it. Reporting them as unknown is the intended
+     * answer: an author who writes one is told plainly that it does nothing.
+     */
+    @Test
+    void mavenCoordinatesInTheJarSectionAreUnknownKeys() {
+        assertEquals(Set.of("maven", "artifact", "version"),
+                declaration(",\"maven\":\"com.example:a:1.0\",\"artifact\":\"a\",\"version\":\"1.0\"")
+                        .unknownKeys().keySet());
     }
 }

@@ -51,6 +51,14 @@ public final class JarDeclaration {
     public static final int CURRENT_SCHEMA = 1;
 
     /** Keys this version understands. Anything else is reported once and ignored, never rejected. */
+    /**
+     * What this loader understands in the {@code jar} section. Anything else is reported back to the author.
+     *
+     * <p>Maven coordinates are deliberately absent even though {@link #containedDeps} refers to libraries by identity:
+     * a coordinate is what a jar says about <em>itself</em>, in its own manifest ({@code Maven-Artifact}), and the jar
+     * that carries one is often a plain library with no {@code mcmod.info} at all. Requiring metadata from those would
+     * make a metadata section mandatory for exactly the jars that have no author left to add it.
+     */
     private static final Set<String> KNOWN_KEYS =
             Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps",
                     "entrypoints");
