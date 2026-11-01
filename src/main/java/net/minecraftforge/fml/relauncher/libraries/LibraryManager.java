@@ -50,9 +50,9 @@ import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.common.ForgeVersion;
 import net.minecraftforge.fml.common.FMLLog;
-import net.minecraftforge.fml.common.MetadataCollection;
 import net.minecraftforge.fml.common.discovery.BundledLibrarySelection;
 import net.minecraftforge.fml.common.discovery.JarDeclaration;
+import net.minecraftforge.fml.common.discovery.JarMetadata;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 
 public class LibraryManager
@@ -421,36 +421,14 @@ public class LibraryManager
 
     /**
      * @return the jar section of {@code jar}'s {@code mcmod.info}, or {@code null} when it has none
-     */
-    @javax.annotation.Nullable
-    private static JarDeclaration declaredContainedDeps(JarFile jar) throws IOException
-    {
-        JarEntry modInfo = jar.getJarEntry("mcmod.info");
-        if (modInfo == null)
-        {
-            return null;
-        }
-        try (InputStream in = jar.getInputStream(modInfo))
-        {
-            return declarationOf(readAll(in), jar.getName());
-        }
-    }
-
-    /**
-     * Parses the {@code jar} section out of raw {@code mcmod.info} bytes, or returns {@code null} when there is none.
      *
-     * <p>Runs for every jar in the mods directory while the classpath is assembled, and the overwhelming majority of
-     * those files predate the section. Searching the text for the section name first turns that majority into one
-     * pass over a few kilobytes; a false positive only costs the parse that would have happened without the check.
+     * <p>Goes through {@link JarMetadata}, which reads the entry once and shares it with the discovery pass that needs
+     * the same file's mod list a moment later.
      */
     @javax.annotation.Nullable
-    static JarDeclaration declarationOf(byte[] mcmodInfo, String sourceName)
+    private static JarDeclaration declaredContainedDeps(JarFile jar)
     {
-        if (new String(mcmodInfo, java.nio.charset.StandardCharsets.UTF_8).indexOf("\"jar\"") < 0)
-        {
-            return null;
-        }
-        return MetadataCollection.from(new ByteArrayInputStream(mcmodInfo), sourceName).getJarDeclaration();
+        return JarMetadata.of(jar).declaration();
     }
 
     private static Pair<Artifact, byte[]> extractPacked(File file, ModList modlist, File... modDirs)

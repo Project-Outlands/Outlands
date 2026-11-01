@@ -62,7 +62,7 @@ public final class JarDeclaration {
      */
     private static final Set<String> KNOWN_KEYS =
             Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps",
-                    "entrypoints", "side", "at");
+                    "entrypoints", "side", "at", "coremod", "alsoMod");
 
     /**
      * Manifest attribute the {@code side} key replaces, still read for jars that declare no section.
@@ -74,6 +74,9 @@ public final class JarDeclaration {
 
     /** Manifest attribute the {@code at} key replaces: a space-separated list of the same paths. */
     public static final Attributes.Name MANIFEST_ACCESS_TRANSFORMERS = new Attributes.Name("FMLAT");
+
+    /** Manifest attribute the {@code coremod} key replaces: the loading plugin class of this jar. */
+    public static final Attributes.Name MANIFEST_CORE_MOD = new Attributes.Name("FMLCorePlugin");
 
     /**
      * Where this jar wants to sit in the order jars are opened for coremod discovery.
@@ -148,6 +151,9 @@ public final class JarDeclaration {
     private final LoadOrder loadOrder;
     private final Side side;
     private final List<String> accessTransformers;
+    @Nullable
+    private final String coreMod;
+    private final boolean alsoMod;
     private final List<ContainedDep> containedDeps;
     private final Map<String, String> entrypoints;
     private final Map<String, String> providers;
@@ -224,7 +230,8 @@ public final class JarDeclaration {
     }
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Side side,
-                           List<String> accessTransformers, List<ContainedDep> containedDeps,
+                           List<String> accessTransformers, @Nullable String coreMod, boolean alsoMod,
+                           List<ContainedDep> containedDeps,
                            Map<String, String> entrypoints, Map<String, String> providers,
                            Map<String, List<String>> providerVersions, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
@@ -232,6 +239,8 @@ public final class JarDeclaration {
         this.loadOrder = loadOrder;
         this.side = side;
         this.accessTransformers = accessTransformers;
+        this.coreMod = coreMod;
+        this.alsoMod = alsoMod;
         this.containedDeps = containedDeps;
         this.entrypoints = entrypoints;
         this.providers = providers;
@@ -294,9 +303,57 @@ public final class JarDeclaration {
         Map<String, String> providers = parseProviders(json.get("providers"), sourceName);
         return new JarDeclaration(schemaVersion, license.trim(), loadOrder, side,
                 parseAccessTransformers(json.get("at"), sourceName),
+                parseCoreMod(json.get("coremod"), sourceName),
+                parseBoolean(json.get("alsoMod"), "alsoMod", sourceName),
                 parseContainedDeps(json.get("containedDeps"), sourceName),
                 parseEntrypoints(json.get("entrypoints"), sourceName), providers,
                 parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
+    }
+
+    /**
+     * The loading plugin a jar declares, or {@code null}.
+     *
+     * <p>The declaration wins over the manifest attribute, so a jar whose section names a different class than its
+     * manifest does gets the one it declared.
+     */
+    @Nullable
+    public static String coreModOf(@Nullable Attributes attributes, @Nullable JarDeclaration declaration) {
+        if (declaration != null && declaration.coreMod != null) {
+            return declaration.coreMod;
+        }
+        if (attributes == null) {
+            return null;
+        }
+        String value = attributes.getValue(MANIFEST_CORE_MOD);
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    @Nullable
+    private static String parseCoreMod(JsonElement element, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"coremod\" as something other than a class name: " + element);
+        }
+        String value = element.getAsString();
+        if (value.isBlank()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"coremod\" without a class name. Supply the full name of an IFMLLoadingPlugin.");
+        }
+        return value.trim();
+    }
+
+    private static boolean parseBoolean(JsonElement element, String key, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return false;
+        }
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"" + key + "\" as something other than a boolean: " + element);
+        }
+        return element.getAsBoolean();
     }
 
     /**
@@ -597,6 +654,20 @@ public final class JarDeclaration {
      */
     public List<String> accessTransformers() {
         return accessTransformers;
+    }
+
+    /** @return the loading plugin class this jar declares, or {@code null} when it declares none */
+    @Nullable
+    public String coreMod() {
+        return coreMod;
+    }
+
+    /**
+     * @return whether this jar is a mod as well as whatever it loads early, i.e. it must be offered to the mod
+     *         discovery like any other jar once its loading plugin has been handled
+     */
+    public boolean alsoMod() {
+        return alsoMod;
     }
 
     /**

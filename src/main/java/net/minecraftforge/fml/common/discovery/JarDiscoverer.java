@@ -64,21 +64,13 @@ public class JarDiscoverer implements ITypeDiscoverer
         FMLLog.log.debug("Examining file {} for potential mods", candidate.getModContainer().getName());
         try (JarFile jar = new JarFile(candidate.getModContainer()))
         {
-            // Parsed by the discovery phase already; only jars it did not look at (no mod id in the manifest) need
-            // this entry to be read here.
+            // Parsed by the discovery phase already; the fallback goes through the same shared read, for the jars it
+            // did not look at at all.
             MetadataCollection mc = candidate.getMetadata();
             if (mc == null)
             {
-                ZipEntry modInfo = jar.getEntry("mcmod.info");
-                if (modInfo != null)
-                {
-                    FMLLog.log.trace("Located mcmod.info file in file {}", candidate.getModContainer().getName());
-                    try (InputStream inputStream = jar.getInputStream(modInfo))
-                    {
-                        mc = MetadataCollection.from(inputStream, candidate.getModContainer().getName());
-                    }
-                }
-                else
+                mc = JarMetadata.of(jar).metadata();
+                if (mc == null)
                 {
                     FMLLog.log.debug("The mod container {} appears to be missing an mcmod.info file", candidate.getModContainer().getName());
                     mc = MetadataCollection.from(null, "");

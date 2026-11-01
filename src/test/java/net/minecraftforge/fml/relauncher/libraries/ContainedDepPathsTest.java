@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Covers which entries a jar's bundled dependencies are read from.
@@ -72,16 +71,6 @@ class ContainedDepPathsTest {
         assertEquals(List.of("a.jar", "b.jar"), LibraryManager.containedDepPaths(manifest("a.jar  b.jar "), null, "test.jar"));
     }
 
-    @Test
-    void aDeclarationIsFoundWithoutBeingGuessed() {
-        String withSection = "{\"jar\":{" + MANDATORY + ",\"containedDeps\":[{\"path\":\"a.jar\"}]}}";
-        assertNotNull(LibraryManager.declarationOf(bytes(withSection), "test.jar"),
-                "a jar section must survive the fast path that skips files without one");
-
-        assertNull(LibraryManager.declarationOf(bytes("{\"modList\":[{\"modId\":\"sample\"}]}"), "test.jar"));
-        assertNull(LibraryManager.declarationOf(bytes("[{\"modId\":\"sample\"}]"), "test.jar"));
-    }
-
     private static Attributes manifest(String containedDeps) {
         Attributes attributes = new Attributes();
         attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
@@ -100,7 +89,4 @@ class ContainedDepPathsTest {
         return declaration;
     }
 
-    private static byte[] bytes(String json) {
-        return json.getBytes(StandardCharsets.UTF_8);
-    }
 }

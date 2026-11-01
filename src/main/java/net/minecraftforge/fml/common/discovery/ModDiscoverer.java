@@ -46,7 +46,6 @@ import net.minecraftforge.fml.relauncher.CoreModManager;
 import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
 
 import javax.annotation.Nullable;
-import org.apache.commons.io.IOUtils;
 import org.spongepowered.asm.launch.MixinBootstrap;
 import org.spongepowered.asm.launch.platform.container.ContainerHandleURI;
 import org.spongepowered.asm.mixin.Mixins;
@@ -314,6 +313,7 @@ public final class ModDiscoverer {
         Set<String> modIds = new LinkedHashSet<>();
         String modType = ManifestAttributes.FORGEMODTYPE;
         String coremod = null, tweaker = null;
+        JarDeclaration declaration = null;
         boolean modernMetadata = false;
         boolean hasMixinManifestAttributes = false, mixinTweakerForceMod = false, coreModContainsMod = false;
 
@@ -340,37 +340,35 @@ public final class ModDiscoverer {
             // Read the metadata entry for every jar, not only for the ones whose mod id is still unknown: the jar
             // section describes the jar, so it has to be reachable for jars identified from their manifest too (those
             // are exactly the ones that need to declare load order). Ids are only taken from it when the manifest did
-            // not already provide any, so the special cases above keep their single derived id.
-            ZipEntry entry = jarFile.getEntry("mcmod.info");
-            if (entry != null)
+            // not already provide any, so the special cases above keep their single derived id. The read is shared
+            // with the classpath pass through JarMetadata, which parsed this file once already.
+            MetadataCollection metadata = JarMetadata.of(jarFile).metadata();
+            if (metadata != null)
             {
                 // Kept for the container discovery, which would otherwise read and parse the very same entry again
-                MetadataCollection metadata = parseMcmodInfo(file, jarFile.getInputStream(entry));
-                if (metadata != null) {
-                    modMetadata.put(absolute, metadata);
-                    if (modIds.isEmpty()) {
-                        collectModIds(file, metadata, modIds);
+                modMetadata.put(absolute, metadata);
+                if (modIds.isEmpty()) {
+                    collectModIds(file, metadata, modIds);
+                }
+                declaration = metadata.getJarDeclaration();
+                if (declaration != null) {
+                    // Declaring the section is the jar putting itself in the current world: current metadata schema,
+                    // current environment, no LWJGL2 API. That is what the LWJGL2 filter reads, see DiscoveredMod.
+                    modernMetadata = true;
+                    if (declaration.schemaVersion() > JarDeclaration.CURRENT_SCHEMA) {
+                        FMLLog.log.warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
+                                file.getName(), declaration.schemaVersion(), JarDeclaration.CURRENT_SCHEMA, JarDeclaration.CURRENT_SCHEMA);
                     }
-                    JarDeclaration declaration = metadata.getJarDeclaration();
-                    if (declaration != null) {
-                        // Declaring the section is the jar putting itself in the current world: current metadata schema,
-                        // current environment, no LWJGL2 API. That is what the LWJGL2 filter reads, see DiscoveredMod.
-                        modernMetadata = true;
-                        if (declaration.schemaVersion() > JarDeclaration.CURRENT_SCHEMA) {
-                            FMLLog.log.warn("{} declares jar schema version {}, this loader understands {}; reading it as {}",
-                                    file.getName(), declaration.schemaVersion(), JarDeclaration.CURRENT_SCHEMA, JarDeclaration.CURRENT_SCHEMA);
-                        }
-                        if (!declaration.unknownKeys().isEmpty()) {
-                            FMLLog.log.warn("{} declares jar keys this loader does not understand: {}",
-                                    file.getName(), declaration.unknownKeys());
-                        }
-                        // Collected here, instantiated only when a mod actually asks for the language: unlike the
-                        // manifest keys read below, this is a claim about code that would run before any mod does.
-                        if (!declaration.providers().isEmpty()) {
-                            LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
-                        }
-                        FMLLog.log.debug("{} declares {}", file.getName(), declaration);
+                    if (!declaration.unknownKeys().isEmpty()) {
+                        FMLLog.log.warn("{} declares jar keys this loader does not understand: {}",
+                                file.getName(), declaration.unknownKeys());
                     }
+                    // Collected here, instantiated only when a mod actually asks for the language: unlike the
+                    // manifest keys read below, this is a claim about code that would run before any mod does.
+                    if (!declaration.providers().isEmpty()) {
+                        LanguageAdapterRegistry.declareProviders(declaration, absolute.getPath());
+                    }
+                    FMLLog.log.debug("{} declares {}", file.getName(), declaration);
                 }
             }
             // Reading the cache is what makes the records worth producing; ignoring it falls back to the pre-cache
@@ -404,6 +402,17 @@ public final class ModDiscoverer {
             FMLLog.log.error("Failed to read mod metadata from {}", absolute.getName(), e);
         }
 
+        // The jar section, when present, is the authoritative statement; the manifest keys it replaces stay as the
+        // fallback for jars written before the section existed.
+        if (declaration != null) {
+            coremod = JarDeclaration.coreModOf(attributes, declaration);
+            // "also a mod" replaces FMLCorePluginContainsFMLMod and the ForceLoadAsMod of the 1.7.10 era alike: both
+            // answered one question, and the answer no longer depends on which early loader happened to swallow the jar.
+            boolean alsoMod = declaration.alsoMod();
+            coreModContainsMod = coreModContainsMod || alsoMod;
+            mixinTweakerForceMod = (mixinTweakerForceMod || alsoMod) && MIXIN_TWEAKER.equals(tweaker);
+        }
+
         DiscoveredMod info = new DiscoveredMod(
                 absolute,
                 attributes,
@@ -422,10 +431,9 @@ public final class ModDiscoverer {
         }
     }
 
-    /** @return the jar section of {@code file}, or {@code null} when it declares none or was never parsed */
+    /** @return the jar section of {@code file}, or {@code null} when it declares none */
     private JarDeclaration declaredOf(File file) {
-        MetadataCollection metadata = modMetadata.get(file.getAbsoluteFile());
-        return metadata == null ? null : metadata.getJarDeclaration();
+        return JarMetadata.of(file).declaration();
     }
 
     private void discoverCoreMod(LaunchClassLoader classLoader, FMLTweaker tweaker, DiscoveredMod discoveredMod, File containedDepsDir) {
@@ -742,20 +750,6 @@ public final class ModDiscoverer {
     }
 
     /** Parses the metadata entry; ids are collected by the caller, which knows whether they are wanted. */
-    private MetadataCollection parseMcmodInfo(File file, InputStream stream) {
-        try {
-            return MetadataCollection.from(stream, file.getName());
-        } catch (LoaderException e) {
-            // A declaration this loader refuses to read is not a parse failure to be tolerated: the jar claimed to
-            // follow the current schema and then did not, so continuing would silently drop what it declared.
-            throw e;
-        } catch (Throwable t) {
-            FMLLog.log.error("Failed to parse mcmod.info for {}", file.getName(), t);
-            return null;
-        } finally {
-            IOUtils.closeQuietly(stream);
-        }
-    }
 
     private static void collectModIds(File file, MetadataCollection metadata, Set<String> ids) {
         for (String id : metadata.getIds()) {
