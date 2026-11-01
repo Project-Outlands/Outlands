@@ -4,8 +4,6 @@
  * This file is licensed under the Outlands License Version 1.0.
  * See the applicable LICENSE file in this directory or a parent directory
  * for the full licence terms.
- *
- * This is visible-source software and is not open-source software.
  */
 
 package net.minecraftforge.fml.common.discovery;
