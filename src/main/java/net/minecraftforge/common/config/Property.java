@@ -98,6 +98,15 @@ public class Property
     private int maxListLength = -1;
     private final Type type;
     private boolean changed = false;
+    /**
+     * Set only when a {@code custom_config} patch overrode this property: the value the config file itself holds.
+     * The writer uses these so a patch never leaks into the file it patches - removing the patch has to bring the
+     * previous value back.
+     */
+    private String savedValue;
+    private String[] savedValues;
+    /** The patch file that overrode this property, or {@code null} when nothing overrode it. */
+    private String patchSource;
 
     public Property(String name, String value, Type type)
     {
@@ -697,6 +706,57 @@ public class Property
     public String getString()
     {
         return value;
+    }
+
+    /**
+     * @return the value the config file holds, ignoring any patch layer; a patched property whose file value was never
+     *         established falls back to its default, because the patch must never become what the file says
+     */
+    public String getSavedString()
+    {
+        if (!isPatched())
+            return value;
+        return savedValue != null ? savedValue : defaultValue;
+    }
+
+    /** @return the list the config file holds, ignoring any patch layer */
+    public String[] getSavedStringList()
+    {
+        if (!isPatched())
+            return values;
+        return savedValues != null ? savedValues : defaultValues;
+    }
+
+    /** @return whether a {@code custom_config} patch overrode this property */
+    public boolean isPatched()
+    {
+        return patchSource != null;
+    }
+
+    /** @return the patch file that overrode this property, or {@code null} */
+    public String getPatchSource()
+    {
+        return patchSource;
+    }
+
+    /**
+     * Overrides this property with a patched value while remembering what the config file itself had, so
+     * {@link #getSavedString()} keeps returning the file's own value.
+     */
+    void applyPatch(String value, String source)
+    {
+        if (patchSource == null)
+            savedValue = this.value;
+        this.value = value;
+        this.patchSource = source;
+    }
+
+    void applyPatch(String[] values, String source)
+    {
+        if (patchSource == null)
+            savedValues = this.values == null ? null : Arrays.copyOf(this.values, this.values.length);
+        this.values = Arrays.copyOf(values, values.length);
+        this.patchSource = source;
     }
 
     /**

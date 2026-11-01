@@ -36,6 +36,19 @@ public interface IConfigElement
      * [Property, Category] Is this object a property object?
      */
     boolean isProperty();
+
+    /**
+     * The file in {@code custom_config/} that overrides this entry, or {@code null} when nothing overrides it.
+     * <p>
+     * A patched entry is displayed but not editable: the patch layer wins over everything written here, so offering a
+     * control that silently has no effect would be worse than showing the value as fixed.
+     *
+     * @return the patch file, or {@code null}
+     */
+    default String patchedBy()
+    {
+        return null;
+    }
     
     /**
      * This method returns a class that implements {@link IConfigEntry} or null. This class MUST

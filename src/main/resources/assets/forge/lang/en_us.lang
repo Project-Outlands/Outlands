@@ -233,6 +233,7 @@ fml.configgui.tooltip.resetToDefault=Reset to Default
 fml.configgui.tooltip.undoAll=Undo All Changes. If the Apply globally checkbox is checked changes to child screens will also be undone.
 fml.configgui.tooltip.undoChanges=Undo Changes
 fml.configgui.tooltip.default=[default: %s]
+fml.configgui.tooltip.patched=Overridden by %s. Change it there, not here.
 fml.configgui.tooltip.defaultNumeric=[range: %s ~ %s, default: %s]
 
 forge.controlsgui.shift=SHIFT + %s

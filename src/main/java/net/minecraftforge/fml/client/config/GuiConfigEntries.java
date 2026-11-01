@@ -1495,6 +1495,8 @@ public class GuiConfigEntries extends GuiListExtended
         protected HoverChecker undoHoverChecker;
         protected HoverChecker defaultHoverChecker;
         protected boolean drawLabel;
+        /** Set when the entry is overridden by a {@code custom_config} patch, which makes it read-only. */
+        protected final String patchedBy;
 
         public ListEntryBase(GuiConfig owningScreen, GuiConfigEntries owningEntryList, IConfigElement configElement)
         {
@@ -1517,6 +1519,7 @@ public class GuiConfigEntries extends GuiListExtended
             this.toolTip = new ArrayList<String>();
 
             this.drawLabel = true;
+            this.patchedBy = configElement.patchedBy();
 
             String comment;
 
@@ -1539,6 +1542,10 @@ public class GuiConfigEntries extends GuiListExtended
 
             if (configElement.requiresMcRestart() || owningScreen.allRequireMcRestart)
                 toolTip.add(TextFormatting.RED + "[" + I18n.format("fml.configgui.gameRestartTitle") + "]");
+
+            if (patchedBy != null)
+                Collections.addAll(toolTip, (TextFormatting.LIGHT_PURPLE
+                        + I18n.format("fml.configgui.tooltip.patched", patchedBy)).split("\n"));
         }
 
         @Override
@@ -1548,7 +1555,8 @@ public class GuiConfigEntries extends GuiListExtended
 
             if (drawLabel)
             {
-                String label = (!isValidValue ? TextFormatting.RED.toString() :
+                String label = (patchedBy != null ? TextFormatting.LIGHT_PURPLE.toString() :
+                        !isValidValue ? TextFormatting.RED.toString() :
                         (isChanged ? TextFormatting.WHITE.toString() : TextFormatting.GRAY.toString()))
                         + (isChanged ? TextFormatting.ITALIC.toString() : "") + this.name;
                 this.mc.fontRenderer.drawString(
@@ -1560,12 +1568,12 @@ public class GuiConfigEntries extends GuiListExtended
 
             this.btnUndoChanges.x = this.owningEntryList.scrollBarX - 44;
             this.btnUndoChanges.y = y;
-            this.btnUndoChanges.enabled = enabled() && isChanged;
+            this.btnUndoChanges.enabled = enabled() && isChanged && patchedBy == null;
             this.btnUndoChanges.drawButton(this.mc, mouseX, mouseY, partial);
 
             this.btnDefault.x = this.owningEntryList.scrollBarX - 22;
             this.btnDefault.y = y;
-            this.btnDefault.enabled = enabled() && !isDefault();
+            this.btnDefault.enabled = enabled() && !isDefault() && patchedBy == null;
             this.btnDefault.drawButton(this.mc, mouseX, mouseY, partial);
 
             if (this.tooltipHoverChecker == null)

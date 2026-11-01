@@ -197,6 +197,7 @@ fml.configgui.tooltip.resetToDefault=重置为默认值
 fml.configgui.tooltip.undoAll=撤消所有更改。如果勾选“应用到全局”复选框，子屏幕的更改也将撤消。
 fml.configgui.tooltip.undoChanges=撤消更改
 fml.configgui.tooltip.default=[默认值：%s]
+fml.configgui.tooltip.patched=被 %s 覆盖。要改请改那个文件。
 fml.configgui.tooltip.defaultNumeric=[范围：%s ~ %s，默认值：%s]
 
 forge.controlsgui.shift=SHIFT + %s

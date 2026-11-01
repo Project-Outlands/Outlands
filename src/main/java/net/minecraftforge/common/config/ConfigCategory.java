@@ -327,7 +327,7 @@ public class ConfigCategory implements Map<String, Property>
 
                 write(out, pad1, String.valueOf(type), ":", propName, " <");
 
-                for (String line : prop.getStringList())
+                for (String line : prop.getSavedStringList())
                 {
                     write(out, pad2, line);
                 }
@@ -336,12 +336,12 @@ public class ConfigCategory implements Map<String, Property>
             }
             else if (prop.getType() == null)
             {
-                write(out, pad1, propName, "=", prop.getString());
+                write(out, pad1, propName, "=", prop.getSavedString());
             }
             else
             {
                 char type = prop.getType().getID();
-                write(out, pad1, String.valueOf(type), ":", propName, "=", prop.getString());
+                write(out, pad1, String.valueOf(type), ":", propName, "=", prop.getSavedString());
             }
             
             prop.resetChangedState();

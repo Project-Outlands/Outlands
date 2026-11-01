@@ -168,6 +168,7 @@ public class ConfigManager
             return;
 
         Side currentSide = currentSide();
+        Set<Configuration> touched = Sets.newHashSet();
         for (ASMData targ : map.get(type))
         {
             try
@@ -196,6 +197,7 @@ public class ConfigManager
                 sync(cfg, cls, modid, category, !Loader.instance().hasReachedState(LoaderState.AVAILABLE), null);
 
                 cfg.save();
+                touched.add(cfg);
 
             }
             catch (Exception e)
@@ -204,6 +206,10 @@ public class ConfigManager
                 throw new LoaderException(e);
             }
         }
+
+        // Only now can a key be called unknown: every class of this mod has had its chance to declare it.
+        for (Configuration cfg : touched)
+            ConfigPatch.reportUnused(cfg);
     }
 
     public static Class<?>[] getModConfigClasses(String modid)
@@ -244,6 +250,7 @@ public class ConfigManager
         {
             cfg = new Configuration(target.file());
             cfg.load();
+            cfg.setPatchLayer(ConfigPatch.load(target.file()));
             CONFIGS.put(target.file().getAbsolutePath(), cfg);
         }
         return cfg;
@@ -348,12 +355,16 @@ public class ConfigManager
                             adapt.setDefaultValue(property, wrapper.getValue(key));
                             if (!existed)
                                 adapt.setValue(property, wrapper.getValue(key));
-                            else
-                                wrapper.setValue(key, adapt.getValue(property));
+
+                            // After the value exists, never before: a key that the file does not have yet has no value
+                            // to keep, and the patch must not become that value.
+                            ConfigPatch.applyTo(cfg, wrapper.getCategory(), property);
+                            wrapper.setValue(key, adapt.getValue(property));
                         }
                         else //If the key is not new, sync according to shouldReadFromVar()
                         {
                             Property property = property(cfg, wrapper.getCategory(), suffix, propType, adapt.isArrayAdapter());
+                            ConfigPatch.applyTo(cfg, wrapper.getCategory(), property);
                             Object propVal = adapt.getValue(property);
                             Object mapVal = wrapper.getValue(key);
                             if (shouldReadFromVar(property, propVal, mapVal))

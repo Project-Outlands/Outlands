@@ -82,6 +82,8 @@ public class Configuration
     File file;
 
     private Map<String, ConfigCategory> categories = new TreeMap<String, ConfigCategory>();
+    /** The optional {@code custom_config} patch layer for this file; attached after reading it. */
+    private ConfigPatch.Layer patchLayer;
     private Map<String, Configuration> children = new TreeMap<String, Configuration>();
 
     private boolean caseSensitiveCustomCategories;
@@ -114,8 +116,15 @@ public class Configuration
     {
         this.file = file;
         this.definedConfigVersion = configVersion;
-        String basePath = ((File)(FMLInjectionData.data()[6])).getAbsolutePath().replace(File.separatorChar, '/').replace("/.", "");
-        String path = file.getAbsolutePath().replace(File.separatorChar, '/').replace("/./", "/").replace(basePath, "");
+        String path = file.getAbsolutePath().replace(File.separatorChar, '/').replace("/./", "/");
+        // The game home is only known once the launcher has injected it. Without it (tests, tooling, an embedded
+        // parser) the absolute path is the honest name - the relative one exists to keep log lines short.
+        Object home = FMLInjectionData.data()[6];
+        if (home != null)
+        {
+            String basePath = ((File) home).getAbsolutePath().replace(File.separatorChar, '/').replace("/.", "");
+            path = path.replace(basePath, "");
+        }
         if (PARENT != null)
         {
             PARENT.setChild(path, this);
@@ -1417,6 +1426,17 @@ public class Configuration
     public Set<String> getCategoryNames()
     {
         return ImmutableSet.copyOf(categories.keySet());
+    }
+
+    /** @return the {@code custom_config} patch layer for this file, or {@code null} when there is none */
+    ConfigPatch.Layer getPatchLayer()
+    {
+        return patchLayer;
+    }
+
+    void setPatchLayer(ConfigPatch.Layer patchLayer)
+    {
+        this.patchLayer = patchLayer;
     }
 
     /**
