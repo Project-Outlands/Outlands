@@ -1,4 +1,4 @@
-# Cleanroom Feature Proposal Guidelines
+# Outlands Feature Proposal Guidelines
 
 1. Be as descriptive as possible!
 2. Keep the content sensible.

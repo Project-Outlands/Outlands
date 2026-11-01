@@ -6,9 +6,6 @@ import net.minecraftforge.fml.common.DummyModContainer;
 import net.minecraftforge.fml.common.LoadController;
 import net.minecraftforge.fml.common.ModMetadata;
 
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Arrays;
 
@@ -25,9 +22,8 @@ public class LoaderContainer extends DummyModContainer {
         meta.version = LoaderVersion.VERSION;
         meta.authorList = Arrays.asList("LexManos", "cpw", "fry", "Rongmario", "kappa_maintainer", "Li");
         meta.credits = "MrCrayFish for the Catalogue mod as base for the revamped mod list.";
-        meta.url = "https://cleanroommc.com";
-        meta.modProperties.put("issueTrackerUrl", "https://github.com/CleanroomMC/Cleanroom/issues");
-        meta.updateJSON = "https://download.cleanroommc.com/api/forge";
+        meta.url = "https://github.com/Project-Outlands/Outlands";
+        meta.modProperties.put("issueTrackerUrl", "https://github.com/Project-Outlands/Outlands/issues");
         meta.logoFile = "/assets/outlands/banner.png";
         meta.modProperties.put("iconFile", "/assets/outlands/icon.png");
         meta.modProperties.put("backgroundFile", "/assets/outlands/background.png");
@@ -38,11 +34,13 @@ public class LoaderContainer extends DummyModContainer {
         return true;
     }
     
+    /**
+     * No update source on purpose. The endpoint this used to point at belongs to another project, so the only thing a
+     * check could report is a version of something we are not. When there is an Outlands endpoint, set updateJSON again
+     * and delete this override.
+     */
     @Override
     public URL getUpdateUrl() {
-        try{
-            return new URI("https://download.cleanroommc.com/api/forge").toURL();
-        } catch (MalformedURLException | URISyntaxException ignored){}
         return null;
     }
 }

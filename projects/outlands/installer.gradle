@@ -187,7 +187,8 @@ tasks.named('assemble') {
 // Several of those modules were renamed rather than upgraded, so Gradle's version conflict resolution cannot
 // see the problem: 'netty-all' (an io.netty.* fat jar) happily coexists next to the split 4.2 modules and wins
 // or loses the classpath race at random, which shows up as NoSuchMethodError at compile time or
-// AbstractMethodError at runtime. Keep this list in sync with CleanroomMinecraftTransformer.vanillaExcludesSet.
+// AbstractMethodError at runtime. The transformer that used to enforce this list went away with the FG6 chain,
+// so the list is the only thing that keeps them off the installer now.
 def staleVanillaModules = [
     'io.netty:netty-all',
     'org.lwjgl.lwjgl:lwjgl',

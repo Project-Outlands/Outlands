@@ -1,6 +1,6 @@
 // Outlands: the patched Minecraft + loader project.
 //
-// This replaces the old ForgeGradle 6 chain (:mcp -> :minecraft -> :cleanroom patcher). The MCP layer
+// This replaces the old ForgeGradle 6 chain (:mcp -> :minecraft -> patcher). The MCP layer
 // (decompile -> mcpcleanup -> rename, access transformers included) and the patch application live in
 // ':mcpbase'; this project only adds the loader sources on top and packages everything.
 //

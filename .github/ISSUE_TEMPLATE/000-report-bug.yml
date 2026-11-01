@@ -7,14 +7,14 @@ body:
   - type: input
     id: discord
     attributes:
-      label: Your CleanroomMC Discord Username
+      label: Your Discord Username
       description: Leave empty if you don't have one, but this will make it harder to contact you if we need additional info.
       placeholder: "Example: Fake#1234"
   - type: input
     id: version
     attributes:
-      label: Cleanroom Version
-      description: "What version of the Cleanroom are you using? (You need 25+ on 0.5.x and later)"
+      label: Outlands Version
+      description: "What version of Outlands are you using? It is printed at the top of `logs/latest.log`."
       placeholder: "Example: 0.5.4-alpha"
     validations:
       required: true
@@ -81,7 +81,7 @@ body:
           required: true
         - label: "I have switched my Forgelin and LibrarianLib to continuous versions(check readme for more detail)."
           required: true
-        - label: "I am running a test build from Cleanroom Github Actions.  (Or, if I've compiled it myself I plan to fix the issue)"
+        - label: "I am running a test build from Outlands Github Actions.  (Or, if I've compiled it myself I plan to fix the issue)"
           required: true
         - label: |
             I did not use PCL/PCLCE or other unsupported launchers.

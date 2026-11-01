@@ -50,7 +50,7 @@ body:
     attributes:
       label: Guidelines
       description: |
-          View the guidelines here: [Cleanroom Feature Proposal Guidelines](../blob/main/CFP_GUIDELINES.md)
+          View the guidelines here: [Outlands Feature Proposal Guidelines](../blob/main/CFP_GUIDELINES.md)
       options:
         - label: I have and will continue to adhere to the guidelines
           required: true

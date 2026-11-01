@@ -57,7 +57,7 @@ assets and natives.
 | `projects/mcpbase` | MCP layer: decompile, access transformers, mcpcleanup, MCP->SRG rename, patch application |
 | `projects/outlands` | loader sources (compiled against the patched Minecraft), reobf, binary patches, packaging, userdev, installer, launcher pack |
 | `patches/minecraft` | the patched Minecraft sources, as git-applyable patches |
-| `templates` | `CleanroomVersion.java`, filled in with the current version at build time |
+| `templates` | `LoaderVersion.java`, filled in with the current version at build time |
 | `buildSrc` | the build plugins/tasks (`top.outlands.gradle.*`) |
 | `legacy/fg6` | the previous ForgeGradle 6 build scripts, kept for reference only |
 

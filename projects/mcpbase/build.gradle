@@ -45,7 +45,7 @@ forgedev {
         accessTransformers.from(file("$rootDir/src/main/resources/forge_at.cfg"))
     }
 
-    // The patch base. Same files as the old ':cleanroom' patcher used, but now every step lives in this project.
+    // The patch base. Same files as the old ForgeGradle 6 patcher used, but now every step lives in this project.
     patches {
         base = mcpBase
         patches.set(file("$rootDir/patches/minecraft"))

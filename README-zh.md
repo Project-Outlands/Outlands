@@ -54,7 +54,7 @@ CalVer：`YYYY.MM.DD`，用 UTC，**不带任何其它信息**——没有 commi
 | `projects/mcpbase` | MCP 层：反编译、访问转换、mcpcleanup、MCP→SRG 重命名、补丁应用 |
 | `projects/outlands` | loader 源码（与打好补丁的 Minecraft 一起编译）、重混淆、二进制补丁、打包、userdev、安装器、启动器整合包 |
 | `patches/minecraft` | 修改后的 Minecraft 源码，以可 git apply 的补丁形式维护 |
-| `templates` | `CleanroomVersion.java`，构建时填入当前版本 |
+| `templates` | `LoaderVersion.java`，构建时填入当前版本 |
 | `buildSrc` | 构建插件与任务（`top.outlands.gradle.*`） |
 | `legacy/fg6` | 旧的 ForgeGradle 6 构建脚本，仅作参考 |
 
