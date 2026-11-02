@@ -233,6 +233,7 @@ public class Loader
      */
     private void sortModList()
     {
+        applyInjectedDependencies();
         FMLLog.log.trace("Verifying mod requirements are satisfied");
         List<WrongMinecraftVersionException> wrongMinecraftExceptions = new ArrayList<>();
         List<MissingModsException> missingModsExceptions = new ArrayList<>();
@@ -981,6 +982,43 @@ public class Loader
             return;
         }
         FMLLog.log.debug("Loaded {} injected dependencies on modIds: {}", injectedBefore.size(), injectedBefore.keySet());
+    }
+
+    /**
+     * Adds the pack's own ordering rules to whatever each container declared.
+     *
+     * <p>They used to be merged while the annotation was parsed, which meant a mod whose dependencies came from its
+     * {@code mcmod.info} entry - or from nowhere, in the case of a declarative mod - silently did not get them. Doing it
+     * once here, after every container has settled on where its lists come from, is one answer for all three sources.
+     *
+     * <p>Each list is copied before the additions: the metadata instance is shared with the collection it was read
+     * from, and a second container for the same id would otherwise add the same entries twice.
+     */
+    private void applyInjectedDependencies()
+    {
+        for (ModContainer mod : modController.getActiveModList())
+        {
+            List<ArtifactVersion> before = getInjectedBefore(mod.getModId());
+            List<ArtifactVersion> after = getInjectedAfter(mod.getModId());
+            if (before.isEmpty() && after.isEmpty())
+            {
+                continue;
+            }
+            ModMetadata metadata = mod.getMetadata();
+            if (metadata == null)
+            {
+                continue;
+            }
+            metadata.dependants = withAdded(metadata.dependants, before);
+            metadata.dependencies = withAdded(metadata.dependencies, after);
+        }
+    }
+
+    private static List<ArtifactVersion> withAdded(@Nullable List<ArtifactVersion> declared, List<ArtifactVersion> added)
+    {
+        List<ArtifactVersion> merged = declared == null ? new ArrayList<>() : new ArrayList<>(declared);
+        merged.addAll(added);
+        return merged;
     }
 
     List<ArtifactVersion> getInjectedBefore(String modId)

@@ -6,6 +6,7 @@ import java.util.List;
 import com.google.common.eventbus.EventBus;
 
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.versioning.VersionParser;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,26 @@ class DeclarativeModContainerTest {
         metadata.version = "1.0";
         return new DeclarativeModContainer(metadata, new File("/mods/declared.jar"), entrypointClass,
                 DeclarativeModContainerTest.class.getClassLoader());
+    }
+
+    @Test
+    void aModWithoutAModClassCanStillDeclareDependencies() {
+        // The annotation was the only source before the jar section existed, so a container with no annotation answered
+        // "no dependencies" no matter what its entry said. Its entry is now where they come from, and the sorter reads
+        // them from the container - so they have to be answered here rather than inherited as empty.
+        ModMetadata metadata = new ModMetadata();
+        metadata.modId = "declared";
+        metadata.version = "1.0";
+        metadata.requiredMods = java.util.Set.of(VersionParser.parseVersionReference("forge@[14.23,)"));
+        metadata.dependencies.add(VersionParser.parseVersionReference("after@[1.0,)"));
+
+        DeclarativeModContainer container = new DeclarativeModContainer(metadata, new File("/mods/declared.jar"),
+                DeclarativeStubEntrypoint.class.getName(), DeclarativeModContainerTest.class.getClassLoader());
+
+        assertEquals(1, container.getRequirements().size());
+        assertEquals("forge", container.getRequirements().iterator().next().getLabel());
+        assertEquals(1, container.getDependencies().size());
+        assertTrue(container.getDependants().isEmpty());
     }
 
     @Test

@@ -61,22 +61,29 @@ public class DummyModContainer implements ModContainer
     {
     }
 
+    /**
+     * The dependency lists of this container's metadata.
+     *
+     * <p>Answering the empty list regardless used to be indistinguishable from "declares none", because nothing without
+     * a mod class could declare any: the annotation was the only source. A declarative mod, which has no annotation by
+     * design, declares them in its {@code mcmod.info} entry, and they have to reach the sorter from there.
+     */
     @Override
     public List<ArtifactVersion> getDependants()
     {
-        return Collections.emptyList();
+        return md == null || md.dependants == null ? Collections.emptyList() : md.dependants;
     }
 
     @Override
     public List<ArtifactVersion> getDependencies()
     {
-        return Collections.emptyList();
+        return md == null || md.dependencies == null ? Collections.emptyList() : md.dependencies;
     }
 
     @Override
     public Set<ArtifactVersion> getRequirements()
     {
-        return Collections.emptySet();
+        return md == null || md.requiredMods == null ? Collections.emptySet() : md.requiredMods;
     }
 
     @Override

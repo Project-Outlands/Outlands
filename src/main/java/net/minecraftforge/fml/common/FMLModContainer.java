@@ -43,6 +43,7 @@ import net.minecraftforge.common.config.ConfigManager;
 import net.minecraftforge.fml.common.Mod.Instance;
 import net.minecraftforge.fml.common.Mod.Metadata;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
+import net.minecraftforge.fml.common.discovery.JarDeclaration;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
 import net.minecraftforge.fml.common.discovery.ASMDataTable.ASMData;
 import net.minecraftforge.fml.common.event.FMLConstructionEvent;
@@ -105,6 +106,42 @@ public class FMLModContainer implements ModContainer
      * the {@code mcmod.info} entry is not. The first call therefore happens from {@link #bindMetadata}, which is where a
      * disagreement between the two is reported.
      */
+    /**
+     * Decides whether this mod's dependencies come from its {@code mcmod.info} entry or from its annotation.
+     *
+     * <p>{@code useDependencyInformation} exists because {@code mcmod.info} used to be an alternative to the
+     * annotation: the entry duplicated what the annotation said, so a jar had to state which of the two it meant, and
+     * only this flag made the entry win. A jar that declares the {@code jar} section has already said which world it is
+     * in, so its entry is read directly and the flag is not part of the new format.
+     *
+     * <p>An entry that declares no dependency list at all falls back to the annotation: "declared nothing" and "did not
+     * migrate this part" are the same JSON, and dropping a mod's dependencies because it adopted the section for some
+     * other reason would be the quietest possible failure.
+     *
+     * @param declaration the jar section of this mod's file, or {@code null} for metadata written before it existed
+     * @param metadata the entry this mod's container is being bound to
+     * @param overridesMetadata whether {@code @Mod(useMetadata = false)} asked for the annotation to be authoritative
+     */
+    static boolean readsDependencyListsFromMetadata(@Nullable JarDeclaration declaration, ModMetadata metadata, boolean overridesMetadata)
+    {
+        if (overridesMetadata)
+        {
+            // A per-mod statement about that mod's own metadata, so it outranks the jar-level one.
+            return false;
+        }
+        if (declaration != null)
+        {
+            // null-safe: an explicit "requiredMods": null is a JSON author's way of saying nothing, not a crash.
+            return !isEmpty(metadata.requiredMods) || !isEmpty(metadata.dependencies) || !isEmpty(metadata.dependants);
+        }
+        return metadata.useDependencyInformation;
+    }
+
+    private static boolean isEmpty(@Nullable java.util.Collection<?> list)
+    {
+        return list == null || list.isEmpty();
+    }
+
     private ModLanguageDeclaration languageDeclaration;
     private ILanguageAdapter languageAdapter;
     private Disableable disableability;
@@ -292,21 +329,24 @@ public class FMLModContainer implements ModContainer
             overridesMetadata = !((Boolean)descriptor.get("useMetadata"));
         }
 
-        if (overridesMetadata || !modMetadata.useDependencyInformation)
+        if (readsDependencyListsFromMetadata(mc.getJarDeclaration(), modMetadata, overridesMetadata))
+        {
+            if (modMetadata.useDependencyInformation)
+            {
+                FMLLog.log.debug("Mod {} declares useDependencyInformation, which does nothing in a jar that declares the"
+                        + " mcmod.info jar section: its entry is read either way", getModId());
+            }
+            FMLLog.log.trace("Using mcmod dependency info for {}: {} {} {}", getModId(), modMetadata.requiredMods, modMetadata.dependencies, modMetadata.dependants);
+        }
+        else
         {
             annotationDependencies = (String)descriptor.get("dependencies");
             DependencyParser dependencyParser = new DependencyParser(getModId(), FMLCommonHandler.instance().getSide());
             DependencyParser.DependencyInfo info = dependencyParser.parseDependencies(annotationDependencies);
-            info.dependants.addAll(Loader.instance().getInjectedBefore(getModId()));
-            info.dependencies.addAll(Loader.instance().getInjectedAfter(getModId()));
             modMetadata.requiredMods = info.requirements;
             modMetadata.dependencies = info.dependencies;
             modMetadata.dependants = info.dependants;
             FMLLog.log.trace("Parsed dependency info for {}: Requirements: {} After:{} Before:{}", getModId(), info.requirements, info.dependencies, info.dependants);
-        }
-        else
-        {
-            FMLLog.log.trace("Using mcmod dependency info for {}: {} {} {}", getModId(), modMetadata.requiredMods, modMetadata.dependencies, modMetadata.dependants);
         }
         if (Strings.isNullOrEmpty(modMetadata.name))
         {

@@ -77,6 +77,17 @@ public class ModMetadata
     // this field is not for use in the json
     public transient List<ModContainer> childMods = Lists.newArrayList();
 
+    /**
+     * Whether this entry's dependency lists are the ones to use.
+     *
+     * <p>Only meaningful for metadata written before the {@code jar} section existed: back then the entry duplicated
+     * the annotation, so a jar had to say which of the two it meant. A jar that declares the section is read directly
+     * and this flag does nothing - keeping it in the new format would be a second switch for a question the section
+     * already answered.
+     *
+     * @deprecated declare the {@code jar} section instead, which makes the entry authoritative on its own
+     */
+    @Deprecated
     public boolean useDependencyInformation;
     public Set<ArtifactVersion> requiredMods = Sets.newHashSet();
     public List<ArtifactVersion> dependencies = Lists.newArrayList();
