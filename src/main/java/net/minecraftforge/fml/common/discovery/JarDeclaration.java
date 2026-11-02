@@ -254,7 +254,7 @@ public final class JarDeclaration {
      * @throws LoaderException if the section is present but unusable: no {@code schemaVersion}, or no {@code license}
      */
     public static JarDeclaration parse(JsonObject json, String sourceName) {
-        String versionText = asString(json.get("schemaVersion"));
+        String versionText = asScalarText(json.get("schemaVersion"), "schemaVersion", sourceName);
         if (versionText == null || versionText.isBlank()) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                     + " does not declare \"schemaVersion\". Add \"schemaVersion\": " + CURRENT_SCHEMA + ".");
@@ -268,7 +268,7 @@ public final class JarDeclaration {
                     + " declares a non-numeric \"schemaVersion\": \"" + versionText + "\".", e);
         }
 
-        String license = asString(json.get("license"));
+        String license = asText(json.get("license"), "license", sourceName);
         if (license == null || license.isBlank()) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                     + " does not declare \"license\". Supply an SPDX identifier and/or a link to the licence text.");
@@ -285,7 +285,7 @@ public final class JarDeclaration {
             unknown.put(entry.getKey(), entry.getValue().toString());
         }
 
-        String orderText = asString(json.get("loadOrder"));
+        String orderText = asText(json.get("loadOrder"), "loadOrder", sourceName);
         LoadOrder loadOrder = LoadOrder.parse(orderText);
         if (loadOrder == null) {
             // Rejecting the whole jar over a typo would be disproportionate; falling back silently would hide it.
@@ -293,7 +293,7 @@ public final class JarDeclaration {
                     + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
         }
 
-        String sideText = asString(json.get("side"));
+        String sideText = asText(json.get("side"), "side", sourceName);
         Side side = Side.parse(sideText);
         if (side == null) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
@@ -333,11 +333,10 @@ public final class JarDeclaration {
         if (element == null || element.isJsonNull()) {
             return null;
         }
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
-                    + " declares \"coremod\" as something other than a class name: " + element);
+        String value = asText(element, "coremod", sourceName);
+        if (value == null) {
+            return null;
         }
-        String value = element.getAsString();
         if (value.isBlank()) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                     + " declares \"coremod\" without a class name. Supply the full name of an IFMLLoadingPlugin.");
@@ -461,7 +460,7 @@ public final class JarDeclaration {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares an entrypoint under an empty mod id.");
             }
-            String className = asString(entry.getValue());
+            String className = asText(entry.getValue(), "entrypoints." + modId, sourceName);
             if (className == null || className.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the entrypoint "
                         + "\"" + modId + "\" without a class name. The value must be the full name of an "
@@ -495,7 +494,7 @@ public final class JarDeclaration {
                         + " declares a containedDep that is not an object.");
             }
             JsonObject object = entry.getAsJsonObject();
-            String path = asString(object.get("path"));
+            String path = asText(object.get("path"), "containedDeps.path", sourceName);
             if (path == null || path.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a containedDep without a \"path\". The path is the entry inside this jar.");
@@ -509,11 +508,11 @@ public final class JarDeclaration {
             String name = path.substring(path.lastIndexOf('/') + 1);
             name = name.substring(0, name.length() - ".jar".length());
 
-            String id = asString(object.get("id"));
+            String id = asScalarText(object.get("id"), "containedDeps.id", sourceName);
             id = id == null || id.isBlank() ? name : id.trim();
-            String version = asString(object.get("version"));
+            String version = asScalarText(object.get("version"), "containedDeps.version", sourceName);
             version = version == null || version.isBlank() ? "0" : version.trim();
-            String kindText = asString(object.get("kind"));
+            String kindText = asText(object.get("kind"), "containedDeps.kind", sourceName);
             ContainedDepKind kind = ContainedDepKind.parse(kindText);
             if (kind == null) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares an unknown"
@@ -548,7 +547,7 @@ public final class JarDeclaration {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a provider under an empty language name. The key is the language mods will ask for.");
             }
-            String className = asString(entry.getValue());
+            String className = asText(entry.getValue(), "providers." + language, sourceName);
             if (className == null || className.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a provider for language \"" + language
@@ -593,7 +592,7 @@ public final class JarDeclaration {
             }
             List<String> supported = new ArrayList<>();
             for (JsonElement version : value.getAsJsonArray()) {
-                String text = asString(version);
+                String text = asScalarText(version, "providerVersions." + language, sourceName);
                 if (text == null || text.isBlank()) {
                     throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                             + " declares a blank version for the \"" + language + "\" provider.");
@@ -612,12 +611,52 @@ public final class JarDeclaration {
         return versions.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(versions);
     }
 
-    private static String asString(JsonElement element) {
+    /**
+     * @return the value of a key that has to be a JSON string, or {@code null} when the key is absent
+     * @throws LoaderException when the key holds anything else: a boolean or a number is not text, and letting one
+     *                         through as {@code "true"} or {@code "1"} means the jar silently declares a value it did
+     *                         not intend
+     */
+    @Nullable
+    private static String asText(@Nullable JsonElement element, String key, String sourceName) {
         if (element == null || element.isJsonNull()) {
             return null;
         }
-        // Numbers are accepted for schemaVersion so that "1" and 1 mean the same thing; anything structured is not.
-        return element.isJsonPrimitive() ? element.getAsString() : element.toString();
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares \"" + key
+                    + "\" as " + describeType(element) + ". Expected a string, as in \"" + key + "\": \"...\".");
+        }
+        return element.getAsString();
+    }
+
+    /**
+     * @return the value of a key where a number is a natural spelling of the same text, or {@code null} when absent
+     *
+     * <p>Only for values that are text without being prose: a schema version, a library version, a provider version.
+     * {@code 1} and {@code "1"} mean the same thing there, and demanding quotes would reject jars that are otherwise
+     * correct. Booleans and structures are refused: {@code true} is not a version of anything.
+     */
+    @Nullable
+    private static String asScalarText(@Nullable JsonElement element, String key, String sourceName) {
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+        if (!element.isJsonPrimitive() || element.getAsJsonPrimitive().isBoolean()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares \"" + key
+                    + "\" as " + describeType(element) + ". Expected a string or a number.");
+        }
+        return element.getAsString();
+    }
+
+    /** @return what a JSON value is, for a message that says what was found instead of what was wanted */
+    private static String describeType(JsonElement element) {
+        if (element.isJsonObject()) {
+            return "an object";
+        }
+        if (element.isJsonArray()) {
+            return "an array";
+        }
+        return element.getAsJsonPrimitive().isBoolean() ? "a boolean" : "a number";
     }
 
     /** @return the declared schema version, never below {@link #CURRENT_SCHEMA} */

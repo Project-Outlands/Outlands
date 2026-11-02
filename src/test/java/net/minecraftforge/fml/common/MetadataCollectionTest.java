@@ -124,6 +124,40 @@ class MetadataCollectionTest {
     }
 
     @Test
+    void aJarSectionOfTheWrongTypeIsRejected() {
+        // "jar" being present is the jar opting into the current schema, so a value that is not an object is a broken
+        // declaration rather than an absent one. Ignoring it would read the jar as legacy: no containedDeps, no side,
+        // no access transformers - and no hint about why.
+        assertThrows(LoaderException.class, () -> parse("{\"jar\":\"an object goes here\"}"));
+        assertThrows(LoaderException.class, () -> parse("{\"jar\":[]}"));
+        assertThrows(LoaderException.class, () -> parse("{\"jar\":1}"));
+    }
+
+    @Test
+    void aModListOfTheWrongTypeIsReportedAndReadAsAbsent() {
+        // The opposite call, and deliberately so: modList predates the jar section, so getting its shape wrong is old
+        // metadata rather than a claim to follow a new schema. Mods are still found by scanning for @Mod, which is
+        // what an absent list falls back to, so this must not be fatal.
+        var collection = parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"MIT\"},\"modList\":{\"modid\":\"x\"}}");
+
+        assertNotNull(collection.getJarDeclaration());
+        assertTrue(collection.getIds().isEmpty());
+    }
+
+    @Test
+    void anEntryOfTheWrongTypeDoesNotTakeTheJarSectionWithIt() {
+        // One bad entry used to throw inside gson, reach the "not valid JSON" handler, and discard the whole file -
+        // including the jar section, which has nothing to do with the entry that was malformed.
+        var collection = parse("{\"jar\":{\"schemaVersion\":1,\"license\":\"MIT\"},"
+                + "\"modList\":[{\"modid\":\"broken\",\"useDependencyInformation\":1},"
+                + "{\"modid\":\"intact\",\"version\":\"1.0\"}]}");
+
+        assertNotNull(collection.getJarDeclaration());
+        assertFalse(collection.getIds().contains("broken"), "the malformed entry is the one that is dropped");
+        assertEquals("1.0", collection.getMetadataForId("intact", java.util.Collections.emptyMap()).version);
+    }
+
+    @Test
     void languageKeysAreReadFromAModEntry() {
         // These three keys are per-mod, not jar level, so they must survive gson into ModMetadata: the merge with the
         // annotation reads them from there, and a key that gson silently drops would look declared but be invisible.

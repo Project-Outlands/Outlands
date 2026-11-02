@@ -65,20 +65,12 @@ public class MetadataCollection
         InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
         try
         {
-            MetadataCollection collection;
+            MetadataCollection collection = new MetadataCollection();
             Gson gson = new GsonBuilder().registerTypeAdapter(ArtifactVersion.class, new ArtifactVersionAdapter()).create();
             JsonElement rootElement = JsonParser.parseReader(reader);
             if (rootElement != null && rootElement.isJsonArray())
             {
-                collection = new MetadataCollection();
-                JsonArray jsonList = rootElement.getAsJsonArray();
-                collection.modList = new ModMetadata[jsonList.size()];
-                int i = 0;
-                for (JsonElement mod : jsonList)
-                {
-                    collection.modList[i++]=gson.fromJson(mod, ModMetadata.class);
-                    warnOnJarLevelKeyInModEntry(mod, sourceName);
-                }
+                collection.modList = readModList(gson, rootElement.getAsJsonArray(), sourceName);
             }
             else if (rootElement != null && rootElement.isJsonObject())
             {
@@ -86,22 +78,33 @@ public class MetadataCollection
                 // because the file only describes the jar itself (library, provider, declarative mod) or because
                 // the file describes a jar that has no @Mod class at all.
                 JsonObject root = rootElement.getAsJsonObject();
-                collection = gson.fromJson(root, MetadataCollection.class);
-                if (collection == null)
-                {
-                    collection = new MetadataCollection();
-                }
+                // Read key by key rather than handing the object to gson: the jar section has to be recognised even
+                // when an entry beside it is malformed, and a key of the wrong type has to be named as such instead
+                // of surfacing as "this file is not valid JSON".
                 JsonElement jarElement = root.get("jar");
-                if (jarElement != null && jarElement.isJsonObject())
+                if (jarElement != null && !jarElement.isJsonNull())
                 {
+                    if (!jarElement.isJsonObject())
+                    {
+                        throw new LoaderException("The mcmod.info of " + sourceName + " declares \"jar\" as "
+                                + describeType(jarElement) + ". Expected an object holding the jar's own metadata.");
+                    }
                     collection.jar = JarDeclaration.parse(jarElement.getAsJsonObject(), sourceName);
                 }
                 JsonElement modListElement = root.get("modList");
-                if (modListElement != null && modListElement.isJsonArray())
+                if (modListElement != null && !modListElement.isJsonNull())
                 {
-                    for (JsonElement mod : modListElement.getAsJsonArray())
+                    if (modListElement.isJsonArray())
                     {
-                        warnOnJarLevelKeyInModEntry(mod, sourceName);
+                        collection.modList = readModList(gson, modListElement.getAsJsonArray(), sourceName);
+                    }
+                    else
+                    {
+                        // Reported, not rejected: "modList" is the key the format had before the jar section, so a
+                        // jar that gets its shape wrong there is old metadata, not a claim to follow a new schema.
+                        // The mods are still found by scanning for @Mod, which is what an absent list falls back to.
+                        FMLLog.log.error("The mcmod.info of {} declares \"modList\" as {} instead of an array; reading"
+                                + " the file as if it had none", sourceName, describeType(modListElement));
                     }
                 }
             }
@@ -121,6 +124,52 @@ public class MetadataCollection
             FMLLog.log.error("The mcmod.info file in {} cannot be parsed as valid JSON. It will be ignored", sourceName, e);
             return new MetadataCollection();
         }
+    }
+
+    /**
+     * Reads the mod entries one at a time.
+     *
+     * <p>One entry with a value of the wrong type used to take the whole file down: gson throws for the entry, the
+     * exception reached the caller's "this is not valid JSON" handler, and everything beside it went with it -
+     * including the {@code jar} section, which has nothing to do with the malformed entry and is often the only
+     * reason the file has the object form at all. Naming the entry and carrying on loses strictly less.
+     */
+    private static ModMetadata[] readModList(Gson gson, JsonArray jsonList, String sourceName)
+    {
+        ModMetadata[] mods = new ModMetadata[jsonList.size()];
+        for (int i = 0; i < jsonList.size(); i++)
+        {
+            JsonElement mod = jsonList.get(i);
+            if (mod != null && !mod.isJsonNull())
+            {
+                try
+                {
+                    mods[i] = gson.fromJson(mod, ModMetadata.class);
+                }
+                catch (JsonParseException e)
+                {
+                    FMLLog.log.error("Mod entry {} in the mcmod.info of {} has a value of the wrong type and is ignored: {}",
+                            i, sourceName, e.getMessage());
+                }
+            }
+            // Reported whether the entry could be read or not: the key is misplaced either way.
+            warnOnJarLevelKeyInModEntry(mod, sourceName);
+        }
+        return mods;
+    }
+
+    /** @return what a JSON value is, for a message that says what was found instead of what was wanted */
+    private static String describeType(JsonElement element)
+    {
+        if (element.isJsonObject())
+        {
+            return "an object";
+        }
+        if (element.isJsonArray())
+        {
+            return "an array";
+        }
+        return element.getAsJsonPrimitive().isBoolean() ? "a boolean" : "a number";
     }
 
     /**
