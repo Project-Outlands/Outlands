@@ -128,7 +128,8 @@ public final class JarDeclaration {
         CLIENT,
         SERVER;
 
-        static Side parse(String value) {
+        /** @return the side a value names, {@link #BOTH} for "any"/"both"/absent, or {@code null} when unrecognised */
+        public static Side parse(String value) {
             if (value == null || value.isBlank()) {
                 return BOTH;
             }
@@ -254,7 +255,7 @@ public final class JarDeclaration {
      * @throws LoaderException if the section is present but unusable: no {@code schemaVersion}, or no {@code license}
      */
     public static JarDeclaration parse(JsonObject json, String sourceName) {
-        String versionText = asScalarText(json.get("schemaVersion"), "schemaVersion", sourceName);
+        String versionText = MetadataJson.optionalScalarText(json.get("schemaVersion"), where(sourceName), "schemaVersion");
         if (versionText == null || versionText.isBlank()) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                     + " does not declare \"schemaVersion\". Add \"schemaVersion\": " + CURRENT_SCHEMA + ".");
@@ -268,7 +269,7 @@ public final class JarDeclaration {
                     + " declares a non-numeric \"schemaVersion\": \"" + versionText + "\".", e);
         }
 
-        String license = asText(json.get("license"), "license", sourceName);
+        String license = MetadataJson.optionalText(json.get("license"), where(sourceName), "license");
         if (license == null || license.isBlank()) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                     + " does not declare \"license\". Supply an SPDX identifier and/or a link to the licence text.");
@@ -285,7 +286,7 @@ public final class JarDeclaration {
             unknown.put(entry.getKey(), entry.getValue().toString());
         }
 
-        String orderText = asText(json.get("loadOrder"), "loadOrder", sourceName);
+        String orderText = MetadataJson.optionalText(json.get("loadOrder"), where(sourceName), "loadOrder");
         LoadOrder loadOrder = LoadOrder.parse(orderText);
         if (loadOrder == null) {
             // Rejecting the whole jar over a typo would be disproportionate; falling back silently would hide it.
@@ -293,7 +294,7 @@ public final class JarDeclaration {
                     + " declares an unknown \"loadOrder\": \"" + orderText.trim() + "\". Expected one of: first, normal, last.");
         }
 
-        String sideText = asText(json.get("side"), "side", sourceName);
+        String sideText = MetadataJson.optionalText(json.get("side"), where(sourceName), "side");
         Side side = Side.parse(sideText);
         if (side == null) {
             throw new LoaderException("The jar section in the mcmod.info of " + sourceName
@@ -328,12 +329,17 @@ public final class JarDeclaration {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    /** @return the sentence subject of every message about this file's {@code jar} section */
+    private static String where(String sourceName) {
+        return "The jar section in the mcmod.info of " + sourceName;
+    }
+
     @Nullable
     private static String parseCoreMod(JsonElement element, String sourceName) {
         if (element == null || element.isJsonNull()) {
             return null;
         }
-        String value = asText(element, "coremod", sourceName);
+        String value = MetadataJson.optionalText(element, where(sourceName), "coremod");
         if (value == null) {
             return null;
         }
@@ -460,7 +466,7 @@ public final class JarDeclaration {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares an entrypoint under an empty mod id.");
             }
-            String className = asText(entry.getValue(), "entrypoints." + modId, sourceName);
+            String className = MetadataJson.optionalText(entry.getValue(), where(sourceName), "entrypoints." + modId);
             if (className == null || className.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the entrypoint "
                         + "\"" + modId + "\" without a class name. The value must be the full name of an "
@@ -494,7 +500,7 @@ public final class JarDeclaration {
                         + " declares a containedDep that is not an object.");
             }
             JsonObject object = entry.getAsJsonObject();
-            String path = asText(object.get("path"), "containedDeps.path", sourceName);
+            String path = MetadataJson.optionalText(object.get("path"), where(sourceName), "containedDeps.path");
             if (path == null || path.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a containedDep without a \"path\". The path is the entry inside this jar.");
@@ -508,11 +514,11 @@ public final class JarDeclaration {
             String name = path.substring(path.lastIndexOf('/') + 1);
             name = name.substring(0, name.length() - ".jar".length());
 
-            String id = asScalarText(object.get("id"), "containedDeps.id", sourceName);
+            String id = MetadataJson.optionalScalarText(object.get("id"), where(sourceName), "containedDeps.id");
             id = id == null || id.isBlank() ? name : id.trim();
-            String version = asScalarText(object.get("version"), "containedDeps.version", sourceName);
+            String version = MetadataJson.optionalScalarText(object.get("version"), where(sourceName), "containedDeps.version");
             version = version == null || version.isBlank() ? "0" : version.trim();
-            String kindText = asText(object.get("kind"), "containedDeps.kind", sourceName);
+            String kindText = MetadataJson.optionalText(object.get("kind"), where(sourceName), "containedDeps.kind");
             ContainedDepKind kind = ContainedDepKind.parse(kindText);
             if (kind == null) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares an unknown"
@@ -547,7 +553,7 @@ public final class JarDeclaration {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a provider under an empty language name. The key is the language mods will ask for.");
             }
-            String className = asText(entry.getValue(), "providers." + language, sourceName);
+            String className = MetadataJson.optionalText(entry.getValue(), where(sourceName), "providers." + language);
             if (className == null || className.isBlank()) {
                 throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                         + " declares a provider for language \"" + language
@@ -592,7 +598,7 @@ public final class JarDeclaration {
             }
             List<String> supported = new ArrayList<>();
             for (JsonElement version : value.getAsJsonArray()) {
-                String text = asScalarText(version, "providerVersions." + language, sourceName);
+                String text = MetadataJson.optionalScalarText(version, where(sourceName), "providerVersions." + language);
                 if (text == null || text.isBlank()) {
                     throw new LoaderException("The jar section in the mcmod.info of " + sourceName
                             + " declares a blank version for the \"" + language + "\" provider.");
@@ -609,54 +615,6 @@ public final class JarDeclaration {
             versions.put(language, List.copyOf(supported));
         }
         return versions.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(versions);
-    }
-
-    /**
-     * @return the value of a key that has to be a JSON string, or {@code null} when the key is absent
-     * @throws LoaderException when the key holds anything else: a boolean or a number is not text, and letting one
-     *                         through as {@code "true"} or {@code "1"} means the jar silently declares a value it did
-     *                         not intend
-     */
-    @Nullable
-    private static String asText(@Nullable JsonElement element, String key, String sourceName) {
-        if (element == null || element.isJsonNull()) {
-            return null;
-        }
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-            throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares \"" + key
-                    + "\" as " + describeType(element) + ". Expected a string, as in \"" + key + "\": \"...\".");
-        }
-        return element.getAsString();
-    }
-
-    /**
-     * @return the value of a key where a number is a natural spelling of the same text, or {@code null} when absent
-     *
-     * <p>Only for values that are text without being prose: a schema version, a library version, a provider version.
-     * {@code 1} and {@code "1"} mean the same thing there, and demanding quotes would reject jars that are otherwise
-     * correct. Booleans and structures are refused: {@code true} is not a version of anything.
-     */
-    @Nullable
-    private static String asScalarText(@Nullable JsonElement element, String key, String sourceName) {
-        if (element == null || element.isJsonNull()) {
-            return null;
-        }
-        if (!element.isJsonPrimitive() || element.getAsJsonPrimitive().isBoolean()) {
-            throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares \"" + key
-                    + "\" as " + describeType(element) + ". Expected a string or a number.");
-        }
-        return element.getAsString();
-    }
-
-    /** @return what a JSON value is, for a message that says what was found instead of what was wanted */
-    private static String describeType(JsonElement element) {
-        if (element.isJsonObject()) {
-            return "an object";
-        }
-        if (element.isJsonArray()) {
-            return "an array";
-        }
-        return element.getAsJsonPrimitive().isBoolean() ? "a boolean" : "a number";
     }
 
     /** @return the declared schema version, never below {@link #CURRENT_SCHEMA} */

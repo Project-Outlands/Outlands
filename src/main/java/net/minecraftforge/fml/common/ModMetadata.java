@@ -89,6 +89,14 @@ public class ModMetadata
      */
     @Deprecated
     public boolean useDependencyInformation;
+    /**
+     * The dependencies this entry declares with {@code depends}, as written.
+     *
+     * <p>Transient because the three lists below are what the sorter reads: this is the declaration, those are its
+     * settled form for one launch. Kept apart so the side filter can be applied where the side is known, and so a
+     * container can answer "what did this mod declare" without undoing a filter.
+     */
+    public transient List<ModDependency> declaredDependencies = List.of();
     public Set<ArtifactVersion> requiredMods = Sets.newHashSet();
     public List<ArtifactVersion> dependencies = Lists.newArrayList();
     public List<ArtifactVersion> dependants = Lists.newArrayList();
@@ -105,6 +113,40 @@ public class ModMetadata
 
     public ModMetadata()
     {
+    }
+
+    /**
+     * Fills the three lists from {@link #declaredDependencies}, dropping the dependencies scoped to the other side.
+     *
+     * <p>Rebuilt from the declaration every time, so calling it twice is the same as calling it once - the container
+     * side and the declarative side of the loader both have a reason to ask.
+     */
+    public void resolveDeclaredDependencies(net.minecraftforge.fml.relauncher.Side launchSide)
+    {
+        if (declaredDependencies.isEmpty())
+        {
+            return;
+        }
+        net.minecraftforge.fml.common.versioning.DependencyParser.DependencyInfo info =
+                new net.minecraftforge.fml.common.versioning.DependencyParser.DependencyInfo();
+        for (ModDependency dependency : declaredDependencies)
+        {
+            dependency.applyTo(info, launchSide);
+        }
+        requiredMods = info.requirements;
+        dependencies = info.dependencies;
+        dependants = info.dependants;
+    }
+
+    /**
+     * @return whether this entry says anything about dependencies at all, in either form
+     */
+    public boolean declaresDependencies()
+    {
+        return !declaredDependencies.isEmpty()
+                || requiredMods != null && !requiredMods.isEmpty()
+                || dependencies != null && !dependencies.isEmpty()
+                || dependants != null && !dependants.isEmpty();
     }
 
     public String getChildModCountString()

@@ -54,6 +54,17 @@ public class DeclarativeModContainer extends DummyModContainer {
         this.classLoader = classLoader;
     }
 
+    /**
+     * Settles this mod's dependency lists from its entry.
+     *
+     * <p>A declarative mod has no annotation, so its entry is the only place dependencies can come from - and the base
+     * implementation does nothing, which used to mean "declares none" for every mod without a mod class.
+     */
+    @Override
+    public void bindMetadata(MetadataCollection mc) {
+        getMetadata().resolveDeclaredDependencies(FMLModContainer.launchSide());
+    }
+
     @Override
     public File getSource() {
         return source;

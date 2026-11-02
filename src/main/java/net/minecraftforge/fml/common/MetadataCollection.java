@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -145,6 +147,10 @@ public class MetadataCollection
                 try
                 {
                     mods[i] = gson.fromJson(mod, ModMetadata.class);
+                    if (mods[i] != null)
+                    {
+                        readDependencies(mods[i], mod, sourceName);
+                    }
                 }
                 catch (JsonParseException e)
                 {
@@ -156,6 +162,43 @@ public class MetadataCollection
             warnOnJarLevelKeyInModEntry(mod, sourceName);
         }
         return mods;
+    }
+
+    /**
+     * Reads the dependency declaration of one mod entry.
+     *
+     * <p>{@code depends} is the current form: one object per dependency, so required / before-after / side stay three
+     * independent facts instead of becoming nine lists. The three lists it replaces are still read - jars written
+     * before it existed declare dependencies that way - but an entry that has both is reported, because the new form
+     * wins and the lists would otherwise stop mattering without a word.
+     */
+    private static void readDependencies(ModMetadata metadata, JsonElement mod, String sourceName)
+    {
+        if (mod == null || !mod.isJsonObject())
+        {
+            return;
+        }
+        JsonObject entry = mod.getAsJsonObject();
+        String where = "The mod entry for \"" + (metadata.modId == null ? "?" : metadata.modId) + "\" in the mcmod.info of " + sourceName;
+        metadata.declaredDependencies = ModDependency.parse(entry.get("depends"), where);
+        if (metadata.declaredDependencies.isEmpty())
+        {
+            return;
+        }
+        List<String> stale = new ArrayList<>();
+        for (String key : new String[] {"requiredMods", "dependencies", "dependants"})
+        {
+            JsonElement legacy = entry.get(key);
+            if (legacy != null && !legacy.isJsonNull() && !(legacy.isJsonArray() && legacy.getAsJsonArray().isEmpty()))
+            {
+                stale.add(key);
+            }
+        }
+        if (!stale.isEmpty())
+        {
+            FMLLog.log.warn("{} declares both \"depends\" and the older {}; \"depends\" is used and the older keys are"
+                    + " ignored", where, stale);
+        }
     }
 
     /** @return what a JSON value is, for a message that says what was found instead of what was wanted */

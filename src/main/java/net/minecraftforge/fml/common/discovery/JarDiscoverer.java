@@ -252,6 +252,9 @@ public class JarDiscoverer implements ITypeDiscoverer
                 metadata.name = modId;
             }
             DeclarativeModContainer container = new DeclarativeModContainer(metadata, candidate.getModContainer(), entry.getValue());
+            // The same hook the @Mod path uses, so a container needs to say "I am bound" only once, in one way, whichever
+            // kind of mod it is.
+            container.bindMetadata(mc);
             table.addContainer(container);
             foundMods.add(container);
             FMLLog.log.debug("Declared mod {} without a mod class, entry point {}", modId, entry.getValue());

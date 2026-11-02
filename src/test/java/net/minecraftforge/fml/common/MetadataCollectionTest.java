@@ -158,6 +158,22 @@ class MetadataCollectionTest {
     }
 
     @Test
+    void dependsWinsOverTheOlderListsInTheSameEntry() {
+        // Both in one entry is a half-finished migration. The new form is authoritative - it is the only one that can
+        // say "client only" - and the older keys are named in a warning rather than quietly ignored.
+        var collection = parse("{\"modList\":[{\"modid\":\"mixed\","
+                + "\"depends\":[{\"on\":\"foo\",\"required\":true}],"
+                + "\"requiredMods\":[\"bar@[1.0,)\"]}]}");
+
+        ModMetadata metadata = collection.getMetadataForId("mixed", java.util.Collections.emptyMap());
+        assertEquals(1, metadata.declaredDependencies.size());
+        metadata.resolveDeclaredDependencies(net.minecraftforge.fml.relauncher.Side.CLIENT);
+
+        assertEquals(1, metadata.requiredMods.size());
+        assertEquals("foo", metadata.requiredMods.iterator().next().getLabel());
+    }
+
+    @Test
     void languageKeysAreReadFromAModEntry() {
         // These three keys are per-mod, not jar level, so they must survive gson into ModMetadata: the merge with the
         // annotation reads them from there, and a key that gson silently drops would look declared but be invisible.

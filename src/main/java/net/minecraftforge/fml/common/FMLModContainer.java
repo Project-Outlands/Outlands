@@ -44,6 +44,7 @@ import net.minecraftforge.fml.common.Mod.Instance;
 import net.minecraftforge.fml.common.Mod.Metadata;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.common.discovery.JarDeclaration;
+import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
 import net.minecraftforge.fml.common.discovery.ASMDataTable.ASMData;
 import net.minecraftforge.fml.common.event.FMLConstructionEvent;
@@ -107,39 +108,62 @@ public class FMLModContainer implements ModContainer
      * disagreement between the two is reported.
      */
     /**
-     * Decides whether this mod's dependencies come from its {@code mcmod.info} entry or from its annotation.
+     * @return the side this launch is, or {@code null} when there is no launch at all (a test, a tool)
      *
-     * <p>{@code useDependencyInformation} exists because {@code mcmod.info} used to be an alternative to the
-     * annotation: the entry duplicated what the annotation said, so a jar had to state which of the two it meant, and
-     * only this flag made the entry win. A jar that declares the {@code jar} section has already said which world it is
-     * in, so its entry is read directly and the flag is not part of the new format.
-     *
-     * <p>An entry that declares no dependency list at all falls back to the annotation: "declared nothing" and "did not
-     * migrate this part" are the same JSON, and dropping a mod's dependencies because it adopted the section for some
-     * other reason would be the quietest possible failure.
-     *
-     * @param declaration the jar section of this mod's file, or {@code null} for metadata written before it existed
-     * @param metadata the entry this mod's container is being bound to
-     * @param overridesMetadata whether {@code @Mod(useMetadata = false)} asked for the annotation to be authoritative
+     * <p>Asked through the handler when it exists because that is what the annotation path has always used, and through
+     * the launch handler otherwise - the handler is built by the tweaker and absent wherever one is not running.
      */
-    static boolean readsDependencyListsFromMetadata(@Nullable JarDeclaration declaration, ModMetadata metadata, boolean overridesMetadata)
+    @Nullable
+    static Side launchSide()
+    {
+        FMLCommonHandler handler = FMLCommonHandler.instance();
+        return handler == null ? FMLLaunchHandler.side() : handler.getSide();
+    }
+
+    /** Where a mod's dependency lists come from. */
+    enum DependencySource {
+        /** The entry's {@code depends} array: the current form, read as written. */
+        DECLARED,
+        /** The entry's {@code requiredMods} / {@code dependencies} / {@code dependants} lists. */
+        ENTRY_LISTS,
+        /** The {@code @Mod(dependencies = "...")} string. */
+        ANNOTATION
+    }
+
+    /**
+     * Decides where this mod's dependencies come from.
+     *
+     * <p>Three sources, in one order of precedence:
+     *
+     * <ol>
+     *   <li>{@code @Mod(useMetadata = false)} - a mod saying its annotation is the truth about itself. A per-mod
+     *       statement, so it outranks the jar-level one.</li>
+     *   <li>{@code depends} in the entry - the current form, and the only one that can say "client only".</li>
+     *   <li>The entry's three lists, when the jar declares the {@code jar} section or sets the historical
+     *       {@code useDependencyInformation} flag. A jar that declares the section does not additionally need the flag:
+     *       declaring the section already said which world it is in.</li>
+     *   <li>Otherwise the annotation.</li>
+     * </ol>
+     *
+     * <p>An entry with no dependency keys at all falls back to the annotation: "declared nothing" and "did not migrate
+     * this part" are the same JSON, and dropping a mod's dependencies because it adopted the section for some other
+     * reason would be the quietest possible failure.
+     */
+    static DependencySource dependencySource(@Nullable MetadataCollection mc, ModMetadata metadata, boolean overridesMetadata)
     {
         if (overridesMetadata)
         {
-            // A per-mod statement about that mod's own metadata, so it outranks the jar-level one.
-            return false;
+            return DependencySource.ANNOTATION;
         }
-        if (declaration != null)
+        if (!metadata.declaredDependencies.isEmpty())
         {
-            // null-safe: an explicit "requiredMods": null is a JSON author's way of saying nothing, not a crash.
-            return !isEmpty(metadata.requiredMods) || !isEmpty(metadata.dependencies) || !isEmpty(metadata.dependants);
+            return DependencySource.DECLARED;
         }
-        return metadata.useDependencyInformation;
-    }
-
-    private static boolean isEmpty(@Nullable java.util.Collection<?> list)
-    {
-        return list == null || list.isEmpty();
+        if (mc != null && mc.getJarDeclaration() != null && metadata.declaresDependencies())
+        {
+            return DependencySource.ENTRY_LISTS;
+        }
+        return metadata.useDependencyInformation ? DependencySource.ENTRY_LISTS : DependencySource.ANNOTATION;
     }
 
     private ModLanguageDeclaration languageDeclaration;
@@ -329,24 +353,38 @@ public class FMLModContainer implements ModContainer
             overridesMetadata = !((Boolean)descriptor.get("useMetadata"));
         }
 
-        if (readsDependencyListsFromMetadata(mc.getJarDeclaration(), modMetadata, overridesMetadata))
+        switch (dependencySource(mc, modMetadata, overridesMetadata))
         {
-            if (modMetadata.useDependencyInformation)
+            case DECLARED ->
             {
-                FMLLog.log.debug("Mod {} declares useDependencyInformation, which does nothing in a jar that declares the"
-                        + " mcmod.info jar section: its entry is read either way", getModId());
+                // Read as written; the side filter is applied here because this is where the launch side is known.
+                modMetadata.resolveDeclaredDependencies(launchSide());
+                FMLLog.log.trace("Using declared dependencies for {}: {} {} {}", getModId(), modMetadata.requiredMods, modMetadata.dependencies, modMetadata.dependants);
             }
-            FMLLog.log.trace("Using mcmod dependency info for {}: {} {} {}", getModId(), modMetadata.requiredMods, modMetadata.dependencies, modMetadata.dependants);
-        }
-        else
-        {
-            annotationDependencies = (String)descriptor.get("dependencies");
-            DependencyParser dependencyParser = new DependencyParser(getModId(), FMLCommonHandler.instance().getSide());
-            DependencyParser.DependencyInfo info = dependencyParser.parseDependencies(annotationDependencies);
-            modMetadata.requiredMods = info.requirements;
-            modMetadata.dependencies = info.dependencies;
-            modMetadata.dependants = info.dependants;
-            FMLLog.log.trace("Parsed dependency info for {}: Requirements: {} After:{} Before:{}", getModId(), info.requirements, info.dependencies, info.dependants);
+            case ENTRY_LISTS ->
+            {
+                if (modMetadata.useDependencyInformation)
+                {
+                    FMLLog.log.debug("Mod {} declares useDependencyInformation, which does nothing in a jar that declares the"
+                            + " mcmod.info jar section: its entry is read either way", getModId());
+                }
+                FMLLog.log.trace("Using mcmod dependency info for {}: {} {} {}", getModId(), modMetadata.requiredMods, modMetadata.dependencies, modMetadata.dependants);
+            }
+            case ANNOTATION ->
+            {
+                if (modMetadata.declaresDependencies() && overridesMetadata)
+                {
+                    FMLLog.log.warn("Mod {} declares dependencies in its mcmod.info entry but sets useMetadata = false, so its"
+                            + " annotation decides and the declaration is ignored", getModId());
+                }
+                annotationDependencies = (String)descriptor.get("dependencies");
+                DependencyParser dependencyParser = new DependencyParser(getModId(), FMLCommonHandler.instance().getSide());
+                DependencyParser.DependencyInfo info = dependencyParser.parseDependencies(annotationDependencies);
+                modMetadata.requiredMods = info.requirements;
+                modMetadata.dependencies = info.dependencies;
+                modMetadata.dependants = info.dependants;
+                FMLLog.log.trace("Parsed dependency info for {}: Requirements: {} After:{} Before:{}", getModId(), info.requirements, info.dependencies, info.dependants);
+            }
         }
         if (Strings.isNullOrEmpty(modMetadata.name))
         {

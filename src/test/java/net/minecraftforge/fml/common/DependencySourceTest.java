@@ -1,12 +1,10 @@
 package net.minecraftforge.fml.common;
 
-import net.minecraftforge.fml.common.discovery.JarDeclaration;
 import net.minecraftforge.fml.common.versioning.VersionParser;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Covers where a mod's dependencies come from.
@@ -27,15 +25,25 @@ class DependencySourceTest {
     @Test
     void withoutADeclarationTheFlagStillDecides() {
         // Every jar written before the section: the entry is a copy of the annotation, so honouring it is opt-in.
-        assertFalse(FMLModContainer.readsDependencyListsFromMetadata(null, requirement("foo@[1.0,)"), false));
-        assertTrue(FMLModContainer.readsDependencyListsFromMetadata(null, flag(requirement("foo@[1.0,)")), false));
+        assertEquals(FMLModContainer.DependencySource.ANNOTATION, FMLModContainer.dependencySource(null, requirement("foo@[1.0,)"), false));
+        assertEquals(FMLModContainer.DependencySource.ENTRY_LISTS, FMLModContainer.dependencySource(null, flag(requirement("foo@[1.0,)")), false));
+    }
+
+    @Test
+    void theDeclaredFormOutranksBothListsAndTheAnnotation() {
+        ModMetadata metadata = requirement("foo@[1.0,)");
+        metadata.declaredDependencies = ModDependency.parse(
+                new com.google.gson.JsonParser().parse("[{\"on\":\"bar\",\"required\":true}]"),
+                "test");
+
+        assertEquals(FMLModContainer.DependencySource.DECLARED, FMLModContainer.dependencySource(collectionJar(), metadata, false));
     }
 
     @Test
     void aDeclarationMakesTheEntryAuthoritativeOnItsOwn() {
-        assertTrue(FMLModContainer.readsDependencyListsFromMetadata(jar(), requirement("foo@[1.0,)"), false),
+        assertEquals(FMLModContainer.DependencySource.ENTRY_LISTS, FMLModContainer.dependencySource(collectionJar(), requirement("foo@[1.0,)"), false),
                 "a jar that declares the section does not also need useDependencyInformation");
-        assertTrue(FMLModContainer.readsDependencyListsFromMetadata(jar(), flag(requirement("foo@[1.0,)")), false),
+        assertEquals(FMLModContainer.DependencySource.ENTRY_LISTS, FMLModContainer.dependencySource(collectionJar(), flag(requirement("foo@[1.0,)")), false),
                 "declaring the flag as well is harmless, just useless");
     }
 
@@ -43,7 +51,7 @@ class DependencySourceTest {
     void anEntryThatSaysNothingFallsBackToTheAnnotation() {
         // "declared nothing" and "did not migrate this part" are the same JSON. A mod that adopted the section for its
         // containedDeps and left its dependencies in the annotation must not silently lose them.
-        assertFalse(FMLModContainer.readsDependencyListsFromMetadata(jar(), new ModMetadata(), false));
+        assertEquals(FMLModContainer.DependencySource.ANNOTATION, FMLModContainer.dependencySource(collectionJar(), new ModMetadata(), false));
     }
 
     @Test
@@ -52,7 +60,7 @@ class DependencySourceTest {
         ModMetadata metadata = new ModMetadata();
         metadata.dependencies.add(VersionParser.parseVersionReference("bar@[2.0,)"));
 
-        assertTrue(FMLModContainer.readsDependencyListsFromMetadata(jar(), metadata, false));
+        assertEquals(FMLModContainer.DependencySource.ENTRY_LISTS, FMLModContainer.dependencySource(collectionJar(), metadata, false));
     }
 
     @Test
@@ -63,14 +71,14 @@ class DependencySourceTest {
         metadata.requiredMods = null;
         metadata.dependencies = null;
 
-        assertFalse(FMLModContainer.readsDependencyListsFromMetadata(jar(), metadata, false));
+        assertEquals(FMLModContainer.DependencySource.ANNOTATION, FMLModContainer.dependencySource(collectionJar(), metadata, false));
     }
 
     @Test
     void useMetadataFalseStillWins() {
         // @Mod(useMetadata = false) is a mod saying its annotation is the truth about itself. That is a per-mod
         // statement, so it outranks the jar-level one even in the new format.
-        assertFalse(FMLModContainer.readsDependencyListsFromMetadata(jar(), requirement("foo@[1.0,)"), true));
+        assertEquals(FMLModContainer.DependencySource.ANNOTATION, FMLModContainer.dependencySource(collectionJar(), requirement("foo@[1.0,)"), true));
     }
 
     private static ModMetadata flag(ModMetadata metadata) {
@@ -78,7 +86,10 @@ class DependencySourceTest {
         return metadata;
     }
 
-    private static JarDeclaration jar() {
-        return Declarations.jar(",\"containedDeps\":[]");
+    /** A metadata collection whose file declares the jar section, which is what {@code dependencySource} looks at. */
+    private static MetadataCollection collectionJar() {
+        return MetadataCollection.from(new java.io.ByteArrayInputStream(
+                "{\"jar\":{\"schemaVersion\":1,\"license\":\"MIT\"}}".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                "test.jar");
     }
 }
