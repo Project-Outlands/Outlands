@@ -90,7 +90,20 @@
      }
  
      @Override
-@@ -893,6 +913,7 @@
+@@ -639,6 +659,12 @@
+     }
+ 
+     @Override
++    public void onRollSynced(float roll)
++    {
++        // The local player owns its roll; ignore the server echo.
++    }
++
++    @Override
+     public void notifyDataManagerChange(DataParameter<?> key)
+     {
+         super.notifyDataManagerChange(key);
+@@ -893,6 +919,7 @@
          float f = 0.8F;
          boolean flag2 = this.movementInput.moveForward >= 0.8F;
          this.movementInput.updatePlayerMoveState();
@@ -98,7 +111,7 @@
          this.mc.getTutorial().handleMovement(this.movementInput);
  
          if (this.isHandActive() && !this.isRiding())
-@@ -912,10 +933,13 @@
+@@ -912,10 +939,13 @@
          }
  
          AxisAlignedBB axisalignedbb = this.getEntityBoundingBox();
@@ -112,7 +125,7 @@
          boolean flag4 = this.getFoodStats().getFoodLevel() > 6.0F || this.capabilities.allowFlying;
  
          if (this.onGround
-@@ -1168,18 +1192,17 @@
+@@ -1168,18 +1198,17 @@
                                  }
  
                                  float f8 = Math.max(f * 7.0F, 1.0F / f12);
@@ -135,7 +148,7 @@
                                  Vec3d vec3d10 = vec3d4.add(vec3d6);
                                  List<AxisAlignedBB> list = this.world.getCollisionBoxes(this, axisalignedbb);
  
-@@ -1244,5 +1267,18 @@
+@@ -1244,5 +1273,18 @@
                  }
              }
          }

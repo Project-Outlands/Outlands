@@ -9,7 +9,23 @@
  {
      private static final Logger LOGGER = LogManager.getLogger();
      private static final List<ItemStack> EMPTY_EQUIPMENT = Collections.emptyList();
-@@ -177,6 +177,10 @@
+@@ -112,6 +112,7 @@
+     public float rotationPitch;
+     public float prevRotationYaw;
+     public float prevRotationPitch;
++    private final net.minecraftforge.common.util.RollState rollState = new net.minecraftforge.common.util.RollState();
+     private AxisAlignedBB boundingBox;
+     public boolean onGround;
+     public boolean collidedHorizontally;
+@@ -149,6 +150,7 @@
+     private static final DataParameter<Boolean> CUSTOM_NAME_VISIBLE = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
+     private static final DataParameter<Boolean> SILENT = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
+     private static final DataParameter<Boolean> NO_GRAVITY = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
++    public static final DataParameter<Float> ROLL = DataSerializers.FLOAT.createKey(254);
+     public boolean addedToChunk;
+     public int chunkCoordX;
+     public int chunkCoordY;
+@@ -177,6 +179,10 @@
      private boolean isPositionDirty;
      private final double[] pistonDeltas;
      private long pistonDeltasGameTime;
@@ -20,7 +36,7 @@
  
      public Entity(World worldIn)
      {
-@@ -200,7 +204,7 @@
+@@ -200,7 +206,7 @@
  
          if (worldIn != null)
          {
@@ -29,9 +45,11 @@
          }
  
          this.dataManager = new EntityDataManager(this);
-@@ -211,7 +215,15 @@
+@@ -210,8 +216,17 @@
+         this.dataManager.register(CUSTOM_NAME, "");
          this.dataManager.register(SILENT, false);
          this.dataManager.register(NO_GRAVITY, false);
++        this.dataManager.register(ROLL, 0.0F);
          this.entityInit();
 +        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(new net.minecraftforge.event.entity.EntityEvent.EntityConstructing(this));
 +        capabilities = net.minecraftforge.event.ForgeEventFactory.gatherCapabilities(this);
@@ -45,7 +63,7 @@
  
      public int getEntityId()
      {
-@@ -357,6 +369,7 @@
+@@ -357,6 +372,7 @@
          this.posX = x;
          this.posY = y;
          this.posZ = z;
@@ -53,7 +71,7 @@
          float f = this.width / 2.0F;
          float f1 = this.height;
          this.setEntityBoundingBox(new AxisAlignedBB(x - f, y, z - f, x + f, y + f1, z + f));
-@@ -654,11 +667,10 @@
+@@ -654,11 +670,10 @@
  
              if ((type == MoverType.SELF || type == MoverType.PLAYER) && this.onGround && this.isSneaking() && this instanceof EntityPlayer)
              {
@@ -69,7 +87,7 @@
                  {
                      if (x < 0.05 && x >= -0.05)
                      {
-@@ -672,8 +684,6 @@
+@@ -672,8 +687,6 @@
                      {
                          x += 0.05;
                      }
@@ -78,7 +96,7 @@
                  }
  
                  for (;
-@@ -786,12 +796,10 @@
+@@ -786,12 +799,10 @@
                  double d7 = z;
                  AxisAlignedBB axisalignedbb1 = this.getEntityBoundingBox();
                  this.setEntityBoundingBox(axisalignedbb);
@@ -93,7 +111,7 @@
                  double d8 = y;
                  int j1 = 0;
  
-@@ -801,7 +809,7 @@
+@@ -801,7 +812,7 @@
                  }
  
                  axisalignedbb2 = axisalignedbb2.offset(0.0, d8, 0.0);
@@ -102,7 +120,7 @@
                  int l1 = 0;
  
                  for (int i2 = list.size(); l1 < i2; l1++)
-@@ -810,7 +818,7 @@
+@@ -810,7 +821,7 @@
                  }
  
                  axisalignedbb2 = axisalignedbb2.offset(d18, 0.0, 0.0);
@@ -111,7 +129,7 @@
                  int j2 = 0;
  
                  for (int k2 = list.size(); j2 < k2; j2++)
-@@ -829,7 +837,7 @@
+@@ -829,7 +840,7 @@
                  }
  
                  AxisAlignedBB axisalignedbb5 = axisalignedbb4.offset(0.0, d20, 0.0);
@@ -120,7 +138,7 @@
                  int j3 = 0;
  
                  for (int k3 = list.size(); j3 < k3; j3++)
-@@ -838,7 +846,7 @@
+@@ -838,7 +849,7 @@
                  }
  
                  AxisAlignedBB axisalignedbb6 = axisalignedbb5.offset(d21, 0.0, 0.0);
@@ -129,7 +147,7 @@
                  int l3 = 0;
  
                  for (int i4 = list.size(); l3 < i4; l3++)
-@@ -1029,6 +1037,7 @@
+@@ -1029,6 +1040,7 @@
          this.posX = (axisalignedbb.minX + axisalignedbb.maxX) / 2.0;
          this.posY = axisalignedbb.minY;
          this.posZ = (axisalignedbb.minZ + axisalignedbb.maxZ) / 2.0;
@@ -137,7 +155,7 @@
      }
  
      protected SoundEvent getSwimSound()
-@@ -1091,7 +1100,7 @@
+@@ -1091,7 +1103,7 @@
  
      protected void playStepSound(BlockPos pos, Block blockIn)
      {
@@ -146,7 +164,7 @@
  
          if (this.world.getBlockState(pos.up()).getBlock() == Blocks.SNOW_LAYER)
          {
-@@ -1325,6 +1334,7 @@
+@@ -1325,6 +1337,7 @@
          BlockPos blockpos = new BlockPos(i, j, k);
          IBlockState iblockstate = this.world.getBlockState(blockpos);
  
@@ -154,7 +172,7 @@
          if (iblockstate.getRenderType() != EnumBlockRenderType.INVISIBLE)
          {
              this.world
-@@ -1353,12 +1363,12 @@
+@@ -1353,12 +1366,12 @@
              BlockPos blockpos = new BlockPos(this.posX, d0, this.posZ);
              IBlockState iblockstate = this.world.getBlockState(blockpos);
  
@@ -171,7 +189,15 @@
              }
              else
              {
-@@ -1462,6 +1472,7 @@
+@@ -1450,6 +1463,7 @@
+         this.rotationPitch = pitch;
+         this.prevRotationYaw = this.rotationYaw;
+         this.prevRotationPitch = this.rotationPitch;
++        this.rollState.snap();
+         double d0 = this.prevRotationYaw - yaw;
+ 
+         if (d0 < -180.0)
+@@ -1462,6 +1476,7 @@
              this.prevRotationYaw -= 360.0F;
          }
  
@@ -179,7 +205,7 @@
          this.setPosition(this.posX, this.posY, this.posZ);
          this.setRotation(yaw, pitch);
      }
-@@ -1788,6 +1799,7 @@
+@@ -1788,6 +1803,7 @@
              {
                  compound.setBoolean("Glowing", this.glowing);
              }
@@ -187,7 +213,7 @@
  
              if (!this.tags.isEmpty())
              {
-@@ -1801,6 +1813,9 @@
+@@ -1801,6 +1817,9 @@
                  compound.setTag("Tags", nbttaglist);
              }
  
@@ -197,7 +223,7 @@
              this.writeEntityToNBT(compound);
  
              if (this.isBeingRidden())
-@@ -1907,6 +1922,10 @@
+@@ -1907,6 +1926,10 @@
              this.setSilent(compound.getBoolean("Silent"));
              this.setNoGravity(compound.getBoolean("NoGravity"));
              this.setGlowing(compound.getBoolean("Glowing"));
@@ -208,7 +234,7 @@
  
              if (compound.hasKey("Tags", 9))
              {
-@@ -1999,7 +2018,10 @@
+@@ -1999,7 +2022,10 @@
          {
              EntityItem entityitem = new EntityItem(this.world, this.posX, this.posY + offsetY, this.posZ, stack);
              entityitem.setDefaultPickupDelay();
@@ -220,7 +246,7 @@
              return entityitem;
          }
      }
-@@ -2068,6 +2090,7 @@
+@@ -2068,6 +2094,7 @@
              this.motionX = 0.0;
              this.motionY = 0.0;
              this.motionZ = 0.0;
@@ -228,7 +254,7 @@
              this.onUpdate();
  
              if (this.isRiding())
-@@ -2115,6 +2138,7 @@
+@@ -2115,6 +2142,7 @@
              }
          }
  
@@ -236,7 +262,7 @@
          if (force || this.canBeRidden(entityIn) && entityIn.canFitPassenger(this))
          {
              if (this.isRiding())
-@@ -2150,6 +2174,7 @@
+@@ -2150,6 +2178,7 @@
          if (this.ridingEntity != null)
          {
              Entity entity = this.ridingEntity;
@@ -244,7 +270,7 @@
              this.ridingEntity = null;
              entity.removePassenger(this);
          }
-@@ -2617,8 +2642,16 @@
+@@ -2617,8 +2646,16 @@
      @Nullable
      public Entity changeDimension(int dimensionIn)
      {
@@ -261,7 +287,7 @@
              this.world.profiler.startSection("changeDimension");
              MinecraftServer minecraftserver = this.getServer();
              int i = this.dimension;
-@@ -2626,7 +2659,7 @@
+@@ -2626,7 +2663,7 @@
              WorldServer worldserver1 = minecraftserver.getWorld(dimensionIn);
              this.dimension = dimensionIn;
  
@@ -270,7 +296,7 @@
              {
                  worldserver1 = minecraftserver.getWorld(0);
                  this.dimension = 0;
-@@ -2637,17 +2670,18 @@
+@@ -2637,17 +2674,18 @@
              this.world.profiler.startSection("reposition");
              BlockPos blockpos;
  
@@ -293,7 +319,7 @@
                  {
                      d0 = MathHelper.clamp(
                               d0 / 8.0, worldserver1.getWorldBorder().minX() + 16.0, worldserver1.getWorldBorder().maxX() - 16.0
-@@ -2656,7 +2690,7 @@
+@@ -2656,7 +2694,7 @@
                               d1 / 8.0, worldserver1.getWorldBorder().minZ() + 16.0, worldserver1.getWorldBorder().maxZ() - 16.0
                           );
                  }
@@ -302,7 +328,7 @@
                  {
                      d0 = MathHelper.clamp(
                               d0 * 8.0, worldserver1.getWorldBorder().minX() + 16.0, worldserver1.getWorldBorder().maxX() - 16.0
-@@ -2670,8 +2704,7 @@
+@@ -2670,8 +2708,7 @@
                  d1 = MathHelper.clamp((int)d1, -29999872, 29999872);
                  float f = this.rotationYaw;
                  this.setLocationAndAngles(d0, this.posY, d1, 90.0F, 0.0F);
@@ -312,7 +338,7 @@
                  blockpos = new BlockPos(this);
              }
  
-@@ -2683,7 +2716,7 @@
+@@ -2683,7 +2720,7 @@
              {
                  entity.copyDataFromOld(this);
  
@@ -321,7 +347,7 @@
                  {
                      BlockPos blockpos1 = worldserver1.getTopSolidOrLiquidBlock(worldserver1.getSpawnPoint());
                      entity.moveToBlockPosAndAngles(blockpos1, entity.rotationYaw, entity.rotationPitch);
-@@ -2720,7 +2753,7 @@
+@@ -2720,7 +2757,7 @@
  
      public float getExplosionResistance(Explosion explosionIn, World worldIn, BlockPos pos, IBlockState blockStateIn)
      {
@@ -330,7 +356,7 @@
      }
  
      public boolean canExplosionDestroyBlock(Explosion explosionIn, World worldIn, BlockPos pos, IBlockState blockStateIn, float p_174816_5_)
-@@ -3032,6 +3065,218 @@
+@@ -3032,6 +3069,263 @@
          EnchantmentHelper.applyArthropodEnchantments(entityLivingBaseIn, entityIn);
      }
  
@@ -544,12 +570,57 @@
 +            && (this instanceof EntityPlayer || net.minecraftforge.event.ForgeEventFactory.getMobGriefingEvent(world, this))
 +            && this.width * this.width * this.height > 0.512F;
 +    }
++
++    /** @return the current roll in degrees, wrapped to [-180, 180) */
++    public float getRoll()
++    {
++        return this.rollState.getRoll();
++    }
++
++    /** @return the roll interpolated between the previous and current tick */
++    public float getRoll(float partialTicks)
++    {
++        return this.rollState.getRoll(partialTicks);
++    }
++
++    /**
++     * Sets the roll in degrees. Non-finite values are discarded. On the logical server the value is also written to
++     * {@link #ROLL} for tracking clients.
++     */
++    public void setRoll(float roll)
++    {
++        if (!Float.isFinite(roll))
++        {
++            LOGGER.warn("Invalid roll {} for {}, discarding", roll, this);
++            return;
++        }
++        this.rollState.setRoll(roll);
++        if (this.dataManager != null && this.world != null && !this.world.isRemote)
++        {
++            this.dataManager.set(ROLL, this.rollState.getRoll());
++        }
++    }
++
++    /**
++     * Applies a roll received from the server. Before the entity's first tick the value is applied immediately and
++     * the interpolation anchor is snapped; afterwards it is applied by {@link #tickRoll()}.
++     */
++    public void onRollSynced(float roll)
++    {
++        this.rollState.onSynced(roll, this.ticksExisted);
++    }
++
++    /** Advances the roll interpolation once per real tick and applies a pending synced value. */
++    public void tickRoll()
++    {
++        this.rollState.tick(this.ticksExisted);
++    }
 +    /* ================================== Forge End =====================================*/
 +
      public void addTrackingPlayer(EntityPlayerMP player)
      {
      }
-@@ -3092,7 +3337,7 @@
+@@ -3092,7 +3386,7 @@
  
      public List<Entity> getPassengers()
      {

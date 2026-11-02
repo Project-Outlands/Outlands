@@ -20,3 +20,28 @@
                  }
              }
              catch (ClassNotFoundException classnotfoundexception)
+@@ -79,9 +81,11 @@
+             j = i;
+         }
+ 
+-        if (j > 254)
++        if (j >= 254)
+         {
+-            throw new IllegalArgumentException("Data value id is too big with " + j + "! (Max is " + 254 + ")");
++            throw new IllegalArgumentException(j == 254
++                ? "Data value id 254 is reserved for Entity.ROLL"
++                : "Data value id is too big with " + j + "! (Max is " + 253 + ")");
+         }
+         else
+         {
+@@ -307,6 +311,10 @@
+             if (dataentry1 != null)
+             {
+                 this.setEntryValue(dataentry1, dataentry);
++                if (Entity.ROLL.equals(dataentry.getKey()))
++                {
++                    this.entity.onRollSynced((Float) dataentry.getValue());
++                }
+                 this.entity.notifyDataManagerChange(dataentry.getKey());
+             }
+         }
