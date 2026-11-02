@@ -177,24 +177,46 @@ public class LibraryManager
     }
 
     /**
-     * Extracts the bundled jars recorded during setup.
+     * Extracts the bundled jars of every candidate that still has them inside.
      *
-     * <p>Runs on the first request for candidates, which is the last moment before the loader decides what exists - late
-     * enough that extraction is not a side effect of tidying the mods directory, early enough that a bundled prerequisite
-     * mod is still discovered like any other.
+     * <p>Runs on the first request for candidates, which is the last moment before the loader decides what exists -
+     * late enough that extraction is not a side effect of tidying the mods directory, early enough that a bundled
+     * prerequisite mod is still discovered like any other.
      *
-     * <p>Idempotent: the recorded set is drained first, so a second call does nothing.
+     * <p>Two kinds of jar arrive here. The ones {@link #setup} queued: files it opened while walking the known mod
+     * lists, whose bundle it deliberately did not unpack at that moment. And the ones it never saw at all - an extras
+     * path, a {@code --mods} argument, a jar in a pack folder one level down - because they belong to no mod list.
+     * For those this is the only place their {@code containedDeps} are ever read.
+     *
+     * <p>Idempotent twice over: the queued set is drained first, and a candidate the setup already opened is
+     * recognised by {@link #processed}, so a second call finds nothing left either way.
      */
-    private static void extractPendingBundledDeps()
+    private static void extractBundledDeps(List<File> candidates)
     {
-        if (pendingBundledDeps.isEmpty())
-        {
-            return;
-        }
         List<File> pending = new ArrayList<>(pendingBundledDeps);
         pendingBundledDeps.clear();
 
-        bundledSelection = BundledLibrarySelection.select(collectLibraryClaims(pending));
+        List<File> unmanaged = new ArrayList<>();
+        for (File file : candidates)
+        {
+            // Only what looks like a mod archive: an extras path may also name a directory of classes or a config file,
+            // and opening those as jars would report a failure that is not one.
+            if (file.isFile() && MOD_FILENAME_FILTER.accept(file.getParentFile(), file.getName())
+                    && !processed.contains(file))
+            {
+                unmanaged.add(file);
+            }
+        }
+        if (pending.isEmpty() && unmanaged.isEmpty())
+        {
+            return;
+        }
+
+        // One decision for the whole launch, over both sources: a library bundled by an unmanaged jar has to compete
+        // with the same library bundled by a listed one, or the loser would be mounted beside the winner.
+        List<File> claims = new ArrayList<>(pending);
+        claims.addAll(unmanaged);
+        bundledSelection = BundledLibrarySelection.select(collectLibraryClaims(claims));
         for (String note : bundledSelection.notes())
         {
             FMLLog.log.warn(note);
@@ -222,7 +244,54 @@ public class LibraryManager
                 FMLLog.log.error("Unable to read {} while extracting its bundled jars", file.getName(), e);
             }
         }
+        // A jar no list manages stays where it is: nothing moved it into a repository, so nothing registers it either.
+        for (File file : unmanaged)
+        {
+            extractPacked(file, UNMANAGED, mods_ver, mods);
+        }
     }
+
+    /**
+     * The list that stands for a jar no mod list manages: an extras path, a {@code --mods} argument, a jar in a pack
+     * folder one level down.
+     *
+     * <p>It keeps no records, because such a jar is not ours to move into a repository or to list, and it answers with
+     * the library folder, which is where a coordinate-named copy of something still has to land to be found again.
+     *
+     * <p>The alternative was a null mod list threaded through the extraction code; every place that registered a jar
+     * would then have needed a check, and the one that was missed would throw in exactly the case nobody tests.
+     */
+    private static final class UnmanagedJars extends ModList
+    {
+        UnmanagedJars()
+        {
+            super(null);
+        }
+
+        @Override
+        public Repository getRepository()
+        {
+            return getDefaultRepo();
+        }
+
+        @Override
+        public void add(Artifact artifact)
+        {
+        }
+
+        @Override
+        public void save()
+        {
+        }
+
+        @Override
+        public String getName()
+        {
+            return "UNMANAGED";
+        }
+    }
+
+    private static final ModList UNMANAGED = new UnmanagedJars();
 
     private static File findLibraryFolder(File minecraftHome)
     {
@@ -951,12 +1020,19 @@ public class LibraryManager
     }
 
     public static List<File> getCandidates() {
-        extractPendingBundledDeps();
         if (candidates != null)
         {
             return candidates;
         }
         List<File> gathered = gatherLegacyCanidates(minecraftHome);
+        // A jar no mod list manages is opened here for the first time: setup() walks the mods folder and the known
+        // lists, and such a jar is in neither. Extracting before the list is frozen makes what it bundles a candidate
+        // of this launch rather than the next one.
+        extractBundledDeps(gathered);
+        // Whatever was just unpacked is an ordinary mod in the version directory, so it is read the same way.
+        Set<File> listed = new HashSet<>(gathered);
+        collectModFiles(new File(new File(minecraftHome, "mods"), ForgeVersion.mcVersion), listed, gathered);
+        gathered.sort(ModFileOrder.INSTANCE);
         Set<File> candidateSet = new HashSet<>(gathered);
         for (Artifact artifact : flattenLists(minecraftHome))
         {
