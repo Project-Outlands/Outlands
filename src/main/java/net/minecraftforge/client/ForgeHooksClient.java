@@ -120,6 +120,7 @@ import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.client.event.InputUpdateEvent;
 import net.minecraftforge.client.event.ModelBakeEvent;
 import net.minecraftforge.client.event.MouseEvent;
+import net.minecraftforge.client.event.MouseTurnEvent;
 import net.minecraftforge.client.event.RenderArmEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
@@ -275,6 +276,29 @@ public class ForgeHooksClient
     public static boolean postMouseEvent()
     {
         return MinecraftForge.EVENT_BUS.post(new MouseEvent());
+    }
+
+    /**
+     * Builds and posts the per-frame turn event. The caller must still apply the event's values unless it was
+     * cancelled.
+     */
+    public static MouseTurnEvent onMouseTurn(EntityPlayer player, float yaw, float pitch)
+    {
+        MouseTurnEvent event = new MouseTurnEvent(player, yaw, pitch, FrameClock.getDeltaSeconds());
+        MinecraftForge.EVENT_BUS.post(event);
+        return event;
+    }
+
+    /** Starts a rendered frame for {@link FrameClock}. */
+    public static void beginFrame()
+    {
+        FrameClock.beginFrame();
+    }
+
+    /** @return seconds since the previous rendered frame, already clamped by {@link FrameClock}. */
+    public static float getFrameDeltaSeconds()
+    {
+        return FrameClock.getDeltaSeconds();
     }
 
     public static float getOffsetFOV(EntityPlayer entity, float fov)
