@@ -5,41 +5,44 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.fml.common.eventhandler.Cancelable;
 
 /**
- * Fired once per rendered frame before the local player's view is turned. The yaw and pitch are the values
- * vanilla would pass to {@link EntityPlayer#turn(float, float)}, already scaled by mouse sensitivity and the
- * invert-mouse setting. Handlers may adjust them; cancelling suppresses the turn entirely.
+ * Fired once per rendered frame before the local player's view is turned. Both values are per-frame deltas, not
+ * absolute angles: {@code yawDelta} is the yaw argument vanilla passes to {@link EntityPlayer#turn(float, float)}
+ * and becomes {@code 0.15 * yawDelta} added to the player's yaw; {@code pitchDelta} is the pitch argument and
+ * becomes {@code 0.15 * pitchDelta} subtracted from the player's pitch. The values are already scaled by mouse
+ * sensitivity and by the invert-mouse setting. Handlers may adjust either delta; cancelling suppresses the turn
+ * entirely.
  *
- * <p>Fired on the client render thread. The frame delta is the time since the previous rendered frame, clamped
- * to {@code [0, 0.1]} seconds.
+ * <p>Fired on the client render thread. {@link #getDeltaSeconds()} is the duration of the frame that just ended,
+ * meant for smoothing the current frame; it is clamped to {@code [0, 0.1]} seconds.
  */
 @Cancelable
 public class MouseTurnEvent extends PlayerEvent {
 
-    private float yaw;
-    private float pitch;
+    private float yawDelta;
+    private float pitchDelta;
     private final float deltaSeconds;
 
-    public MouseTurnEvent(EntityPlayer player, float yaw, float pitch, float deltaSeconds) {
+    public MouseTurnEvent(EntityPlayer player, float yawDelta, float pitchDelta, float deltaSeconds) {
         super(player);
-        this.yaw = yaw;
-        this.pitch = pitch;
+        this.yawDelta = yawDelta;
+        this.pitchDelta = pitchDelta;
         this.deltaSeconds = deltaSeconds;
     }
 
-    public float getYaw() {
-        return yaw;
+    public float getYawDelta() {
+        return yawDelta;
     }
 
-    public void setYaw(float yaw) {
-        this.yaw = yaw;
+    public void setYawDelta(float yawDelta) {
+        this.yawDelta = yawDelta;
     }
 
-    public float getPitch() {
-        return pitch;
+    public float getPitchDelta() {
+        return pitchDelta;
     }
 
-    public void setPitch(float pitch) {
-        this.pitch = pitch;
+    public void setPitchDelta(float pitchDelta) {
+        this.pitchDelta = pitchDelta;
     }
 
     public float getDeltaSeconds() {

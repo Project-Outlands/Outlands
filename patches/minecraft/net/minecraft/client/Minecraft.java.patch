@@ -258,7 +258,7 @@
  
          if (!this.skipRenderWorld)
          {
-+            net.minecraftforge.client.FrameClock.beginFrame();
++            net.minecraftforge.client.ForgeHooksClient.beginFrame();
 +            net.minecraftforge.fml.common.FMLCommonHandler.instance().onRenderTickStart(this.timer.renderPartialTicks);
              this.profiler.endStartSection("gameRenderer");
              this.entityRenderer.updateCameraAndRender(this.isGamePaused ? this.renderPartialTicksPaused : this.timer.renderPartialTicks, i);

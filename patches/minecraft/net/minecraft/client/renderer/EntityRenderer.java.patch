@@ -305,7 +305,7 @@
 +                net.minecraftforge.client.event.MouseTurnEvent mouseTurn = net.minecraftforge.client.ForgeHooksClient.onMouseTurn(this.mc.player, f2, f3 * i);
 +                if (!mouseTurn.isCanceled())
 +                {
-+                    this.mc.player.turn(mouseTurn.getYaw(), mouseTurn.getPitch());
++                    this.mc.player.turn(mouseTurn.getYawDelta(), mouseTurn.getPitchDelta());
 +                }
              }
              else
@@ -316,7 +316,7 @@
 +                net.minecraftforge.client.event.MouseTurnEvent mouseTurn = net.minecraftforge.client.ForgeHooksClient.onMouseTurn(this.mc.player, f2, f3 * i);
 +                if (!mouseTurn.isCanceled())
 +                {
-+                    this.mc.player.turn(mouseTurn.getYaw(), mouseTurn.getPitch());
++                    this.mc.player.turn(mouseTurn.getYawDelta(), mouseTurn.getPitchDelta());
 +                }
              }
          }

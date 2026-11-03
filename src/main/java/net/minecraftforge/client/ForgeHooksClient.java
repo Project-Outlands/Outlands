@@ -279,23 +279,23 @@ public class ForgeHooksClient
     }
 
     /**
-     * Builds and posts the per-frame turn event. The caller must still apply the event's values unless it was
+     * Builds and posts the per-frame turn event. The caller must still apply the event's deltas unless it was
      * cancelled.
      */
-    public static MouseTurnEvent onMouseTurn(EntityPlayer player, float yaw, float pitch)
+    public static MouseTurnEvent onMouseTurn(EntityPlayer player, float yawDelta, float pitchDelta)
     {
-        MouseTurnEvent event = new MouseTurnEvent(player, yaw, pitch, FrameClock.getDeltaSeconds());
+        MouseTurnEvent event = new MouseTurnEvent(player, yawDelta, pitchDelta, FrameClock.getDeltaSeconds());
         MinecraftForge.EVENT_BUS.post(event);
         return event;
     }
 
-    /** Starts a rendered frame for {@link FrameClock}. */
+    /** Loader internal: starts a rendered frame for {@link FrameClock}. */
     public static void beginFrame()
     {
         FrameClock.beginFrame();
     }
 
-    /** @return seconds since the previous rendered frame, already clamped by {@link FrameClock}. */
+    /** @return the duration of the frame that just ended, in seconds, clamped to {@code [0, 0.1]} */
     public static float getFrameDeltaSeconds()
     {
         return FrameClock.getDeltaSeconds();
