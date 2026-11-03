@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CoremodLoadOrderTest {
 
     private static DiscoveredMod mod(String path) {
-        return new DiscoveredMod(new File(path), null, List.of(), "MOD", false, false, false, false, null, null);
+        return new DiscoveredMod(new File(path), null, List.of(), "MOD", List.of(), false, false, false, false, null, null);
     }
 
     private static List<String> order(ToIntFunction<File> rankOf, DiscoveredMod... mods) {

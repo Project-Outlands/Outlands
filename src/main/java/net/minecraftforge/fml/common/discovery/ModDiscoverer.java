@@ -21,6 +21,7 @@ package net.minecraftforge.fml.common.discovery;
 
 import net.minecraftforge.cleanmix.CleanMixModContainer;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
+import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.LanguageAdapterRegistry;
 import com.google.common.base.Strings;
@@ -47,6 +48,7 @@ import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
 
 import javax.annotation.Nullable;
 import org.spongepowered.asm.launch.MixinBootstrap;
+import org.spongepowered.asm.launch.platform.container.IContainerHandle;
 import org.spongepowered.asm.launch.platform.container.ContainerHandleURI;
 import org.spongepowered.asm.mixin.Mixins;
 import org.spongepowered.asm.util.Constants.ManifestAttributes;
@@ -101,6 +103,8 @@ public final class ModDiscoverer {
     private final Map<File, DiscoveredMod> discoveredFiles = new LinkedHashMap<>();
     private final Map<File, JarScanRecord> scanRecords = new HashMap<>();
     private final Map<File, MetadataCollection> modMetadata = new HashMap<>();
+    /** Mixin config name to the jar that declared it first, so two jars claiming one name can be reported. */
+    private final Map<String, File> mixinConfigOwners = new HashMap<>();
     /** Bundled library id to the first declaration of it, for the report that two jars bundle different versions. */
     private final ASMDataTable asmDataTable = new ASMDataTable();
 
@@ -159,8 +163,9 @@ public final class ModDiscoverer {
     }
 
     public void discoverMixinMods() {
+        Side side = FMLLaunchHandler.side();
         for (DiscoveredMod mod : discoveredFiles.values()) {
-            if (!mod.hasMixinManifestAttributes()) {
+            if (!mod.declaresMixins()) {
                 continue;
             }
             if (mod.coremod() == null) {
@@ -171,7 +176,13 @@ public final class ModDiscoverer {
                 }
             }
             FMLLog.log.debug("Submitting mixin container for {}", mod.file().getName());
-            MixinBootstrap.getPlatform().addContainer(new ContainerHandleURI(mod.file().toURI()));
+            IContainerHandle handle = new ContainerHandleURI(mod.file().toURI());
+            MixinBootstrap.getPlatform().addContainer(handle);
+            // The manifest list is registered by Mixin's own platform agent; the declared one is ours to hand over.
+            // Passing the handle keeps the config attributed to this jar in audits and crash reports.
+            for (String config : mod.mixinConfigsFor(side)) {
+                Mixins.addConfiguration(config, handle);
+            }
         }
         // TODO: evaluate if this is a good place for this
         String devConfigs = System.getProperty("outlands.dev.mixin");
@@ -304,7 +315,7 @@ public final class ModDiscoverer {
             // A candidate that is not an archive is a directory on the classpath: the output directory of the module
             // being developed, built against the current environment. It has no metadata to parse and no LWJGL2 code
             // to rewrite, so it is the one source classified as modern without a declaration.
-            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, true, false, false, false, null, null);
+            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, List.of(), true, false, false, false, null, null);
             discoveredFiles.put(absolute, info);
             return;
         }
@@ -352,6 +363,19 @@ public final class ModDiscoverer {
                 }
                 declaration = metadata.getJarDeclaration();
                 if (declaration != null) {
+                    // Checked here because this is where the jar is open, and because the failure it prevents is the
+                    // quiet kind: Mixin logs a config it cannot read and carries on, so a typo would otherwise leave the
+                    // game running with some of a mod's patches silently absent.
+                    declaration.verifyMixinConfigs(file.getName(), name -> jarFile.getJarEntry(name) != null);
+                    for (JarDeclaration.MixinConfig mixin : declaration.mixins()) {
+                        File owner = mixinConfigOwners.putIfAbsent(mixin.config(), absolute);
+                        if (owner != null) {
+                            // Mixin keeps the first registration and drops the second by name, so which jar wins is
+                            // decided by scan order and written down nowhere.
+                            FMLLog.log.warn("{} and {} both declare the mixin configuration {}; the first one scanned wins",
+                                    owner.getName(), file.getName(), mixin.config());
+                        }
+                    }
                     // Declaring the section is the jar putting itself in the current world: current metadata schema,
                     // current environment, no LWJGL2 API. That is what the LWJGL2 filter reads, see DiscoveredMod.
                     modernMetadata = true;
@@ -418,6 +442,7 @@ public final class ModDiscoverer {
                 attributes,
                 List.copyOf(modIds),
                 modType,
+                declaration == null ? List.of() : declaration.mixins(),
                 modernMetadata,
                 hasMixinManifestAttributes,
                 mixinTweakerForceMod,

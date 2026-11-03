@@ -62,7 +62,7 @@ public final class JarDeclaration {
      */
     private static final Set<String> KNOWN_KEYS =
             Set.of("schemaVersion", "license", "loadOrder", "providers", "providerVersions", "containedDeps",
-                    "entrypoints", "side", "at", "coremod", "alsoMod");
+                    "entrypoints", "side", "at", "coremod", "alsoMod", "mixins");
 
     /**
      * Manifest attribute the {@code side} key replaces, still read for jars that declare no section.
@@ -71,6 +71,9 @@ public final class JarDeclaration {
      * these names are now aliases of them.
      */
     public static final Attributes.Name MANIFEST_SIDE = new Attributes.Name("ModSide");
+
+    /** Keys understood inside one {@code mixins} entry. Anything else is reported once and ignored. */
+    private static final Set<String> MIXIN_KEYS = Set.of("config", "side");
 
     /** Manifest attribute the {@code at} key replaces: a space-separated list of the same paths. */
     public static final Attributes.Name MANIFEST_ACCESS_TRANSFORMERS = new Attributes.Name("FMLAT");
@@ -156,6 +159,7 @@ public final class JarDeclaration {
     private final String coreMod;
     private final boolean alsoMod;
     private final List<ContainedDep> containedDeps;
+    private final List<MixinConfig> mixins;
     private final Map<String, String> entrypoints;
     private final Map<String, String> providers;
     private final Map<String, List<String>> providerVersions;
@@ -212,6 +216,31 @@ public final class JarDeclaration {
     }
 
     /**
+     * One mixin configuration the jar carries.
+     *
+     * <p>{@code side} is the reason this is an object rather than the manifest's comma-separated list: a jar that runs
+     * on both sides still tends to carry configs that only make sense on one of them, and a config registered on the
+     * wrong side is not merely useless - its target classes may not exist there at all, so a {@code required} mixin in
+     * it turns into a failure at the first transform.
+     */
+    public record MixinConfig(String config, Side side) {
+
+        public MixinConfig {
+            java.util.Objects.requireNonNull(config, "config");
+            java.util.Objects.requireNonNull(side, "side");
+        }
+
+        public MixinConfig(String config) {
+            this(config, Side.BOTH);
+        }
+
+        /** @return whether this configuration must not be registered while running as {@code runningSide} */
+        public boolean excludes(String runningSide) {
+            return side.excludes(runningSide);
+        }
+    }
+
+    /**
      * Finds the declaration for a bundled entry.
      *
      * <p>Matched by full path or by file name: an entry may be looked up as {@code META-INF/libraries/x.jar} when the
@@ -232,7 +261,7 @@ public final class JarDeclaration {
 
     private JarDeclaration(int schemaVersion, String license, LoadOrder loadOrder, Side side,
                            List<String> accessTransformers, @Nullable String coreMod, boolean alsoMod,
-                           List<ContainedDep> containedDeps,
+                           List<ContainedDep> containedDeps, List<MixinConfig> mixins,
                            Map<String, String> entrypoints, Map<String, String> providers,
                            Map<String, List<String>> providerVersions, Map<String, String> unknown) {
         this.schemaVersion = schemaVersion;
@@ -243,6 +272,7 @@ public final class JarDeclaration {
         this.coreMod = coreMod;
         this.alsoMod = alsoMod;
         this.containedDeps = containedDeps;
+        this.mixins = mixins;
         this.entrypoints = entrypoints;
         this.providers = providers;
         this.providerVersions = providerVersions;
@@ -307,6 +337,7 @@ public final class JarDeclaration {
                 parseCoreMod(json.get("coremod"), sourceName),
                 parseBoolean(json.get("alsoMod"), "alsoMod", sourceName),
                 parseContainedDeps(json.get("containedDeps"), sourceName),
+                parseMixins(json.get("mixins"), sourceName, side),
                 parseEntrypoints(json.get("entrypoints"), sourceName), providers,
                 parseProviderVersions(json.get("providerVersions"), providers, sourceName), unknown);
     }
@@ -532,6 +563,78 @@ public final class JarDeclaration {
     }
 
     /**
+     * Reads {@code mixins}: the mixin configurations this jar carries.
+     *
+     * <p>One object per config, for the same reason every other list in the section is structured: the manifest key it
+     * replaces was a comma-separated string with no room for a second fact, and the fact that matters is the side.
+     *
+     * <p>The config file itself is not read here - it is Mixin's to parse, and Mixin reports a bad one in its own
+     * words. What is checked here is what the loader can notice while the section is in hand: that the value is a
+     * config name at all, and that it is not declared twice. Whether the file is inside the jar is checked by
+     * {@link #verifyMixinConfigs}, which needs the jar open.
+     */
+    private static List<MixinConfig> parseMixins(JsonElement element, String sourceName, Side jarSide) {
+        if (element == null || element.isJsonNull()) {
+            return List.of();
+        }
+        if (!element.isJsonArray()) {
+            throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                    + " declares \"mixins\" as " + MetadataJson.describeType(element)
+                    + ". Expected an array of mixin configurations, as in [{\"config\": \"mymod.mixins.json\"}].");
+        }
+        List<MixinConfig> mixins = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonElement entry : element.getAsJsonArray()) {
+            if (entry == null || !entry.isJsonObject()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a mixin entry that is not an object. Expected {\"config\": \"mymod.mixins.json\"}.");
+            }
+            JsonObject object = entry.getAsJsonObject();
+            for (String key : object.keySet()) {
+                if (!MIXIN_KEYS.contains(key)) {
+                    // Reported, not rejected: a newer schema may add a field, and refusing to start over one is the
+                    // worse trade.
+                    net.minecraftforge.fml.common.FMLLog.log.warn("The jar section in the mcmod.info of {} declares the"
+                            + " mixin key \"{}\", which this loader does not understand", sourceName, key);
+                }
+            }
+            String config = MetadataJson.optionalText(object.get("config"), where(sourceName), "mixins.config");
+            if (config == null || config.isBlank()) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName
+                        + " declares a mixin entry without \"config\". The value is the configuration's resource name.");
+            }
+            config = config.trim();
+            if (!config.endsWith(".json")) {
+                // Mixin registers only names ending in .json and silently ignores the rest, so a config without the
+                // suffix would do nothing at all and say nothing about it.
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the mixin"
+                        + " configuration \"" + config + "\", which does not end in .json.");
+            }
+            if (!seen.add(config)) {
+                // Two entries for one config can only repeat or disagree about the side, and Mixin would register it
+                // once anyway.
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the mixin"
+                        + " configuration \"" + config + "\" more than once.");
+            }
+            String sideText = MetadataJson.optionalText(object.get("side"), where(sourceName), "mixins.side");
+            Side side = Side.parse(sideText);
+            if (side == null) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares an unknown"
+                        + " \"side\" for the mixin configuration \"" + config + "\": \"" + sideText.trim()
+                        + "\". Expected one of: both, client, server.");
+            }
+            if (side != Side.BOTH && jarSide != Side.BOTH && side != jarSide) {
+                net.minecraftforge.fml.common.FMLLog.log.warn("The jar section in the mcmod.info of {} is for the {}, but"
+                        + " the mixin configuration {} is declared for the {}; it will never be registered", sourceName,
+                        jarSide.name().toLowerCase(java.util.Locale.ENGLISH), config,
+                        side.name().toLowerCase(java.util.Locale.ENGLISH));
+            }
+            mixins.add(new MixinConfig(config, side));
+        }
+        return mixins.isEmpty() ? List.of() : List.copyOf(mixins);
+    }
+
+    /**
      * Reads the {@code providers} object: language name to the class that can construct mods written in it.
      *
      * <p>Malformed entries are rejected rather than skipped. A provider section exists so that a mod declaring
@@ -679,6 +782,14 @@ public final class JarDeclaration {
     }
 
     /**
+     * @return the mixin configurations this jar carries, in declaration order; never {@code null}, empty when it
+     *         declares none
+     */
+    public List<MixinConfig> mixins() {
+        return mixins;
+    }
+
+    /**
      * @return the language versions the providers of this jar can serve, as language name to versions, in declaration
      *         order; never {@code null}, empty when nothing is declared
      */
@@ -688,6 +799,26 @@ public final class JarDeclaration {
 
     public Map<String, String> providers() {
         return providers;
+    }
+
+    /**
+     * Refuses declared mixin configurations that are not inside the jar.
+     *
+     * <p>The one check that cannot be made while parsing, because it needs the jar open - and the one worth making:
+     * {@code Mixins.addConfiguration} catches a config it cannot read and logs a line, so a typo otherwise produces a
+     * game that starts with half of a mod's patches missing and nothing said while the jar was being scanned.
+     *
+     * @param sourceName the file the section came from, for the message
+     * @param resourceExists whether a resource with that name is present in the jar
+     * @throws LoaderException when a declared configuration is not there
+     */
+    public void verifyMixinConfigs(String sourceName, java.util.function.Predicate<String> resourceExists) {
+        for (MixinConfig mixin : mixins) {
+            if (!resourceExists.test(mixin.config())) {
+                throw new LoaderException("The jar section in the mcmod.info of " + sourceName + " declares the mixin"
+                        + " configuration \"" + mixin.config() + "\", which is not in the jar.");
+            }
+        }
     }
 
     /** @return keys this loader does not understand, with their JSON text, for a single warning */
@@ -705,6 +836,7 @@ public final class JarDeclaration {
         return "JarDeclaration[schema=" + schemaVersion + ", license=" + license
                 + (loadOrder == LoadOrder.NORMAL ? "" : ", loadOrder=" + loadOrder.name().toLowerCase(java.util.Locale.ENGLISH))
                 + (containedDeps.isEmpty() ? "" : ", containedDeps=" + containedDeps.size())
+                + (mixins.isEmpty() ? "" : ", mixins=" + mixins.size())
                 + (entrypoints.isEmpty() ? "" : ", entrypoints=" + entrypoints.keySet())
                 + (providers.isEmpty() ? "" : ", providers=" + providers.keySet())
                 + (providerVersions.isEmpty() ? "" : ", providerVersions=" + providerVersions)

@@ -13,10 +13,13 @@ import java.util.List;
  * Implement this in any arbitrary class. Said class will be constructed when mixins are ready to be queued.
  * Return all late mixin configs you want MixinBooter to queue and send to Mixin library.
  *
- * @deprecated as of 11.0, the line of "early" and "late" mixin loading no longer is present, use
- *             {@code MixinConfigs} manifest entry to list your configs or {@code MixinConnector} to denote
- *             a class implementing {@link org.spongepowered.asm.mixin.connect.IMixinConnector} and call
- *             {@link org.spongepowered.asm.mixin.Mixins#addConfiguration(String)} (or related methods) there
+ * @deprecated as of 11.0, the line of "early" and "late" mixin loading no longer is present. List your
+ *             configurations in the {@code jar} section of your {@code mcmod.info} instead:
+ *             {@code "mixins": [{"config": "mymod.mixins.json"}, {"config": "mymod.client.mixins.json", "side": "client"}]}
+ *             - the loader registers them before anything is transformed, and unlike a manifest key the entry can say
+ *             which side a configuration belongs to. The manifest {@code MixinConfigs} / {@code MixinConnector} keys
+ *             still work for jars that cannot carry metadata; {@code MixinConnector} remains the way to choose
+ *             configurations from code at startup.
  */
 @Deprecated
 public interface ILateMixinLoader {

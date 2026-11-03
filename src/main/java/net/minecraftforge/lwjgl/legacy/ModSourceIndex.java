@@ -116,12 +116,12 @@ final class ModSourceIndex {
     }
 
     /**
-     * Whether the scan found anything that makes this source a mod: a mod id, mixin manifest attributes, a coremod
-     * or a tweaker.
+     * Whether the scan found anything that makes this source a mod: a mod id, mixin declarations (in the manifest or in
+     * {@code mcmod.info}), a coremod or a tweaker.
      */
     private static boolean isMod(DiscoveredMod discovered) {
         return !discovered.modIds().isEmpty()
-                || discovered.hasMixinManifestAttributes()
+                || discovered.declaresMixins()
                 || discovered.mixinTweakerForceMod()
                 || discovered.coreModContainsMod()
                 || discovered.coremod() != null
