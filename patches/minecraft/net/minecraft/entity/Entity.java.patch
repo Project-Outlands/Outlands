@@ -17,15 +17,20 @@
      private AxisAlignedBB boundingBox;
      public boolean onGround;
      public boolean collidedHorizontally;
-@@ -149,6 +150,7 @@
+@@ -149,6 +150,12 @@
      private static final DataParameter<Boolean> CUSTOM_NAME_VISIBLE = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
      private static final DataParameter<Boolean> SILENT = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
      private static final DataParameter<Boolean> NO_GRAVITY = EntityDataManager.createKey(Entity.class, DataSerializers.BOOLEAN);
++    /**
++     * Forge: roll in degrees, synced from the server. Read it with {@link #getRoll()} or
++     * {@link #getRoll(float)} and write it with {@link #setRoll(float)}. Setting this parameter directly leaves the
++     * interpolation state behind, so the renderer keeps the previous angle.
++     */
 +    public static final DataParameter<Float> ROLL = DataSerializers.FLOAT.createKey(254);
      public boolean addedToChunk;
      public int chunkCoordX;
      public int chunkCoordY;
-@@ -177,6 +179,10 @@
+@@ -177,6 +184,10 @@
      private boolean isPositionDirty;
      private final double[] pistonDeltas;
      private long pistonDeltasGameTime;
@@ -36,7 +41,7 @@
  
      public Entity(World worldIn)
      {
-@@ -200,7 +206,7 @@
+@@ -200,7 +211,7 @@
  
          if (worldIn != null)
          {
@@ -45,7 +50,7 @@
          }
  
          this.dataManager = new EntityDataManager(this);
-@@ -210,8 +216,17 @@
+@@ -210,8 +221,17 @@
          this.dataManager.register(CUSTOM_NAME, "");
          this.dataManager.register(SILENT, false);
          this.dataManager.register(NO_GRAVITY, false);
@@ -63,7 +68,7 @@
  
      public int getEntityId()
      {
-@@ -357,6 +372,7 @@
+@@ -357,6 +377,7 @@
          this.posX = x;
          this.posY = y;
          this.posZ = z;
@@ -71,7 +76,7 @@
          float f = this.width / 2.0F;
          float f1 = this.height;
          this.setEntityBoundingBox(new AxisAlignedBB(x - f, y, z - f, x + f, y + f1, z + f));
-@@ -654,11 +670,10 @@
+@@ -654,11 +675,10 @@
  
              if ((type == MoverType.SELF || type == MoverType.PLAYER) && this.onGround && this.isSneaking() && this instanceof EntityPlayer)
              {
@@ -87,7 +92,7 @@
                  {
                      if (x < 0.05 && x >= -0.05)
                      {
-@@ -672,8 +687,6 @@
+@@ -672,8 +692,6 @@
                      {
                          x += 0.05;
                      }
@@ -96,7 +101,7 @@
                  }
  
                  for (;
-@@ -786,12 +799,10 @@
+@@ -786,12 +804,10 @@
                  double d7 = z;
                  AxisAlignedBB axisalignedbb1 = this.getEntityBoundingBox();
                  this.setEntityBoundingBox(axisalignedbb);
@@ -111,7 +116,7 @@
                  double d8 = y;
                  int j1 = 0;
  
-@@ -801,7 +812,7 @@
+@@ -801,7 +817,7 @@
                  }
  
                  axisalignedbb2 = axisalignedbb2.offset(0.0, d8, 0.0);
@@ -120,7 +125,7 @@
                  int l1 = 0;
  
                  for (int i2 = list.size(); l1 < i2; l1++)
-@@ -810,7 +821,7 @@
+@@ -810,7 +826,7 @@
                  }
  
                  axisalignedbb2 = axisalignedbb2.offset(d18, 0.0, 0.0);
@@ -129,7 +134,7 @@
                  int j2 = 0;
  
                  for (int k2 = list.size(); j2 < k2; j2++)
-@@ -829,7 +840,7 @@
+@@ -829,7 +845,7 @@
                  }
  
                  AxisAlignedBB axisalignedbb5 = axisalignedbb4.offset(0.0, d20, 0.0);
@@ -138,7 +143,7 @@
                  int j3 = 0;
  
                  for (int k3 = list.size(); j3 < k3; j3++)
-@@ -838,7 +849,7 @@
+@@ -838,7 +854,7 @@
                  }
  
                  AxisAlignedBB axisalignedbb6 = axisalignedbb5.offset(d21, 0.0, 0.0);
@@ -147,7 +152,7 @@
                  int l3 = 0;
  
                  for (int i4 = list.size(); l3 < i4; l3++)
-@@ -1029,6 +1040,7 @@
+@@ -1029,6 +1045,7 @@
          this.posX = (axisalignedbb.minX + axisalignedbb.maxX) / 2.0;
          this.posY = axisalignedbb.minY;
          this.posZ = (axisalignedbb.minZ + axisalignedbb.maxZ) / 2.0;
@@ -155,7 +160,7 @@
      }
  
      protected SoundEvent getSwimSound()
-@@ -1091,7 +1103,7 @@
+@@ -1091,7 +1108,7 @@
  
      protected void playStepSound(BlockPos pos, Block blockIn)
      {
@@ -164,7 +169,7 @@
  
          if (this.world.getBlockState(pos.up()).getBlock() == Blocks.SNOW_LAYER)
          {
-@@ -1325,6 +1337,7 @@
+@@ -1325,6 +1342,7 @@
          BlockPos blockpos = new BlockPos(i, j, k);
          IBlockState iblockstate = this.world.getBlockState(blockpos);
  
@@ -172,7 +177,7 @@
          if (iblockstate.getRenderType() != EnumBlockRenderType.INVISIBLE)
          {
              this.world
-@@ -1353,12 +1366,12 @@
+@@ -1353,12 +1371,12 @@
              BlockPos blockpos = new BlockPos(this.posX, d0, this.posZ);
              IBlockState iblockstate = this.world.getBlockState(blockpos);
  
@@ -189,7 +194,7 @@
              }
              else
              {
-@@ -1450,6 +1463,7 @@
+@@ -1450,6 +1468,7 @@
          this.rotationPitch = pitch;
          this.prevRotationYaw = this.rotationYaw;
          this.prevRotationPitch = this.rotationPitch;
@@ -197,7 +202,7 @@
          double d0 = this.prevRotationYaw - yaw;
  
          if (d0 < -180.0)
-@@ -1462,6 +1476,7 @@
+@@ -1462,6 +1481,7 @@
              this.prevRotationYaw -= 360.0F;
          }
  
@@ -205,7 +210,7 @@
          this.setPosition(this.posX, this.posY, this.posZ);
          this.setRotation(yaw, pitch);
      }
-@@ -1788,6 +1803,7 @@
+@@ -1788,6 +1808,7 @@
              {
                  compound.setBoolean("Glowing", this.glowing);
              }
@@ -213,7 +218,7 @@
  
              if (!this.tags.isEmpty())
              {
-@@ -1801,6 +1817,9 @@
+@@ -1801,6 +1822,9 @@
                  compound.setTag("Tags", nbttaglist);
              }
  
@@ -223,7 +228,7 @@
              this.writeEntityToNBT(compound);
  
              if (this.isBeingRidden())
-@@ -1907,6 +1926,10 @@
+@@ -1907,6 +1931,10 @@
              this.setSilent(compound.getBoolean("Silent"));
              this.setNoGravity(compound.getBoolean("NoGravity"));
              this.setGlowing(compound.getBoolean("Glowing"));
@@ -234,7 +239,7 @@
  
              if (compound.hasKey("Tags", 9))
              {
-@@ -1999,7 +2022,10 @@
+@@ -1999,7 +2027,10 @@
          {
              EntityItem entityitem = new EntityItem(this.world, this.posX, this.posY + offsetY, this.posZ, stack);
              entityitem.setDefaultPickupDelay();
@@ -246,7 +251,7 @@
              return entityitem;
          }
      }
-@@ -2068,6 +2094,7 @@
+@@ -2068,6 +2099,7 @@
              this.motionX = 0.0;
              this.motionY = 0.0;
              this.motionZ = 0.0;
@@ -254,7 +259,7 @@
              this.onUpdate();
  
              if (this.isRiding())
-@@ -2115,6 +2142,7 @@
+@@ -2115,6 +2147,7 @@
              }
          }
  
@@ -262,7 +267,7 @@
          if (force || this.canBeRidden(entityIn) && entityIn.canFitPassenger(this))
          {
              if (this.isRiding())
-@@ -2150,6 +2178,7 @@
+@@ -2150,6 +2183,7 @@
          if (this.ridingEntity != null)
          {
              Entity entity = this.ridingEntity;
@@ -270,7 +275,7 @@
              this.ridingEntity = null;
              entity.removePassenger(this);
          }
-@@ -2617,8 +2646,16 @@
+@@ -2617,8 +2651,16 @@
      @Nullable
      public Entity changeDimension(int dimensionIn)
      {
@@ -287,7 +292,7 @@
              this.world.profiler.startSection("changeDimension");
              MinecraftServer minecraftserver = this.getServer();
              int i = this.dimension;
-@@ -2626,7 +2663,7 @@
+@@ -2626,7 +2668,7 @@
              WorldServer worldserver1 = minecraftserver.getWorld(dimensionIn);
              this.dimension = dimensionIn;
  
@@ -296,7 +301,7 @@
              {
                  worldserver1 = minecraftserver.getWorld(0);
                  this.dimension = 0;
-@@ -2637,17 +2674,18 @@
+@@ -2637,17 +2679,18 @@
              this.world.profiler.startSection("reposition");
              BlockPos blockpos;
  
@@ -319,7 +324,7 @@
                  {
                      d0 = MathHelper.clamp(
                               d0 / 8.0, worldserver1.getWorldBorder().minX() + 16.0, worldserver1.getWorldBorder().maxX() - 16.0
-@@ -2656,7 +2694,7 @@
+@@ -2656,7 +2699,7 @@
                               d1 / 8.0, worldserver1.getWorldBorder().minZ() + 16.0, worldserver1.getWorldBorder().maxZ() - 16.0
                           );
                  }
@@ -328,7 +333,7 @@
                  {
                      d0 = MathHelper.clamp(
                               d0 * 8.0, worldserver1.getWorldBorder().minX() + 16.0, worldserver1.getWorldBorder().maxX() - 16.0
-@@ -2670,8 +2708,7 @@
+@@ -2670,8 +2713,7 @@
                  d1 = MathHelper.clamp((int)d1, -29999872, 29999872);
                  float f = this.rotationYaw;
                  this.setLocationAndAngles(d0, this.posY, d1, 90.0F, 0.0F);
@@ -338,7 +343,7 @@
                  blockpos = new BlockPos(this);
              }
  
-@@ -2683,7 +2720,7 @@
+@@ -2683,7 +2725,7 @@
              {
                  entity.copyDataFromOld(this);
  
@@ -347,7 +352,7 @@
                  {
                      BlockPos blockpos1 = worldserver1.getTopSolidOrLiquidBlock(worldserver1.getSpawnPoint());
                      entity.moveToBlockPosAndAngles(blockpos1, entity.rotationYaw, entity.rotationPitch);
-@@ -2720,7 +2757,7 @@
+@@ -2720,7 +2762,7 @@
  
      public float getExplosionResistance(Explosion explosionIn, World worldIn, BlockPos pos, IBlockState blockStateIn)
      {
@@ -356,7 +361,7 @@
      }
  
      public boolean canExplosionDestroyBlock(Explosion explosionIn, World worldIn, BlockPos pos, IBlockState blockStateIn, float p_174816_5_)
-@@ -3032,6 +3069,263 @@
+@@ -3032,6 +3074,263 @@
          EnchantmentHelper.applyArthropodEnchantments(entityLivingBaseIn, entityIn);
      }
  
@@ -620,7 +625,7 @@
      public void addTrackingPlayer(EntityPlayerMP player)
      {
      }
-@@ -3092,7 +3386,7 @@
+@@ -3092,7 +3391,7 @@
  
      public List<Entity> getPassengers()
      {
