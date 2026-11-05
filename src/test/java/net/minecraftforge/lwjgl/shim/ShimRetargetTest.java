@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -98,22 +99,7 @@ class ShimRetargetTest {
                 return exempt;
             }
         });
-        return ShimRegistry.select(new ShimEnvironment() {
-            @Override
-            public String backendId() {
-                return "vulkan";
-            }
-
-            @Override
-            public boolean vulkanInstanceAvailable() {
-                return true;
-            }
-
-            @Override
-            public String glVersionString() {
-                return "";
-            }
-        });
+        return ShimRegistry.select(() -> "vulkan");
     }
 
     @Test
@@ -160,22 +146,7 @@ class ShimRetargetTest {
     @Test
     void selectionIsFrozenAfterFirstResolve() {
         ShimRegistry.Selection first = selectionFor(GL11, FACADE, Set.of());
-        ShimRegistry.Selection second = ShimRegistry.select(new ShimEnvironment() {
-            @Override
-            public String backendId() {
-                return "vanilla-gl";
-            }
-
-            @Override
-            public boolean vulkanInstanceAvailable() {
-                return false;
-            }
-
-            @Override
-            public String glVersionString() {
-                return "4.6";
-            }
-        });
+        ShimRegistry.Selection second = ShimRegistry.select(() -> "vanilla-gl");
 
         assertEquals(first.rulesetId(), second.rulesetId(), "the first resolution must win");
         assertTrue(second == first);
@@ -208,6 +179,52 @@ class ShimRetargetTest {
 
         assertEquals("test", ShimRegistry.selection().rulesetId(),
                 "a ruleset registered after the freeze must not replace the selection");
+    }
+
+    @Test
+    void registeredExemptionJoinsTheSelection() {
+        ShimRegistry.resetForTests();
+        ShimRegistry.exempt("com/example/render/");
+        ShimRegistry.register(new ShimRewriteRules() {
+            @Override
+            public String id() {
+                return "test";
+            }
+
+            @Override
+            public boolean appliesTo(ShimEnvironment env) {
+                return true;
+            }
+
+            @Override
+            public List<RetargetEntry> entries() {
+                return List.of(new RetargetEntry(GL11, "glEnable", "(I)V", FACADE));
+            }
+
+            @Override
+            public Set<String> exemptPrefixes() {
+                return Set.of("com/example/other/");
+            }
+        });
+        ShimRegistry.Selection selection = ShimRegistry.select(() -> "vulkan");
+
+        assertTrue(selection.isExempt("com/example/render/MyRenderer"),
+                "a renderer's own declaration must be honoured even though the ruleset never listed it");
+        assertTrue(selection.isExempt("com/example/other/Thing"), "the ruleset's own list still applies");
+        assertFalse(selection.isExempt("com/example/third/Thing"));
+    }
+
+    @Test
+    void exemptAfterFreezeIsRejected() {
+        selectionFor(GL11, FACADE, Set.of());
+        assertThrows(IllegalStateException.class, () -> ShimRegistry.exempt("com/example/render/"),
+                "exempting after the freeze would be silently ineffective, so it must fail loudly");
+    }
+
+    @Test
+    void exemptRejectsDottedPrefix() {
+        ShimRegistry.resetForTests();
+        assertThrows(IllegalArgumentException.class, () -> ShimRegistry.exempt("com.example.render"));
     }
 
     @Test

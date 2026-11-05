@@ -34,7 +34,19 @@ public interface RenderBackend {
      */
     long sdlWindowFlags();
 
-    /** Whether this backend draws through OpenGL, i.e. whether GL state and GL attributes are meaningful. */
+    /**
+     * Whether this backend draws through OpenGL, i.e. whether GL state and GL attributes are meaningful.
+     *
+     * <p><b>Contract, not a hint.</b> On the loader side this decides two things: whether
+     * {@code Display.applyGlAttributes(...)} runs, and whether a GL context is created at all. A backend that
+     * answers {@code true} must therefore also accept its context request through {@code ContextAttribs} — that
+     * is the channel {@code Display} honours first, ahead of {@code ForgeEarlyConfig}. A renderer that needs to
+     * shape the context request (a core profile, for instance) attaches it there and gets it, without having to
+     * infer the loader's window backend from {@code Display}'s fields.</p>
+     *
+     * <p>Answering {@code false} means the window is created without GL support: no context, no GL attributes,
+     * and no GL state to read through {@code GlStateView}.</p>
+     */
     default boolean isOpenGl() {
         return false;
     }

@@ -212,25 +212,12 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
     /**
      * The environment the ruleset chooser sees.
      *
-     * <p>Deliberately cheap: it reports the already-selected backend and nothing else. Probing Vulkan here
-     * would mean creating an instance during class loading, which is neither necessary nor safe.</p>
+     * <p>Reports the selected backend and nothing else. Anything derived from a live context is unavailable
+     * here: rewriting runs while classes load, before the window exists, so a Vulkan probe would mean creating
+     * an instance during class loading and a GL version string would be empty by construction. Neither is worth
+     * the risk or the misleading value.</p>
      */
-    private static final ShimEnvironment ENVIRONMENT = new ShimEnvironment() {
-        @Override
-        public String backendId() {
-            return RenderBackendSelection.get().id();
-        }
-
-        @Override
-        public boolean vulkanInstanceAvailable() {
-            return !RenderBackendSelection.get().isOpenGl();
-        }
-
-        @Override
-        public String glVersionString() {
-            return "";
-        }
-    };
+    private static final ShimEnvironment ENVIRONMENT = () -> RenderBackendSelection.get().id();
 
     private static boolean isExcluded(String internal) {
         for (String prefix : EXCLUDED_PREFIXES) {

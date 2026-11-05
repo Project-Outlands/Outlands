@@ -28,6 +28,9 @@ public final class ShimRegistry {
 
     private static final List<ShimRewriteRules> RULESETS = new ArrayList<>();
 
+    /** Package prefixes that always keep real GL, registered by the renderers that own them. */
+    private static final List<String> EXEMPT_PREFIXES = new ArrayList<>();
+
     /** Frozen selection. Empty list means "no rewriting", which is the default and the vanilla behaviour. */
     private static volatile @Nullable Selection selection;
 
@@ -56,6 +59,43 @@ public final class ShimRegistry {
     }
 
     /**
+     * Declares that a renderer issues real GL and must not be retargeted.
+     *
+     * <p><b>Why this is not the ruleset's job.</b> A ruleset is written by the shim provider and lists the
+     * classes it knows about. A third-party renderer cannot edit that list, and it should not have to: the fact
+     * "this package draws through real GL" is owned by the renderer, not by whoever wrote the shim. Without a
+     * way to state it, the rewrite reaches a renderer's own GL calls, and the failure shows up as a load-time
+     * {@code NoSuchMethodError} or unbounded recursion.</p>
+     *
+     * <p>Exemptions are unioned with the selected ruleset's own list, so a renderer does not have to know which
+     * shim is in use. Registering after the freeze is rejected rather than ignored: by then classes have already
+     * been rewritten and the exemption would be silently ineffective.</p>
+     *
+     * @param packagePrefix an internal-name prefix, e.g. {@code "com/dhj/actinium/render/"}
+     * @throws IllegalStateException    if the selection is already frozen
+     * @throws IllegalArgumentException if the prefix is blank or already registered
+     */
+    public static void exempt(String packagePrefix) {
+        if (packagePrefix == null || packagePrefix.isBlank()) {
+            throw new IllegalArgumentException("exempt prefix must not be blank");
+        }
+        if (packagePrefix.indexOf('.') >= 0) {
+            throw new IllegalArgumentException(
+                    "exempt prefix must be an internal name (slashes, not dots): " + packagePrefix);
+        }
+        synchronized (RULESETS) {
+            if (selection != null) {
+                throw new IllegalStateException("Cannot exempt '" + packagePrefix
+                        + "': rewriting is already frozen, so classes have already been rewritten");
+            }
+            if (EXEMPT_PREFIXES.contains(packagePrefix)) {
+                throw new IllegalArgumentException("already exempt: " + packagePrefix);
+            }
+            EXEMPT_PREFIXES.add(packagePrefix);
+        }
+    }
+
+    /**
      * Resolves the ruleset for an environment, freezing the result. Idempotent; the first call wins and every
      * later call returns the same selection regardless of the environment passed.
      */
@@ -68,7 +108,7 @@ public final class ShimRegistry {
             if (selection != null) {
                 return selection;
             }
-            Selection resolved = resolve(env);
+            Selection resolved = resolve(env).withExtraExemptions(List.copyOf(EXEMPT_PREFIXES));
             selection = resolved;
             if (resolved.isEmpty()) {
                 LOGGER.info("Shim rewriting: disabled (no ruleset applies)");
@@ -100,10 +140,11 @@ public final class ShimRegistry {
         return Selection.EMPTY;
     }
 
-    /** Test hook: clears the registry and the selection. */
+    /** Test hook: clears the registry, the exemptions and the selection. */
     static void resetForTests() {
         synchronized (RULESETS) {
             RULESETS.clear();
+            EXEMPT_PREFIXES.clear();
             selection = null;
         }
     }
@@ -135,6 +176,16 @@ public final class ShimRegistry {
             List<RetargetEntry> entries = List.copyOf(ruleset.entries());
             Set<String> exempt = Set.copyOf(new HashSet<>(ruleset.exemptPrefixes()));
             return new Selection(ruleset.id(), entries, exempt);
+        }
+
+        /** Returns a copy whose exemptions also cover {@code extra}, which is how registry-level exemptions join. */
+        private Selection withExtraExemptions(List<String> extra) {
+            if (extra.isEmpty()) {
+                return this;
+            }
+            Set<String> merged = new HashSet<>(exemptPrefixes);
+            merged.addAll(extra);
+            return new Selection(rulesetId, entries, Set.copyOf(merged));
         }
 
         public boolean isEmpty() {
