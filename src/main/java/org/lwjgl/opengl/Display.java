@@ -925,10 +925,12 @@ public class Display {
             drawable.destroy();
             drawable = null;
         }
-        if (displayCreated) {
-            GL.setCapabilities(null);
-            GL.destroy();
-        }
+        // create() installs the function provider before the display counts as created, so releasing it must not
+        // depend on displayCreated: a create that fails right after GL.create() would otherwise leave the provider
+        // loaded and make every retry throw "OpenGL library has already been loaded" from GL.create().
+        // GL.destroy() is a no-op when no provider was installed.
+        GL.setCapabilities(null);
+        GL.destroy();
         MainThread.runOnMainThread(() -> {
             if (sdlGlContext != NULL) {
                 SDLVideo.SDL_GL_DestroyContext(sdlGlContext);
