@@ -10,6 +10,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 
 import net.minecraft.launchwrapper.IClassTransformer;
+import net.minecraftforge.lwjgl.shim.ShimEnvironment;
+import net.minecraftforge.lwjgl.shim.ShimRegistry;
+import top.outlands.render.RenderBackendSelection;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -73,6 +76,13 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
     private static final AtomicInteger SINCE_REPORT = new AtomicInteger();
     private static final AtomicBoolean ANNOUNCED = new AtomicBoolean();
 
+    /**
+     * Frozen shim selection. Resolved on the first class that reaches this transformer and never changed
+     * afterwards: rewriting part of the process with one ruleset and the rest with another is not a state we
+     * can debug, so it is turned into a hard error instead.
+     */
+    private static volatile ShimRegistry.Selection shimSelection;
+
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (basicClass == null) {
@@ -84,6 +94,11 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
         }
         String internal = dotted.replace('.', '/');
         if (isExcluded(internal)) {
+            return basicClass;
+        }
+
+        final ShimRegistry.Selection selection = shimSelection();
+        if (selection.isExempt(internal)) {
             return basicClass;
         }
 
@@ -109,7 +124,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
             return basicClass;
         }
         try {
-            byte[] rewritten = CompatRewriter.rewrite(basicClass);
+            byte[] rewritten = CompatRewriter.rewrite(basicClass, selection);
             if (rewritten == null) {
                 return basicClass;
             }
@@ -177,6 +192,45 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
         }
         return map;
     }
+
+    /**
+     * Resolves the shim ruleset once and returns the frozen selection.
+     *
+     * <p>Registration happens in the coremod stage, which runs before any mod class loads, so by the time the
+     * first class arrives here the candidate list is complete.</p>
+     */
+    private static ShimRegistry.Selection shimSelection() {
+        ShimRegistry.Selection current = shimSelection;
+        if (current != null) {
+            return current;
+        }
+        ShimRegistry.Selection resolved = ShimRegistry.select(ENVIRONMENT);
+        shimSelection = resolved;
+        return resolved;
+    }
+
+    /**
+     * The environment the ruleset chooser sees.
+     *
+     * <p>Deliberately cheap: it reports the already-selected backend and nothing else. Probing Vulkan here
+     * would mean creating an instance during class loading, which is neither necessary nor safe.</p>
+     */
+    private static final ShimEnvironment ENVIRONMENT = new ShimEnvironment() {
+        @Override
+        public String backendId() {
+            return RenderBackendSelection.get().id();
+        }
+
+        @Override
+        public boolean vulkanInstanceAvailable() {
+            return RenderBackendSelection.get() == top.outlands.render.RenderBackendKind.VULKAN;
+        }
+
+        @Override
+        public String glVersionString() {
+            return "";
+        }
+    };
 
     private static boolean isExcluded(String internal) {
         for (String prefix : EXCLUDED_PREFIXES) {

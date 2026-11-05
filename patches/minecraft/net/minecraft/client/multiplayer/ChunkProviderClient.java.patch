@@ -1,10 +1,28 @@
 --- before/net/minecraft/client/multiplayer/ChunkProviderClient.java
 +++ after/net/minecraft/client/multiplayer/ChunkProviderClient.java
-@@ -61,6 +61,7 @@
+@@ -48,6 +48,7 @@
+         }
+ 
+         this.loadedChunks.remove(ChunkPos.asLong(x, z));
++        top.outlands.world.ChunkLifecycle.fireChunkUnload(this.world, x, z);
+     }
+ 
+     @Nullable
+@@ -61,7 +62,9 @@
      {
          Chunk chunk = new Chunk(this.world, chunkX, chunkZ);
          this.loadedChunks.put(ChunkPos.asLong(chunkX, chunkZ), chunk);
 +        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(new net.minecraftforge.event.world.ChunkEvent.Load(chunk));
          chunk.markLoaded(true);
++        top.outlands.world.ChunkLifecycle.fireChunkLoad(this.world, chunkX, chunkZ);
          return chunk;
      }
+ 
+@@ -86,6 +89,7 @@
+             LOGGER.info("Warning: Clientside chunk ticking took {} ms", System.currentTimeMillis() - i);
+         }
+ 
++        top.outlands.world.ChunkLifecycle.fireClientChunkTick(this.world);
+         return false;
+     }
+ 

@@ -4,6 +4,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
+import org.jspecify.annotations.Nullable;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
@@ -13,6 +14,8 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
+
+import net.minecraftforge.lwjgl.shim.ShimRegistry;
 
 /**
  * Applies {@link RewriteTable} to call sites: stack-neutral retargeting plus straight-line argument conversion,
@@ -28,13 +31,26 @@ public final class CompatRewriter {
 
     /** Returns the rewritten class or {@code null} when nothing matched. */
     public static byte[] rewrite(byte[] classBytes) {
+        return rewrite(classBytes, null);
+    }
+
+    /**
+     * Rewrites a class, applying the LWJGL2 tables and then, for anything they did not match, the shim
+     * retargets of {@code selection}.
+     *
+     * <p>The shim pass runs last on purpose: a call site has to be brought to its final LWJGL3 shape before
+     * its owner is swapped, otherwise the retarget key would not match what the table produced.</p>
+     *
+     * @param selection the frozen shim selection, or {@code null} for none
+     */
+    public static byte[] rewrite(byte[] classBytes, ShimRegistry.@Nullable Selection selection) {
         ClassNode cn = new ClassNode();
         new ClassReader(classBytes).accept(cn, 0);
 
         boolean changed = false;
         for (MethodNode mn : cn.methods) {
             if (mn.instructions != null && mn.instructions.size() > 0) {
-                changed |= rewriteMethod(mn);
+                changed |= rewriteMethod(mn, selection);
             }
         }
         if (!changed) {
@@ -45,18 +61,38 @@ public final class CompatRewriter {
         return cw.toByteArray();
     }
 
-    private static boolean rewriteMethod(MethodNode mn) {
+    private static boolean rewriteMethod(MethodNode mn, ShimRegistry.@Nullable Selection selection) {
         boolean changed = false;
         for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; ) {
             AbstractInsnNode next = insn.getNext();
             if (insn.getOpcode() == Opcodes.NEW) {
                 changed |= redirectAllocation((TypeInsnNode) insn);
             } else if (insn.getType() == AbstractInsnNode.METHOD_INSN) {
-                changed |= rewriteCall(mn, (MethodInsnNode) insn);
+                MethodInsnNode call = (MethodInsnNode) insn;
+                boolean tableChanged = rewriteCall(mn, call);
+                changed |= tableChanged;
+                if (!tableChanged && selection != null) {
+                    changed |= retarget(call, selection);
+                }
             }
             insn = next;
         }
         return changed;
+    }
+
+    /**
+     * Swaps the owner of a call site, leaving name and descriptor alone.
+     *
+     * <p>Because the descriptor is untouched the stack shape is unchanged and existing stack map frames stay
+     * valid, so this needs no {@code COMPUTE_FRAMES} pass and no argument recipe.</p>
+     */
+    private static boolean retarget(MethodInsnNode call, ShimRegistry.Selection selection) {
+        String newOwner = selection.retarget(call.owner, call.name, call.desc);
+        if (newOwner == null) {
+            return false;
+        }
+        call.owner = newOwner;
+        return true;
     }
 
     /**

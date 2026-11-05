@@ -52,6 +52,9 @@ import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_HIDDEN;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
+import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_VULKAN;
+
+import top.outlands.render.RenderBackendSelection;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memUTF8;
 
@@ -253,11 +256,14 @@ public class Display {
 
         MainThread.runOnMainThread(() -> createWindow(resolvedMajor, resolvedMinor));
 
-        Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
-        // OPENGL_EXPLICIT_INIT is set in Sys.initialize, so GL.create() has not run yet. It must be
-        // driven here, once a context is current, or every GL call resolves to a null pointer.
-        GL.create(SDLVideo::SDL_GL_GetProcAddress);
-        drawable = new DrawableGL();
+        if (sdlGlContext != NULL) {
+            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
+            // OPENGL_EXPLICIT_INIT is set in Sys.initialize, so GL.create() has not run yet. It must be
+            // driven here, once a context is current, or every GL call resolves to a null pointer.
+            GL.create(SDLVideo::SDL_GL_GetProcAddress);
+            drawable = new DrawableGL();
+        }
+        // A non-GL backend owns its own context and drawable; the GL path above is skipped entirely.
         try {
             drawable.makeCurrent();
         } catch (LWJGLException e) {
@@ -400,7 +406,12 @@ public class Display {
     }
 
     private static void createWindow(int versionMajor, int versionMinor) {
-        applyGlAttributes(versionMajor, versionMinor);
+        // GL attributes are only meaningful for the OpenGL backend; setting them for a Vulkan window would be
+        // either ignored or, on some drivers, a reason to refuse window creation.
+        final boolean openGl = RenderBackendSelection.get().isOpenGl();
+        if (openGl) {
+            applyGlAttributes(versionMajor, versionMinor);
+        }
 
         final int props = SDL_CreateProperties();
         try {
@@ -424,7 +435,7 @@ public class Display {
             Sys.checkSdl(SDL_SetNumberProperty(props, SDLVideo.SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, (long) windowFlags()));
             Sys.checkSdl(SDL_SetStringProperty(props, SDLVideo.SDL_PROP_WINDOW_CREATE_TITLE_STRING, windowTitle));
             Sys.checkSdl(
-                SDL_SetBooleanProperty(props, SDLVideo.SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true));
+                SDL_SetBooleanProperty(props, SDLVideo.SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, openGl));
             Sys.checkSdl(
                 SDL_SetBooleanProperty(
                     props,
@@ -460,10 +471,13 @@ public class Display {
         }
 
         sdlWindowId = SDLVideo.SDL_GetWindowID(sdlWindow);
-        sdlGlContext = SDLVideo.SDL_GL_CreateContext(sdlWindow);
-        if (sdlGlContext == NULL) {
-            throw new IllegalStateException("Failed to create GL context: " + SDLError.SDL_GetError());
+        if (openGl) {
+            sdlGlContext = SDLVideo.SDL_GL_CreateContext(sdlWindow);
+            if (sdlGlContext == NULL) {
+                throw new IllegalStateException("Failed to create GL context: " + SDLError.SDL_GetError());
+            }
         }
+        // A non-GL backend creates its own context/surface from the window; there is no GL context to make current.
 
         final long flags = SDL_GetWindowFlags(sdlWindow);
         displayFocused = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
@@ -492,8 +506,17 @@ public class Display {
             SDLVideo.SDL_GetCurrentVideoDriver());
     }
 
+    /**
+     * Builds the window flags for the selected render backend.
+     *
+     * <p>{@code SDL_WINDOW_OPENGL} and {@code SDL_WINDOW_VULKAN} are mutually exclusive at window creation,
+     * which makes this the earliest point at which the backend choice is still actionable. The selection is
+     * frozen here and read back unchanged for the rest of the process.</p>
+     *
+     * <p>With no backend registered this returns exactly the previous flags, so a vanilla setup is unaffected.</p>
+     */
     private static int windowFlags() {
-        long flags = SDL_WINDOW_OPENGL;
+        long flags = backendWindowFlags();
         if (!ForgeEarlyConfig.windowDecorated) {
             flags |= SDL_WINDOW_BORDERLESS;
         }
@@ -501,6 +524,19 @@ public class Display {
             flags |= SDL_WINDOW_HIDDEN;
         }
         return (int) flags;
+    }
+
+    private static long backendWindowFlags() {
+        switch (RenderBackendSelection.get()) {
+            case VULKAN:
+            case SDL_GPU:
+                // SDL_GPU selects its Vulkan driver behind SDL_WINDOW_VULKAN. A Metal-backed SDL_GPU build would
+                // need SDL_WINDOW_METAL instead; that distinction belongs to the backend, not here.
+                return SDLVideo.SDL_WINDOW_VULKAN;
+            case VANILLA_GL:
+            default:
+                return SDL_WINDOW_OPENGL;
+        }
     }
 
     private static void applyGlAttributes(int versionMajor, int versionMinor) {
