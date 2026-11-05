@@ -40,7 +40,7 @@ public final class RenderBackendSelection {
     /** Candidates in descending preference. Populated by providers before {@link #select()}. */
     private static final List<Candidate> CANDIDATES = new ArrayList<>();
 
-    private static volatile RenderBackendKind selected;
+    private static volatile RenderBackend selected;
     private static volatile boolean selectionFrozen;
 
     private RenderBackendSelection() {}
@@ -48,11 +48,11 @@ public final class RenderBackendSelection {
     /**
      * A backend that may be selected, and the probe that decides whether it can be.
      *
-     * @param kind        the backend
+     * @param backend     the backend
      * @param probe       availability check; must not create GL or Vulkan objects, only query
      * @param priority    higher wins when several candidates are available
      */
-    public record Candidate(RenderBackendKind kind, BackendProbe probe, int priority) {}
+    public record Candidate(RenderBackend backend, BackendProbe probe, int priority) {}
 
     /** Availability check for one backend. Implementations must be side-effect free. */
     public interface BackendProbe {
@@ -67,12 +67,12 @@ public final class RenderBackendSelection {
      * because a candidate registered late cannot affect the window flags.
      */
     public static void register(Candidate candidate) {
-        if (candidate == null || candidate.kind() == null) {
-            throw new IllegalArgumentException("candidate and kind must not be null");
+        if (candidate == null || candidate.backend() == null) {
+            throw new IllegalArgumentException("candidate and backend must not be null");
         }
         synchronized (CANDIDATES) {
             if (selectionFrozen) {
-                LOGGER.warn("Ignoring late backend candidate '{}': selection already happened", candidate.kind().id());
+                LOGGER.warn("Ignoring late backend candidate '{}': selection already happened", candidate.backend().id());
                 return;
             }
             CANDIDATES.add(candidate);
@@ -86,11 +86,11 @@ public final class RenderBackendSelection {
      * <ol>
      *     <li>an explicit {@value #PROPERTY} value, if it names a known backend;</li>
      *     <li>otherwise the highest-priority candidate whose probe reports available;</li>
-     *     <li>otherwise {@link RenderBackendKind#VANILLA_GL}.</li>
+     *     <li>otherwise the vanilla renderer.</li>
      * </ol>
      */
-    public static RenderBackendKind select() {
-        RenderBackendKind already = selected;
+    public static RenderBackend select() {
+        RenderBackend already = selected;
         if (already != null) {
             return already;
         }
@@ -98,45 +98,48 @@ public final class RenderBackendSelection {
             if (selected != null) {
                 return selected;
             }
-            RenderBackendKind resolved = resolve();
+            RenderBackend resolved = resolve();
             selected = resolved;
             selectionFrozen = true;
+            // The table is closed at the same moment: a backend registered afterwards could not affect the window
+            // flags, so accepting it would only make the registry disagree with the process.
+            RenderBackends.freeze();
             LOGGER.info("Render backend: {}", resolved.id());
             return resolved;
         }
     }
 
-    private static RenderBackendKind resolve() {
+    private static RenderBackend resolve() {
         String forced = System.getProperty(PROPERTY);
         if (forced != null && !forced.isEmpty()) {
-            RenderBackendKind kind = byId(forced);
-            if (kind == null) {
+            RenderBackend backend = RenderBackends.get(forced);
+            if (backend == null) {
                 LOGGER.warn("Unknown render backend '{}' in -D{}; falling back to {}", forced, PROPERTY,
-                        RenderBackendKind.VANILLA_GL.id());
-                return RenderBackendKind.VANILLA_GL;
+                        RenderBackends.VANILLA_GL_ID);
+                return RenderBackend.VANILLA;
             }
-            if (kind == RenderBackendKind.VANILLA_GL) {
-                return kind;
+            if (RenderBackends.isVanilla(backend.id())) {
+                return backend;
             }
             // A forced backend still has to prove it can own the frame, otherwise the window would be created
             // with flags nothing can draw to.
-            Candidate candidate = find(kind);
+            Candidate candidate = find(backend);
             if (candidate == null) {
-                LOGGER.warn("Render backend '{}' was forced but is not registered; falling back to {}", kind.id(),
-                        RenderBackendKind.VANILLA_GL.id());
-                return RenderBackendKind.VANILLA_GL;
+                LOGGER.warn("Render backend '{}' was forced but is not registered; falling back to {}", backend.id(),
+                        RenderBackends.VANILLA_GL_ID);
+                return RenderBackend.VANILLA;
             }
             if (!probe(candidate)) {
                 LOGGER.warn("Render backend '{}' was forced but its probe reports unavailable; falling back to {}",
-                        kind.id(), RenderBackendKind.VANILLA_GL.id());
-                return RenderBackendKind.VANILLA_GL;
+                        backend.id(), RenderBackends.VANILLA_GL_ID);
+                return RenderBackend.VANILLA;
             }
-            return kind;
+            return backend;
         }
 
         Candidate best = null;
         for (Candidate candidate : CANDIDATES) {
-            if (candidate.kind() == RenderBackendKind.VANILLA_GL) {
+            if (RenderBackends.isVanilla(candidate.backend().id())) {
                 continue;
             }
             if (!probe(candidate)) {
@@ -146,7 +149,7 @@ public final class RenderBackendSelection {
                 best = candidate;
             }
         }
-        return best == null ? RenderBackendKind.VANILLA_GL : best.kind();
+        return best == null ? RenderBackend.VANILLA : best.backend();
     }
 
     private static boolean probe(Candidate candidate) {
@@ -154,24 +157,15 @@ public final class RenderBackendSelection {
             return candidate.probe().isAvailable();
         } catch (Throwable t) {
             // A probe that throws is a probe that says no. Never let a probe failure abort startup.
-            LOGGER.warn("Backend probe for '{}' threw; treating as unavailable", candidate.kind().id(), t);
+            LOGGER.warn("Backend probe for '{}' threw; treating as unavailable", candidate.backend().id(), t);
             return false;
         }
     }
 
-    private static Candidate find(RenderBackendKind kind) {
+    private static Candidate find(RenderBackend backend) {
         for (Candidate candidate : CANDIDATES) {
-            if (candidate.kind() == kind) {
+            if (candidate.backend() == backend || candidate.backend().id().equals(backend.id())) {
                 return candidate;
-            }
-        }
-        return null;
-    }
-
-    private static RenderBackendKind byId(String id) {
-        for (RenderBackendKind kind : RenderBackendKind.values()) {
-            if (kind.id().equals(id)) {
-                return kind;
             }
         }
         return null;
@@ -181,9 +175,9 @@ public final class RenderBackendSelection {
      * The selected backend. Selects on first use if nobody called {@link #select()} yet, so call sites never
      * need a null check.
      */
-    public static RenderBackendKind get() {
-        RenderBackendKind kind = selected;
-        return kind != null ? kind : select();
+    public static RenderBackend get() {
+        RenderBackend backend = selected;
+        return backend != null ? backend : select();
     }
 
     /** Whether the selection has been made. Only meaningful for diagnostics and tests. */

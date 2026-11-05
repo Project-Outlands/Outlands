@@ -223,7 +223,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
 
         @Override
         public boolean vulkanInstanceAvailable() {
-            return RenderBackendSelection.get() == top.outlands.render.RenderBackendKind.VULKAN;
+            return !RenderBackendSelection.get().isOpenGl();
         }
 
         @Override

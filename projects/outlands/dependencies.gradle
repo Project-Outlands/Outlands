@@ -101,6 +101,10 @@ dependencies {
 
     installer 'it.unimi.dsi:fastutil:8.5.19'
 
+    // Math types for the render interfaces. JOML was dropped with the kirino submodule (e02c508a), but the
+    // render seams need real matrix/vector types rather than float[], so it comes back as a loader dependency.
+    installer 'org.joml:joml:1.10.9'
+
     installer 'com.google.guava:guava:33.7.2-jre'
     installer 'com.google.guava:failureaccess:1.0.3'
     installer 'com.google.code.gson:gson:2.14.0'

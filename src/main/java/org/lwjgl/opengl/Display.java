@@ -52,7 +52,6 @@ import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_HIDDEN;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
-import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_VULKAN;
 
 import top.outlands.render.RenderBackendSelection;
 import static org.lwjgl.system.MemoryUtil.NULL;
@@ -527,16 +526,7 @@ public class Display {
     }
 
     private static long backendWindowFlags() {
-        switch (RenderBackendSelection.get()) {
-            case VULKAN:
-            case SDL_GPU:
-                // SDL_GPU selects its Vulkan driver behind SDL_WINDOW_VULKAN. A Metal-backed SDL_GPU build would
-                // need SDL_WINDOW_METAL instead; that distinction belongs to the backend, not here.
-                return SDLVideo.SDL_WINDOW_VULKAN;
-            case VANILLA_GL:
-            default:
-                return SDL_WINDOW_OPENGL;
-        }
+        return RenderBackendSelection.get().sdlWindowFlags();
     }
 
     private static void applyGlAttributes(int versionMajor, int versionMinor) {

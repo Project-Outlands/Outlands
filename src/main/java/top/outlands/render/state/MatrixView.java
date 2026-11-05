@@ -1,5 +1,7 @@
 package top.outlands.render.state;
 
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
 
 import java.nio.FloatBuffer;
@@ -28,12 +30,12 @@ public interface MatrixView {
         }
 
         @Override
-        public float[] viewProjection() {
+        public Matrix4f viewProjection() {
             throw unavailable();
         }
 
         @Override
-        public float[] frustumPlanes() {
+        public Vector4f[] frustumPlanes() {
             throw unavailable();
         }
 
@@ -68,18 +70,16 @@ public interface MatrixView {
      * is part of the contract, not an implementation detail — a consumer that adds its own translation on
      * top would double-count it.</p>
      *
-     * <p>Row-major 4x4, 16 elements. The returned array may be reused between calls; copy it if you need to
-     * keep it.</p>
+     * <p>The returned instance may be reused between calls; copy it if you need to keep it.</p>
      */
-    float[] viewProjection();
+    Matrix4f viewProjection();
 
     /**
      * The six frustum planes, in the order JOML's {@code FrustumIntersection} expects.
      *
-     * <p>Six planes of four components each, 24 elements, laid out as {@code nx, ny, nz, d} per plane.
-     * Same reuse caveat as {@link #viewProjection()}.</p>
+     * <p>Six planes in JOML's order. Same reuse caveat as {@link #viewProjection()}.</p>
      */
-    float[] frustumPlanes();
+    Vector4f[] frustumPlanes();
 
     /** The object-space origin under the current transform, as {@code x, y, z, w}. */
     float[] objectCoords();
