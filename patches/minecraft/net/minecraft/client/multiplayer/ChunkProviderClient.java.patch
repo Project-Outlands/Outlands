@@ -4,7 +4,7 @@
          }
  
          this.loadedChunks.remove(ChunkPos.asLong(x, z));
-+        top.outlands.world.ChunkLifecycle.fireChunkUnload(this.world, x, z);
++        net.minecraftforge.client.event.ChunkLifecycle.fireChunkUnload(this.world, x, z);
      }
  
      @Nullable
@@ -14,7 +14,7 @@
          this.loadedChunks.put(ChunkPos.asLong(chunkX, chunkZ), chunk);
 +        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(new net.minecraftforge.event.world.ChunkEvent.Load(chunk));
          chunk.markLoaded(true);
-+        top.outlands.world.ChunkLifecycle.fireChunkLoad(this.world, chunkX, chunkZ);
++        net.minecraftforge.client.event.ChunkLifecycle.fireChunkLoad(this.world, chunkX, chunkZ);
          return chunk;
      }
  
@@ -22,7 +22,7 @@
              LOGGER.info("Warning: Clientside chunk ticking took {} ms", System.currentTimeMillis() - i);
          }
  
-+        top.outlands.world.ChunkLifecycle.fireClientChunkTick(this.world);
++        net.minecraftforge.client.event.ChunkLifecycle.fireClientChunkTick(this.world);
          return false;
      }
  

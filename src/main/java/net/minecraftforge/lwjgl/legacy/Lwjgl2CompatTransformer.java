@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.LongAdder;
 import net.minecraft.launchwrapper.IClassTransformer;
 import net.minecraftforge.lwjgl.shim.ShimEnvironment;
 import net.minecraftforge.lwjgl.shim.ShimRegistry;
-import top.outlands.render.RenderBackendSelection;
+import net.minecraftforge.client.render.RenderBackendSelection;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

@@ -1,4 +1,4 @@
-package top.outlands.render.shim;
+package net.minecraftforge.client.render.shim;
 
 import org.lwjgl.opengl.GL11;
 

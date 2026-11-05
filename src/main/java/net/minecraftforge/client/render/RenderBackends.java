@@ -1,4 +1,4 @@
-package top.outlands.render;
+package net.minecraftforge.client.render;
 
 import net.minecraftforge.fml.common.util.SlotTable;
 

@@ -53,7 +53,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
 
-import top.outlands.render.RenderBackendSelection;
+import net.minecraftforge.client.render.RenderBackendSelection;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memUTF8;
 

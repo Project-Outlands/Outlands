@@ -1,4 +1,4 @@
-package top.outlands.render;
+package net.minecraftforge.client.render;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -1,4 +1,4 @@
-package top.outlands.attach;
+package net.minecraftforge.common.attachment;
 
 import org.jspecify.annotations.Nullable;
 
@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  * {@code equals}, but relying on that would be fragile, so this table keys on identity explicitly.</p>
  *
  * <p><b>Lifetime.</b> Entries live until {@link #purge(Object)}. Per-world and per-chunk hosts must be
- * purged from {@link top.outlands.world.ChunkLifecycle} listeners; nothing else knows when a host dies.</p>
+ * purged from {@link net.minecraftforge.client.event.ChunkLifecycle} listeners; nothing else knows when a host dies.</p>
  *
  * <p><b>Threading.</b> Writes are main-thread only. Reads may happen on chunk build threads, so a value that
  * is published must be safely publishable (immutable, or reached through a volatile field).</p>

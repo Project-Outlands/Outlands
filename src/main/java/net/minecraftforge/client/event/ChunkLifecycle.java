@@ -1,4 +1,4 @@
-package top.outlands.world;
+package net.minecraftforge.client.event;
 
 import net.minecraft.world.World;
 

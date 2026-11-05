@@ -1,4 +1,4 @@
-package top.outlands.render;
+package net.minecraftforge.client.render;
 
 import org.jspecify.annotations.Nullable;
 

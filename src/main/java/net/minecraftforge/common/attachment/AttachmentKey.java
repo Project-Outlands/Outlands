@@ -1,4 +1,4 @@
-package top.outlands.attach;
+package net.minecraftforge.common.attachment;
 
 /**
  * Identity of one attachment slot.
