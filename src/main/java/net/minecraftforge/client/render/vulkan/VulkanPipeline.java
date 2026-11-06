@@ -34,7 +34,10 @@ import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
 import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_BACK_BIT;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32B32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_FRONT_FACE_COUNTER_CLOCKWISE;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
 import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -66,8 +69,8 @@ import static org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout;
  */
 final class VulkanPipeline implements AutoCloseable {
 
-    /** position(3) + normal(3) + colour(3) floats. */
-    static final int VERTEX_STRIDE = 9 * Float.BYTES;
+    /** Vanilla's {@code DefaultVertexFormats.BLOCK}: 28 bytes, four attributes, no normal. */
+    static final int VERTEX_STRIDE = TerrainVertexFormat.STRIDE;
 
     private final VkDevice device;
     private final long layout;
@@ -140,10 +143,17 @@ final class VulkanPipeline implements AutoCloseable {
         VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(1, stack);
         binding.get(0).binding(0).stride(VERTEX_STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
-        VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(3, stack);
-        attributes.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
-        attributes.get(1).location(1).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(3 * Float.BYTES);
-        attributes.get(2).location(2).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(6 * Float.BYTES);
+        // The offsets are TerrainVertexFormat's, which are the ones VboRenderList.setupArrayPointers gives GL.
+        // R16G16_UNORM for the lightmap means the shader sees 0..1 without the CPU touching the shorts.
+        VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(4, stack);
+        attributes.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT)
+                .offset(TerrainVertexFormat.POSITION_OFFSET);
+        attributes.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
+                .offset(TerrainVertexFormat.COLOR_OFFSET);
+        attributes.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT)
+                .offset(TerrainVertexFormat.UV_OFFSET);
+        attributes.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_UNORM)
+                .offset(TerrainVertexFormat.LIGHTMAP_OFFSET);
 
         VkPipelineVertexInputStateCreateInfo vertexInput = VkPipelineVertexInputStateCreateInfo.calloc(stack)
                 .sType$Default()

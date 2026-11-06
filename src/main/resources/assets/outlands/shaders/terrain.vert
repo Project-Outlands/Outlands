@@ -1,24 +1,30 @@
 #version 450
 
-// The loader's own terrain shader, for M3. It draws whatever geometry it is handed; the geometry is a stand-in
-// until chunk data is wired in, so the point of this shader is the interface: a vertex format, a pushed MVP, and
-// a colour that depends on depth so a flat face is visibly flat.
+// The terrain shader. Its vertex input is vanilla's DefaultVertexFormats.BLOCK, unchanged: the mesh builder only
+// splits quads into triangles and adds indices, so nothing here is a conversion - the offsets are the ones
+// VboRenderList.setupArrayPointers hands to GL.
+//
+// There is no normal attribute. Vanilla bakes its directional shading and ambient occlusion into the vertex colour
+// before the vertex is written, so the lighting is already in `inColor`; adding a normal would mean inventing a
+// second, disagreeing source for it.
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec3 inColor;
+layout(location = 0) in vec3 inPosition;   // offset 0,  R32G32B32_SFLOAT
+layout(location = 1) in vec4 inColor;      // offset 12, R8G8B8A8_UNORM
+layout(location = 2) in vec2 inUv;         // offset 16, R32G32_SFLOAT
+layout(location = 3) in vec2 inLightmap;   // offset 24, R16G16_UNORM
 
-// A push constant, not a uniform buffer: 64 bytes of matrix is well inside the 128-byte minimum every device
-// guarantees, and it avoids a descriptor set for the one thing every draw needs.
+// One mat4 per draw. 64 bytes, inside the 128 every device guarantees.
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
 } pc;
 
-layout(location = 0) out vec3 outNormal;
-layout(location = 1) out vec3 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec2 outUv;
+layout(location = 2) out vec2 outLightmap;
 
 void main() {
     gl_Position = pc.modelViewProjection * vec4(inPosition, 1.0);
-    outNormal = inNormal;
     outColor = inColor;
+    outUv = inUv;
+    outLightmap = inLightmap;
 }
