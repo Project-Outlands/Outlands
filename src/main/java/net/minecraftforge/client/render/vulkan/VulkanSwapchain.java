@@ -34,6 +34,10 @@ import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
 import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 import org.lwjgl.vulkan.VkSwapchainCreateInfoKHR;
 import org.lwjgl.vulkan.VkViewport;
+import net.minecraftforge.client.render.graph.RenderGraph;
+import net.minecraftforge.client.render.graph.RenderGraphContext;
+import net.minecraftforge.client.render.graph.RenderGraphs;
+
 import org.lwjgl.sdl.SDLVideo;
 
 import java.nio.IntBuffer;
@@ -161,6 +165,31 @@ final class VulkanSwapchain {
     private int frameIndex;
     private boolean outOfDate;
 
+    /** The graph, frozen on the first frame. Held here because the frame is what runs it. */
+    private RenderGraph graph;
+
+    /** Reused every frame: the render path must not allocate a context per frame. */
+    private final FrameContext frameContext = new FrameContext();
+
+    private final class FrameContext implements RenderGraphContext {
+        VkCommandBuffer commandBuffer;
+
+        @Override
+        public int width() {
+            return extentWidth;
+        }
+
+        @Override
+        public int height() {
+            return extentHeight;
+        }
+
+        @Override
+        public Object nativeContext() {
+            return commandBuffer;
+        }
+    }
+
     private VulkanSwapchain(VulkanContext context) {
         this.context = context;
         this.device = context.device();
@@ -168,6 +197,10 @@ final class VulkanSwapchain {
 
     static VulkanSwapchain create(VulkanContext context, long window) {
         VulkanSwapchain swapchain = new VulkanSwapchain(context);
+        // Freeze before anything draws: a cycle, a dangling anchor or a phase with no provider is a startup error
+        // with a name in it, not a crash halfway through a frame.
+        swapchain.graph = RenderGraphs.get();
+        swapchain.graph.freeze();
         swapchain.createCommandPool();
         swapchain.createSyncObjects();
         swapchain.rebuild(window);
@@ -310,7 +343,11 @@ final class VulkanSwapchain {
         scissor.get(0).extent().width(extentWidth).height(extentHeight);
         vkCmdSetScissor(commandBuffer, 0, scissor);
 
-        // Nothing is drawn yet. Reaching the screen with the right clear colour is what this milestone proves.
+        // The phases run inside the rendering instance because they draw into these attachments. Each one is a
+        // no-op for now; the graph is what makes "replace terrain.layer" a thing a mod can do.
+        frameContext.commandBuffer = commandBuffer;
+        graph.run(frameContext);
+        frameContext.commandBuffer = null;
 
         vkCmdEndRendering(commandBuffer);
 
