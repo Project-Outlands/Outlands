@@ -3,6 +3,8 @@ package net.minecraftforge.client.render.vulkan;
 import net.minecraftforge.client.render.RenderBackend;
 import net.minecraftforge.client.render.RenderBackendSelection;
 import net.minecraftforge.client.render.RenderBackends;
+import net.minecraftforge.client.render.graph.RenderGraph;
+import net.minecraftforge.client.render.graph.RenderGraphs;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -51,6 +53,7 @@ public final class VulkanBackend implements RenderBackend {
 
     private VulkanContext context;
     private VulkanSwapchain swapchain;
+    private VulkanTerrainLayer terrainLayer;
     private long window;
     private boolean failed;
 
@@ -116,7 +119,14 @@ public final class VulkanBackend implements RenderBackend {
         this.window = window;
         try {
             context = VulkanContext.create(window);
-            swapchain = VulkanSwapchain.create(context, window);
+            // The swapchain first: it is what decides the attachment formats, and the pipeline has to be built for
+            // exactly those. Then the phases this backend implements, then the freeze, so the completeness check
+            // sees them.
+            RenderGraph graph = RenderGraphs.get();
+            swapchain = VulkanSwapchain.create(context, window, graph);
+            terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat());
+            graph.replace(terrainLayer);
+            graph.freeze();
         } catch (RuntimeException | LinkageError e) {
             // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
             // log it once, and present nothing rather than throwing from inside the render loop every frame.
@@ -150,6 +160,10 @@ public final class VulkanBackend implements RenderBackend {
         if (swapchain != null) {
             swapchain.close();
             swapchain = null;
+        }
+        if (terrainLayer != null) {
+            terrainLayer.close();
+            terrainLayer = null;
         }
         if (context != null) {
             context.close();

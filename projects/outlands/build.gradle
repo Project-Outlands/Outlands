@@ -729,3 +729,14 @@ checks.base(project(':mcpbase').forgedev.mcpBase)
 checks.patches { it.patchDir.set(rootProject.layout.projectDirectory.dir('patches/minecraft')) }
 checks.execs {}
 // endregion
+
+// Regenerates the .spv files that ship next to their GLSL sources. The results are committed, so this only has
+// to run when a shader changes; a build without it works.
+tasks.register('compileShaders', JavaExec) {
+    group = 'build'
+    description = 'Compiles assets/outlands/shaders/*.{vert,frag} to SPIR-V'
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ShaderCompiler'
+    args = [rootDir.absolutePath]
+}

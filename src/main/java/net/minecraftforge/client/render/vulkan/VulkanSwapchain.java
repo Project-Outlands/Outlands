@@ -36,7 +36,6 @@ import org.lwjgl.vulkan.VkSwapchainCreateInfoKHR;
 import org.lwjgl.vulkan.VkViewport;
 import net.minecraftforge.client.render.graph.RenderGraph;
 import net.minecraftforge.client.render.graph.RenderGraphContext;
-import net.minecraftforge.client.render.graph.RenderGraphs;
 
 import org.lwjgl.sdl.SDLVideo;
 
@@ -165,7 +164,7 @@ final class VulkanSwapchain {
     private int frameIndex;
     private boolean outOfDate;
 
-    /** The graph, frozen on the first frame. Held here because the frame is what runs it. */
+    /** The frozen graph. Held here because the frame is what runs it. */
     private RenderGraph graph;
 
     /** Reused every frame: the render path must not allocate a context per frame. */
@@ -195,12 +194,10 @@ final class VulkanSwapchain {
         this.device = context.device();
     }
 
-    static VulkanSwapchain create(VulkanContext context, long window) {
+    static VulkanSwapchain create(VulkanContext context, long window, RenderGraph graph) {
         VulkanSwapchain swapchain = new VulkanSwapchain(context);
-        // Freeze before anything draws: a cycle, a dangling anchor or a phase with no provider is a startup error
-        // with a name in it, not a crash halfway through a frame.
-        swapchain.graph = RenderGraphs.get();
-        swapchain.graph.freeze();
+        // Already frozen by the backend, after it registered the nodes it implements.
+        swapchain.graph = graph;
         swapchain.createCommandPool();
         swapchain.createSyncObjects();
         swapchain.rebuild(window);
@@ -213,6 +210,16 @@ final class VulkanSwapchain {
 
     int extentHeight() {
         return extentHeight;
+    }
+
+    /** The swapchain image format, chosen in {@link #rebuild}. */
+    int imageFormat() {
+        return imageFormat;
+    }
+
+    /** The depth attachment format, chosen in {@link #rebuild}. */
+    int depthFormat() {
+        return depthFormat;
     }
 
     /**

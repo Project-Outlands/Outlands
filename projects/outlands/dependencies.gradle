@@ -215,6 +215,11 @@ dependencies {
     installer "com.cleanroommc:cleanmix:$cleanmixVersion"
     installer annotationProcessor('com.cleanroommc:mixinextras-common:0.5.5')
 
+    // Build-time shader compilation (src/test/java/.../ShaderCompiler). Not a runtime dependency: the running
+    // process consumes SPIR-V only, so the compiler stays out of the shipped jar and off players' disks.
+    testImplementation "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version"
+    testRuntimeOnly "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version:$lwjglArch"
+
     testImplementation platform('org.junit:junit-bom:6.1.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.junit.vintage:junit-vintage-engine'
