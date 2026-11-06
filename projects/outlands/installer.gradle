@@ -47,6 +47,10 @@ tasks.register('launcherJson') {
     ext.output = outputFile
     inputs.file(mmcVanilla)
     inputs.files(loaderJar, artifactsFile)
+    // '-Prelease' decides whether the loader jar carries a download URL. It is read in the task action, so without
+    // this a local build followed by a release build would keep the local 'url: ""' profile (same version, same
+    // loader jar) and publish an installer no launcher can resolve the loader from.
+    inputs.property('release', project.hasProperty('release'))
     outputs.file(outputFile)
 
     doLast {
@@ -63,7 +67,15 @@ tasks.register('launcherJson') {
             mainClass             : 'top.outlands.foundation.boot.Foundation',
             assetIndex            : vanilla.assetIndex,
             assets                : vanilla.assetIndex.id,
-            downloads             : vanilla.downloads,
+            // The client/server jars the launcher fetches into 'versions/<id>/'. This profile does not inherit from
+            // '1.12.2' - it carries the whole library set instead - so the downloads have to be spelled out here,
+            // and they come from the MMC component the rest of the vanilla metadata is read from. The key used to be
+            // read as 'vanilla.downloads', which the template does not have, so it serialized as "downloads": null
+            // and left every launcher without a jar to launch.
+            downloads             : vanilla.downloads ?: [:],
+            // Empty on purpose (Forge's 1.12.2 profile does the same): the loader ships its own log4j2.xml at the
+            // jar root, so a vanilla 'logging.client.argument' would override it with Mojang's 1.12 config.
+            logging               : vanilla.logging ?: [:],
             javaVersion           : [component: 'java-runtime-epsilon', majorVersion: 25],
             complianceLevel       : 1,
             minimumLauncherVersion: 18,
@@ -112,6 +124,14 @@ tasks.register('launcherJson') {
         }
         cache.lwjglNatives.each { key, lib -> json.libraries.add(lib) }
 
+        // One entry per coordinate, last one wins. Two sources feed this list - the MMC component (vanilla's
+        // libraries, with the natives/rule overrides MultiMC needs) and the resolved artifacts (everything the
+        // loader adds) - and they overlap. A profile that lists a library twice makes each launcher pick one of the
+        // two silently, which is how a stale text2speech entry used to shadow the real one.
+        def byName = new LinkedHashMap<String, Object>()
+        json.libraries.each { byName.put(it.name as String, it) }
+        json.libraries = new ArrayList(byName.values())
+
         outputFile.get().asFile.text = new JsonBuilder(json).toPrettyString()
     }
 }
@@ -124,6 +144,8 @@ tasks.register('installerJson') {
     def launcherJson = tasks.named('launcherJson').flatMap { it.outputs.files.elements.map { it.first().asFile } }
     def outputFile = layout.buildDirectory.file('install_profile.json')
     inputs.files(loaderJar, artifactsFile, launcherJson)
+    // same flag, same reason as launcherJson: it decides whether the loader jar has a url
+    inputs.property('release', project.hasProperty('release'))
     outputs.file(outputFile)
 
     doLast {
@@ -153,8 +175,12 @@ tasks.register('installerJson') {
             path      : loaderCoords,
             logo      : '/big_logo.png',
             minecraft : mcVersion,
-            welcome   : 'installer.welcome.message',
-            data      : [],
+            // Shown verbatim in the installer GUI's header (Forge's installer reads this field as plain text, it
+            // is not a translation key), so it has to be the sentence itself.
+            welcome   : "Welcome to the simple ${rootProject.name} installer.",
+            // Object, not array: this is a key/value map in the installer spec (Forge writes '{}') and launchers
+            // deserialize it as one - an empty list here fails to parse before anything is installed.
+            data      : [:],
             processors: [],
             libraries : libs.values().sort { a, b -> a.name <=> b.name }
         ]
@@ -163,11 +189,39 @@ tasks.register('installerJson') {
 }
 
 // region installer jar -----------------------------------------------------
-tasks.register('installerJar', Zip) {
+// The installer jar is Forge's installer program with our metadata dropped into it: 'install_profile.json' and
+// 'version.json' at the root, and the loader jar under 'maven/' where SimpleInstaller looks for it. That program
+// reads the profile, downloads the vanilla jar and every library (extracting ours from '/maven/' when the profile
+// carries no url for it), and injects a launcher profile - which is why the metadata has to stay in Forge's shape.
+//
+// It is not a Zip task: the archive is the installer, so it needs the fatjar's META-INF/MANIFEST.MF
+// (Main-Class: net.minecraftforge.installer.SimpleInstaller). Without a manifest 'java -jar' refuses the file as
+// 'Invalid or corrupt jarfile', which is what a metadata-only Zip produced.
+//
+// Upstream Forge, not a rebrand: its window title says 'Forge Installer'. That is deliberate (see the dependency in
+// dependencies.gradle), so do not 'fix' it by editing the panel - the string is compiled into the artifact.
+tasks.register('installerJar', Jar) {
     dependsOn 'installerJson', 'launcherJson'
     archiveClassifier = 'installer'
-    archiveExtension = 'jar'
     destinationDirectory = layout.buildDirectory.dir('libs')
+    // The installer program's classes, but not its manifest: a Jar task always writes META-INF/MANIFEST.MF from its
+    // own 'manifest' block, so a copied one would be shadowed by an empty one and the jar would lose its Main-Class.
+    // The attributes are taken from the artifact instead of being spelled out here, so bumping the installer cannot
+    // leave a stale main class behind.
+    from({ zipTree(configurations.installerApp.singleFile) }) {
+        exclude 'META-INF/MANIFEST.MF'
+    }
+    manifest {
+        def fromInstaller = new LinkedHashMap<String, Object>()
+        new java.util.jar.JarFile(configurations.installerApp.singleFile).withCloseable { jar ->
+            jar.manifest.mainAttributes.each { key, value -> fromInstaller.put(key.toString(), value) }
+        }
+        // our identity, not the installer program's
+        fromInstaller.put('Implementation-Title', 'Outlands Installer')
+        fromInstaller.put('Implementation-Version', project.version.toString())
+        fromInstaller.put('Implementation-Vendor', 'Outlands')
+        attributes(fromInstaller)
+    }
     from({ tasks.named('installerJson').get().outputs.files })
     from({ tasks.named('launcherJson').get().outputs.files })
     from(tasks.named('universalJar')) {

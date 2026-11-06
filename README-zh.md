@@ -22,7 +22,7 @@
 | 文件 | 说明 |
 |---|---|
 | `outlands-<版本>.jar` | loader（universal）jar |
-| `outlands-<版本>-installer.jar` | 安装器/启动器 JSON + universal jar |
+| `outlands-<版本>-installer.jar` | Forge 的安装器程序（GUI + `--installClient`/`--installServer`），内含我们的 `install_profile.json`、`version.json` 与 universal jar |
 | `outlands-<版本>-sources.jar` | loader 源码（userdev 消费者注入的就是它） |
 | `outlands-<版本>-userdev.jar` | 供模组开发环境使用的 userdev 产物 |
 | `outlands-<版本>-srg.jar` | 重混淆后的 class（userdev 工具链使用） |
@@ -58,8 +58,9 @@ CalVer：`YYYY.MM.DD`，用 UTC，**不带任何其它信息**——没有 commi
 | `buildSrc` | 构建插件与任务（`top.outlands.gradle.*`） |
 | `legacy/fg6` | 旧的 ForgeGradle 6 构建脚本，仅作参考 |
 
-给模组开发者的坐标：`top.outlands:outlands:<版本>`（另有 `userdev`、`installer`、`sources`、`srg` 分类器），
-来自 `https://maven.outlands.top/releases`。
+给模组开发者的坐标：`top.outlands:outlands:<版本>`（另有 `userdev`、`installer`、`sources`、`srg`、
+`dev-sources`、`devenv`、`mmc` 分类器），来自 `https://maven.outlands.top/releases`。
+其中 `mmc` 分类器就是启动器整合包（`outlands-<版本>-mmc.zip`），与 release 里附带的 zip 是同一个文件。
 
 ## 维护补丁
 

@@ -116,8 +116,9 @@ jobs:
           missing=0
           present=0
           missing_list=""
-          for classifier in "" "-sources" "-userdev" "-installer" "-srg"; do
-            file="outlands-$VERSION$classifier.jar"
+          # Suffixes relative to 'outlands-$VERSION'; the extension is spelled out because the launcher pack is a zip.
+          for suffix in ".jar" "-sources.jar" "-userdev.jar" "-installer.jar" "-srg.jar" "-mmc.zip"; do
+            file="outlands-$VERSION$suffix"
             code=$(curl -sS -L --max-time 30 --retry 2 --retry-delay 2 -o /dev/null -w '%{http_code}' "${AUTH[@]}" -I "$BASE/$file")
             case "$code" in
               200) present=$((present + 1)) ;;
@@ -164,9 +165,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -uo pipefail
-          for classifier in '' '-sources' '-srg' '-userdev' '-installer'; do
-            url="https://nexus.jsdu.cn/repository/top/outlands/outlands/${VERSION}/outlands-${VERSION}${classifier}.jar"
-            printf '%-95s %s\n' "outlands-${VERSION}${classifier}.jar" \
+          for suffix in '.jar' '-sources.jar' '-srg.jar' '-userdev.jar' '-installer.jar' '-mmc.zip'; do
+            url="https://nexus.jsdu.cn/repository/top/outlands/outlands/${VERSION}/outlands-${VERSION}${suffix}"
+            printf '%-95s %s\n' "outlands-${VERSION}${suffix}" \
               "$(curl -sS -o /dev/null -w '%{http_code} %{time_total}s' --max-time 300 --retry 2 "$url" || echo failed)"
           done
 

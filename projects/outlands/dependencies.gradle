@@ -28,6 +28,13 @@ configurations {
         transitive = false
     }
 
+    // Forge's installer program, the one the installer jar wraps around its metadata: a Swing GUI plus the
+    // headless actions (--installClient/--installServer/--extract/--makeOffline). It is not a launcher library and
+    // must not reach version.json, so it gets its own configuration rather than riding on 'installer'.
+    installerApp {
+        transitive = false
+    }
+
     testCompile.extendsFrom(lwjglNatives)
 }
 
@@ -132,6 +139,16 @@ dependencies {
     installer 'com.google.guava:guava:33.7.2-jre'
     installer 'com.google.guava:failureaccess:1.0.3'
     installer 'com.google.code.gson:gson:2.14.0'
+
+    // The installer program itself (see installer.gradle): Forge's installer is a standalone, published artifact -
+    // the same convention ForgeGradle and Cleanroom use. 'fatjar' carries its own dependencies and the manifest with
+    // Main-Class: net.minecraftforge.installer.SimpleInstaller. Bump the version deliberately: it decides what the
+    // GUI looks like, not what gets installed (that is all in install_profile.json/version.json).
+    //
+    // Upstream, not a fork: the window title and its dialogs say 'Forge Installer', because that string is compiled
+    // into the artifact. Accepted on purpose - it is the same program every 1.12.2 player already ran, and forking
+    // it (what Cleanroom did with 'com.cleanroommc:installer:...:shrunk') is only worth it for the branding.
+    installerApp 'net.minecraftforge:installer:2.2.17:fatjar'
 
     installer 'org.apache.commons:commons-lang3:3.21.0'
     installer 'org.apache.commons:commons-compress:1.28.0'

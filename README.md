@@ -23,7 +23,7 @@ Artifacts land in `projects/outlands/build/libs/`:
 | File | What it is |
 |---|---|
 | `outlands-<version>.jar` | the loader ("universal") jar |
-| `outlands-<version>-installer.jar` | installer/launcher JSON + the universal jar |
+| `outlands-<version>-installer.jar` | Forge's installer program (GUI + `--installClient`/`--installServer`) carrying our `install_profile.json`, `version.json` and the universal jar |
 | `outlands-<version>-sources.jar` | loader sources (what userdev consumers inject) |
 | `outlands-<version>-userdev.jar` | userdev artifact for mod development setups |
 | `outlands-<version>-srg.jar` | reobfuscated classes (consumed by userdev tooling) |
@@ -62,7 +62,8 @@ assets and natives.
 | `legacy/fg6` | the previous ForgeGradle 6 build scripts, kept for reference only |
 
 Published coordinates for mod developers: `top.outlands:outlands:<version>` (plus the `userdev`, `installer`,
-`sources` and `srg` classifiers), from `https://maven.outlands.top/releases`.
+`sources`, `srg`, `dev-sources`, `devenv` and `mmc` classifiers), from `https://maven.outlands.top/releases`.
+The `mmc` classifier is the launcher pack (`outlands-<version>-mmc.zip`), i.e. the same zip a release attaches.
 
 ## Maintaining patches
 

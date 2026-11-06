@@ -642,6 +642,33 @@ tasks.register('outlandsInfo') {
     }
 }
 
+// region MMC/Prism pack -----------------------------------------------------
+// The launcher-facing distribution: mmc-pack.json + the per-component patch JSONs (forge slot carries the loader,
+// lwjgl3 slot carries our LWJGL build) + the loader jar for local (non-release) builds.
+// Registered before the publishing block below, which lists its output as a maven artifact.
+tasks.register('createMMCPack', CreateMMCPackTask) {
+    group = 'build'
+    description = 'Creates a MultiMC/Prism instance package for Outlands'
+    dependsOn 'launcherJson', 'universalJar'
+
+    versionJson = tasks.named('launcherJson').get().ext.output
+    templateDir = rootProject.layout.projectDirectory.dir('mmcpack-template')
+    universalJarFile = tasks.named('universalJar', Jar).flatMap { it.archiveFile }
+    loaderVersion = project.version.toString()
+    loaderCoords = "${project.group}:${base.archivesName.get()}".toString()
+    // Players take everything that is not central or Mojang's from the mirror that backs repo.cleanroommc.com.
+    releaseBaseUrl = Util.MIRROR_MAVEN_URL
+    // 'release' is what CI passes when publishing. A plain build keeps the 'local' pack (it carries the loader jar,
+    // a release pack points at the maven URL instead), so the flag - not the version string - decides this.
+    def releaseBuild = project.hasProperty('release')
+    isRelease = releaseBuild
+    outputZip = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}${releaseBuild ? '' : '-local'}.zip")
+}
+
+tasks.named('assemble') { dependsOn 'createMMCPack' }
+tasks.named('compileJava') { dependsOn ':mcpbase:renamePatchedSources' }
+// endregion
+
 // region publishing ---------------------------------------------------------
 // top.outlands:outlands (universal), :userdev and :installer are the three artifacts consumers resolve.
 // Only the token is a secret: 'fg' is a shared publishing account, so it can stay visible in the logs (masking it
@@ -677,35 +704,14 @@ publishing {
             artifact(layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}-srg.jar")) {
                 classifier = 'srg'; extension = 'jar'; builtBy tasks.named('reobf')
             }
+            // The launcher pack a player imports into Prism/MultiMC. Published here so a launcher download URL can
+            // point at maven instead of a GitHub release asset, which is the only place it used to exist.
+            artifact(tasks.named('createMMCPack')) {
+                classifier = 'mmc'; extension = 'zip'
+            }
         }
     }
 }
-// endregion
-
-// region MMC/Prism pack -----------------------------------------------------
-// The launcher-facing distribution: mmc-pack.json + the per-component patch JSONs (forge slot carries the loader,
-// lwjgl3 slot carries our LWJGL build) + the loader jar for local (non-release) builds.
-tasks.register('createMMCPack', CreateMMCPackTask) {
-    group = 'build'
-    description = 'Creates a MultiMC/Prism instance package for Outlands'
-    dependsOn 'launcherJson', 'universalJar'
-
-    versionJson = tasks.named('launcherJson').get().ext.output
-    templateDir = rootProject.layout.projectDirectory.dir('mmcpack-template')
-    universalJarFile = tasks.named('universalJar', Jar).flatMap { it.archiveFile }
-    loaderVersion = project.version.toString()
-    loaderCoords = "${project.group}:${base.archivesName.get()}".toString()
-    // Players take everything that is not central or Mojang's from the mirror that backs repo.cleanroommc.com.
-    releaseBaseUrl = Util.MIRROR_MAVEN_URL
-    // 'release' is what CI passes when publishing. A plain build keeps the 'local' pack (it carries the loader jar,
-    // a release pack points at the maven URL instead), so the flag - not the version string - decides this.
-    def releaseBuild = project.hasProperty('release')
-    isRelease = releaseBuild
-    outputZip = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}${releaseBuild ? '' : '-local'}.zip")
-}
-
-tasks.named('assemble') { dependsOn 'createMMCPack' }
-tasks.named('compileJava') { dependsOn ':mcpbase:renamePatchedSources' }
 // endregion
 
 // region checks -------------------------------------------------------------
