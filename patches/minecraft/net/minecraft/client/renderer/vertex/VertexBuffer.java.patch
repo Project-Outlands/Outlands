@@ -1,0 +1,83 @@
+--- before/net/minecraft/client/renderer/vertex/VertexBuffer.java
++++ after/net/minecraft/client/renderer/vertex/VertexBuffer.java
+@@ -1,53 +1,63 @@
+ package net.minecraft.client.renderer.vertex;
+ 
+ import java.nio.ByteBuffer;
+-import net.minecraft.client.renderer.GlStateManager;
+-import net.minecraft.client.renderer.OpenGlHelper;
+ import net.minecraftforge.fml.relauncher.Side;
+ import net.minecraftforge.fml.relauncher.SideOnly;
+ 
++/**
++ * A vertex buffer, with the backend behind it chosen at construction.
++ *
++ * <p>The public surface is unchanged - name, methods and descriptors are what they were - so callers and mods see
++ * no difference. What changed is that the body no longer decides how the bytes reach the GPU. See
++ * {@code net.minecraftforge.client.render.vertex.VertexBufferBackend} for why that decision is an interface rather
++ * than a GL call, and {@code docs/vulkan-backend-plan.md} 8.4.2 for the reasoning.</p>
++ */
+ @SideOnly(Side.CLIENT)
+ public class VertexBuffer
+ {
+-    private int glBufferId;
+     private final VertexFormat vertexFormat;
+-    private int count;
++    private final net.minecraftforge.client.render.vertex.VertexBufferBackend backend;
+ 
+     public VertexBuffer(VertexFormat vertexFormatIn)
+     {
++        this(vertexFormatIn, net.minecraftforge.client.render.vertex.VertexBufferBackends.create(vertexFormatIn));
++    }
++
++    /**
++     * Forwards to a backend that was already built.
++     *
++     * <p>Package-private on purpose: it exists so a test can observe the forwarding without a GPU. Constructing a
++     * GL-backed buffer needs a current context - glGenBuffers runs in the constructor - so a test that wanted the
++     * real backend would have to stand up a context just to check five one-line methods.</p>
++     */
++    VertexBuffer(VertexFormat vertexFormatIn, net.minecraftforge.client.render.vertex.VertexBufferBackend backend)
++    {
+         this.vertexFormat = vertexFormatIn;
+-        this.glBufferId = OpenGlHelper.glGenBuffers();
++        this.backend = backend;
+     }
+ 
+     public void bindBuffer()
+     {
+-        OpenGlHelper.glBindBuffer(OpenGlHelper.GL_ARRAY_BUFFER, this.glBufferId);
++        this.backend.bind();
+     }
+ 
+     public void bufferData(ByteBuffer data)
+     {
+-        this.bindBuffer();
+-        OpenGlHelper.glBufferData(OpenGlHelper.GL_ARRAY_BUFFER, data, 35044);
+-        this.unbindBuffer();
+-        this.count = data.limit() / this.vertexFormat.getSize();
++        this.backend.upload(data);
+     }
+ 
+     public void drawArrays(int mode)
+     {
+-        GlStateManager.glDrawArrays(mode, 0, this.count);
++        this.backend.draw(mode, 0, this.backend.vertexCount());
+     }
+ 
+     public void unbindBuffer()
+     {
+-        OpenGlHelper.glBindBuffer(OpenGlHelper.GL_ARRAY_BUFFER, 0);
++        this.backend.unbind();
+     }
+ 
+     public void deleteGlBuffers()
+     {
+-        if (this.glBufferId >= 0)
+-        {
+-            OpenGlHelper.glDeleteBuffers(this.glBufferId);
+-            this.glBufferId = -1;
+-        }
++        this.backend.delete();
+     }
+ }
