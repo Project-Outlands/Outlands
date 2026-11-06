@@ -2,6 +2,7 @@ package net.minecraftforge.client.render.vulkan;
 
 import net.minecraftforge.client.render.RenderBackend;
 import net.minecraftforge.client.render.RenderBackendSelection;
+import net.minecraftforge.client.render.ChunkMeshCapture;
 import net.minecraftforge.client.render.RenderBackends;
 import net.minecraftforge.client.render.graph.RenderGraph;
 import net.minecraftforge.client.render.graph.RenderGraphs;
@@ -54,6 +55,8 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanContext context;
     private VulkanSwapchain swapchain;
     private VulkanTerrainLayer terrainLayer;
+    /** Captures waiting for the next frame. Written by chunk workers, drained on the render thread. */
+    private final java.util.Queue<ChunkMeshCapture.Captured> pendingChunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private long window;
     private boolean failed;
 
@@ -127,6 +130,9 @@ public final class VulkanBackend implements RenderBackend {
             terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat());
             graph.replace(terrainLayer);
             graph.freeze();
+            // Only now, once the graph is frozen and the layer exists, does anything start capturing chunk meshes.
+            // The consumer is the layer itself: it owns the buffers the meshes become.
+            ChunkMeshCapture.setConsumer(captured -> pendingChunks.add(captured));
         } catch (RuntimeException | LinkageError e) {
             // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
             // log it once, and present nothing rather than throwing from inside the render loop every frame.
@@ -142,6 +148,7 @@ public final class VulkanBackend implements RenderBackend {
             return;
         }
         try {
+            drainCaptures();
             swapchain.drawFrame(window);
         } catch (RuntimeException e) {
             failed = true;
@@ -155,8 +162,27 @@ public final class VulkanBackend implements RenderBackend {
         return context;
     }
 
+    /**
+     * Hands whatever chunk workers finished to the terrain layer.
+     *
+     * <p>Drained on the render thread, before recording, so a rebuild that finished mid-frame is picked up next
+     * frame rather than forcing the two threads to synchronise mid-draw.</p>
+     */
+    private void drainCaptures() {
+        if (pendingChunks.isEmpty() || terrainLayer == null) {
+            return;
+        }
+        java.util.List<ChunkMeshCapture.Captured> batch = new java.util.ArrayList<>();
+        ChunkMeshCapture.Captured captured;
+        while ((captured = pendingChunks.poll()) != null) {
+            batch.add(captured);
+        }
+        terrainLayer.useCaptured(batch);
+    }
+
     @Override
     public void close() {
+        ChunkMeshCapture.setConsumer(null);
         if (swapchain != null) {
             swapchain.close();
             swapchain = null;

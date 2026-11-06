@@ -1,5 +1,6 @@
 package net.minecraftforge.client.render.vulkan;
 
+import net.minecraftforge.client.render.ChunkMeshCapture;
 import net.minecraftforge.client.render.graph.RenderGraphContext;
 import net.minecraftforge.client.render.graph.RenderGraphNode;
 import net.minecraftforge.client.render.graph.RenderPhases;
@@ -43,22 +44,44 @@ import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
  */
 final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
+    private final VkDevice device;
+    private final VulkanContext context;
     private final VulkanPipeline pipeline;
-    private final VulkanBuffer vertices;
-    private final VulkanBuffer indices;
-    private final List<TerrainMeshPacker.Slice> slices;
-    private final int indexType;
+    private VulkanBuffer vertices;
+    private VulkanBuffer indices;
+    private List<TerrainMeshPacker.Slice> slices;
+    private int indexType;
+
+    /** Where the current buffers came from: null while the placeholder is showing. */
+    private String source;
+
+    /** Draws per frame, so the cost of the packing choice is observable rather than assumed. */
+    private int drawCount;
     private final Matrix4f projection = new Matrix4f();
     private final Matrix4f view = new Matrix4f();
     private final Matrix4f modelViewProjection = new Matrix4f();
 
-    private VulkanTerrainLayer(VulkanPipeline pipeline, VulkanBuffer vertices, VulkanBuffer indices,
-                               TerrainMeshPacker.Pack pack) {
+    private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
+                               VulkanBuffer vertices, VulkanBuffer indices, TerrainMeshPacker.Pack pack,
+                               String source) {
+        this.device = device;
+        this.context = context;
         this.pipeline = pipeline;
         this.vertices = vertices;
         this.indices = indices;
         this.slices = pack.slices();
         this.indexType = pack.index32() ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+        this.source = source;
+    }
+
+    /** How many indexed draws the last frame issued. */
+    int drawCount() {
+        return drawCount;
+    }
+
+    /** What the current mesh came from, for diagnostics. */
+    String source() {
+        return source;
     }
 
     static VulkanTerrainLayer create(VulkanContext context, int colorFormat, int depthFormat) {
@@ -86,7 +109,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             pipeline.close();
             throw e;
         }
-        return new VulkanTerrainLayer(pipeline, vertices, indices, pack);
+        return new VulkanTerrainLayer(device, context, pipeline, vertices, indices, pack, "placeholder");
     }
 
     @Override
@@ -126,7 +149,51 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             for (TerrainMeshPacker.Slice slice : slices) {
                 vkCmdDrawIndexed(commandBuffer, slice.indexCount(), 1, slice.firstIndex(), slice.vertexOffset(), 0);
             }
+            drawCount = slices.size();
         }
+    }
+
+    /**
+     * Replaces the mesh with real chunk data.
+     *
+     * <p>Called from the render thread with whatever {@link ChunkMeshCapture} collected since the last frame. The
+     * whole terrain is one packed buffer, so this rebuilds it: incremental updates would need per-chunk slices that
+     * survive repacking, which is worth doing when the rebuild cost is measured rather than assumed.</p>
+     */
+    void useCaptured(java.util.List<ChunkMeshCapture.Captured> captured) {
+        if (captured.isEmpty()) {
+            return;
+        }
+        java.util.List<TerrainMeshBuilder.Mesh> meshes = new java.util.ArrayList<>(captured.size());
+        int quads = 0;
+        for (ChunkMeshCapture.Captured chunk : captured) {
+            // The capture is vanilla's own BLOCK bytes; the builder only splits quads into triangles and adds
+            // indices, so this is where the two halves meet.
+            TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(chunk.vertices(), chunk.quadCount());
+            meshes.add(mesh);
+            quads += chunk.quadCount();
+        }
+
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(meshes);
+        VulkanBuffer nextVertices = VulkanBuffer.create(device, context, pack.vertices());
+        VulkanBuffer nextIndices;
+        try {
+            nextIndices = VulkanBuffer.create(device, context, pack.indices());
+        } catch (RuntimeException e) {
+            nextVertices.close();
+            throw e;
+        }
+
+        VulkanBuffer oldVertices = vertices;
+        VulkanBuffer oldIndices = indices;
+        vertices = nextVertices;
+        indices = nextIndices;
+        slices = pack.slices();
+        indexType = pack.index32() ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+        source = captured.size() + " chunk layers, " + quads + " quads";
+        // The old buffers may still be in flight; the device is idle at this point in the frame, before recording.
+        oldIndices.close();
+        oldVertices.close();
     }
 
     @Override

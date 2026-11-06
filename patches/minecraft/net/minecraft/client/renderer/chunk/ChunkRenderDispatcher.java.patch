@@ -17,3 +17,20 @@
  
          if (j > 1)
          {
+@@ -248,6 +254,16 @@
+         final double p_188245_5_
+     )
+     {
++        // A non-GL backend takes the finished mesh here, before the VBO/display-list choice, because both of those
++        // are OpenGL and this is the only point that has the layer, the bytes and the chunk together. Returns false
++        // when nothing is registered, which is the case on a GL renderer.
++        if (net.minecraftforge.client.render.ChunkMeshCapture.capture(p_188245_1_, p_188245_2_, p_188245_3_, p_188245_4_))
++        {
++            p_188245_2_.reset();
++            p_188245_2_.setTranslation(0.0, 0.0, 0.0);
++            return Futures.immediateFuture(null);
++        }
++
+         if (Minecraft.getMinecraft().isCallingFromMinecraftThread())
+         {
+             if (OpenGlHelper.useVbo())

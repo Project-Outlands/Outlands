@@ -263,18 +263,25 @@ public class Display {
             GL.create(SDLVideo::SDL_GL_GetProcAddress);
             drawable = new DrawableGL();
         }
-        // A non-GL backend owns its own context and drawable; the GL path above is skipped entirely.
-        try {
-            drawable.makeCurrent();
-        } catch (LWJGLException e) {
-            throw new IllegalStateException("Failed to make the Display GL context current", e);
+        // A non-GL backend owns its own context and drawable, and there is no drawable to make current: the GL
+        // path above was skipped, so drawable is null. Everything below that reads GL state has to be skipped too,
+        // or the first GL call resolves to a null pointer and takes the client down during startup.
+        final boolean openGl = drawable != null;
+        if (openGl) {
+            try {
+                drawable.makeCurrent();
+            } catch (LWJGLException e) {
+                throw new IllegalStateException("Failed to make the Display GL context current", e);
+            }
         }
 
         displayCreated = true;
 
-        // Rebuild after the context is current: the table is cached in a static initializer, and
-        // OpenGlHelper reads it right after create().
-        GLContext.refreshCapabilities();
+        if (openGl) {
+            // Rebuild after the context is current: the table is cached in a static initializer, and
+            // OpenGlHelper reads it right after create().
+            GLContext.refreshCapabilities();
+        }
 
         if (pendingBorderless) {
             pendingBorderless = false;
