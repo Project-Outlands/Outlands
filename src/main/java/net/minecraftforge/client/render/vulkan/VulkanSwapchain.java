@@ -67,6 +67,7 @@ import static org.lwjgl.vulkan.VK10.VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_B
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_UNDEFINED;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_STENCIL_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TILING_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
@@ -260,7 +261,7 @@ final class VulkanSwapchain {
                 .oldLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .newLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
                 .image(depthImage)
-                .subresourceRange(depthRange(stack));
+                .subresourceRange(depthBarrierRange(stack));
 
         VkDependencyInfo dependencyInfo = VkDependencyInfo.calloc(stack)
                 .sType$Default()
@@ -392,7 +393,21 @@ final class VulkanSwapchain {
                 .layerCount(1);
     }
 
-    private static VkImageSubresourceRange depthRange(MemoryStack stack) {
+    /**
+     * The subresource range for barriers on the depth attachment.
+     *
+     * <p>The chosen format has both a depth and a stencil aspect, and {@code separateDepthStencilLayouts} is not
+     * enabled, so the spec requires both bits here even though only depth is written. The image <i>view</i> still
+     * asks for depth alone: a view selects what is sampled, not what is transitioned.</p>
+     */
+    private static VkImageSubresourceRange depthBarrierRange(MemoryStack stack) {
+        return VkImageSubresourceRange.calloc(stack)
+                .aspectMask(VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+                .levelCount(1)
+                .layerCount(1);
+    }
+
+    private static VkImageSubresourceRange depthViewRange(MemoryStack stack) {
         return VkImageSubresourceRange.calloc(stack)
                 .aspectMask(VK_IMAGE_ASPECT_DEPTH_BIT)
                 .levelCount(1)
@@ -582,7 +597,7 @@ final class VulkanSwapchain {
                 .image(image)
                 .viewType(VK_IMAGE_VIEW_TYPE_2D)
                 .format(format)
-                .subresourceRange(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ? depthRange(stack) : colorRange(stack));
+                .subresourceRange(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ? depthViewRange(stack) : colorRange(stack));
         LongBuffer viewOut = stack.mallocLong(1);
         VkCheck.check(vkCreateImageView(device, createInfo, null, viewOut), "vkCreateImageView");
         return viewOut.get(0);

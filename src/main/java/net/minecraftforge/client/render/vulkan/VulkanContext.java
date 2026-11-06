@@ -386,7 +386,7 @@ final class VulkanContext {
 
         VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack)
                 .sType$Default()
-                .pNext(enable14)
+                .pNext(enable14.address())
                 .pQueueCreateInfos(queueCreateInfo)
                 .ppEnabledExtensionNames(extensionNames);
 
