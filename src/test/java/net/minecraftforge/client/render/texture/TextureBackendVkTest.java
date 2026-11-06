@@ -1,0 +1,81 @@
+package net.minecraftforge.client.render.texture;
+
+import org.junit.jupiter.api.Test;
+
+import java.nio.IntBuffer;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/**
+ * The texture registry's behaviour, including the one idiom that is easy to break.
+ */
+class TextureBackendVkTest {
+
+    private static IntBuffer pixels(int count) {
+        IntBuffer buffer = IntBuffer.allocate(count);
+        for (int i = 0; i < count; i++) {
+            // 0xAARRGGBB, the layout vanilla hands over.
+            buffer.put(0xFF000000 | i);
+        }
+        buffer.rewind();
+        return buffer;
+    }
+
+    @Test
+    void idsStartAtOneAndAreNeverReused() {
+        TextureBackend backend = new TextureBackendVk();
+
+        int first = backend.create();
+        int second = backend.create();
+
+        assertEquals(1, first);
+        assertEquals(2, second, "a deleted handle must not be handed out again");
+    }
+
+    @Test
+    void aDeletedTextureCanStillBeUsed() {
+        // TextureUtil.allocateTextureImpl does deleteTexture(id); bindTexture(id); glTexParameteri(...);
+        // glTexImage2D(...). GL revives a deleted name on the next upload. A backend that dropped the handle would
+        // fail on the very next line, which is how this contract was discovered.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 2, 2, pixels(4));
+
+        backend.delete(id);
+        assertEquals(0, backend.pendingDeviceUploads(), "delete drops the data");
+
+        assertDoesNotThrow(() -> backend.parameter(id, 10241, 9987), "parameters on the same id must still work");
+        backend.upload(id, 0, 2, 2, pixels(4));
+        assertEquals(1, backend.pendingDeviceUploads(), "re-uploading revives it");
+    }
+
+    @Test
+    void allocationWithoutDataRecordsTheSize() {
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+
+        backend.upload(id, 0, 4, 4, null);
+
+        // subUpload needs the size to compute the row stride; without it the write has nowhere to land.
+        assertDoesNotThrow(() -> backend.subUpload(id, 0, 1, 1, 2, 2, pixels(4)),
+                "the allocation-without-data path is exactly what TextureUtil uses for mip levels");
+    }
+
+    @Test
+    void aSubUploadOutsideTheAllocationIsLoud() {
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 2, 2, null);
+
+        assertThrows(IllegalStateException.class, () -> backend.subUpload(id, 0, 1, 1, 2, 2, pixels(4)),
+                "a 2x2 write at 1,1 does not fit a 2x2 level");
+    }
+
+    @Test
+    void anUnknownIdIsLoud() {
+        TextureBackend backend = new TextureBackendVk();
+        assertThrows(IllegalStateException.class, () -> backend.parameter(99, 10241, 9987));
+    }
+}
