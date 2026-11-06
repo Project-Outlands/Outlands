@@ -1,6 +1,7 @@
 package net.minecraft.client.renderer.vertex;
 
 import net.minecraftforge.client.render.vertex.VertexBufferBackend;
+import net.minecraftforge.client.render.vertex.VertexBufferBackends;
 
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
@@ -111,12 +113,11 @@ class VertexBufferDelegationTest {
     }
 
     @Test
-    void theFormatIsTheOneItWasConstructedWith() {
-        VertexFormat format = DefaultVertexFormats.POSITION_TEX;
-        Recording backend = new Recording(format);
-
-        assertSame(format, backend.format());
-        assertSame(format, new VertexBuffer(format, backend) == null ? null : format,
-                "the constructor does not replace the format");
+    void aNullBackendMeansTheVanillaGlBodyRuns() {
+        // The constructor's two-argument form takes null to mean "no backend, use the GL body in place". Building
+        // that buffer here would call glGenBuffers and abort the process, so what is asserted is the decision
+        // itself: on the GL path the loader supplies no backend.
+        assertNull(VertexBufferBackends.forNonGl(DefaultVertexFormats.POSITION_TEX),
+                "the GL path has no loader-side implementation: the vanilla body is the implementation");
     }
 }

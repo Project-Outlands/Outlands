@@ -17,6 +17,11 @@ import java.nio.ByteBuffer;
  * later by an unrelated call. A backend that receives the bytes and the layout together can copy them into a
  * stream buffer and record a draw; there is no state to reproduce.</p>
  *
+ * <p><b>There is no GL implementation of this interface.</b> The GL path is {@code WorldVertexBufferUploader}'s own
+ * body - the element walk, the client-state calls, the draw - left in place and still reachable, exactly as it was
+ * before this seam existed. {@link VertexStreamBackends#forNonGl()} returns {@code null} for it. A {@code
+ * VertexStreamGl} in the loader would be a second copy of code that already exists in the tree.</p>
+ *
  * <p><b>{@link VertexLayout} rather than {@code VertexFormat}.</b> The layout is the translated form - normalisation
  * decided, padding included in the stride, offsets resolved - so a backend does not have to re-derive GL's
  * rules. See {@link VertexLayout}.</p>

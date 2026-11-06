@@ -2,21 +2,22 @@ package net.minecraftforge.client.render.vertex;
 
 import net.minecraftforge.client.render.RenderBackendSelection;
 
+import org.jspecify.annotations.Nullable;
+
 /**
- * Chooses the implementation for drawing from client memory.
+ * Supplies the backend for drawing from client memory, when the renderer is not OpenGL.
  *
- * <p>Resolved from {@link RenderBackendSelection}, which is fixed before the window exists, so every draw in a
- * process belongs to the same backend.</p>
+ * <p>See {@link VertexBufferBackends} for why {@code null} is the OpenGL answer: the walk over the vertex format,
+ * the client-state calls and the draw all stay in {@code WorldVertexBufferUploader}, in place and reachable.</p>
  */
 public final class VertexStreamBackends {
 
-    private static final VertexStreamBackend GL = new VertexStreamGl();
-    private static final VertexStreamBackend VK = new VertexStreamVk();
+    private static final VertexStreamVk VK = new VertexStreamVk();
 
     private VertexStreamBackends() {}
 
-    /** The backend for the active renderer. */
-    public static VertexStreamBackend get() {
-        return RenderBackendSelection.get().isOpenGl() ? GL : VK;
+    /** The backend for the active renderer, or {@code null} when the vanilla GL code path applies. */
+    public static @Nullable VertexStreamBackend forNonGl() {
+        return RenderBackendSelection.glPath() ? null : VK;
     }
 }

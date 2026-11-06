@@ -13,6 +13,11 @@ import net.minecraft.client.renderer.vertex.VertexFormat;
  * have to understand GL's target enums and usage hints first. The vocabulary of the contract decides whether the
  * implementation is a renderer or a GL emulator - see {@code docs/vulkan-backend-plan.md} §8.4.2.</p>
  *
+ * <p><b>There is no GL implementation of this interface, on purpose.</b> The GL path is {@code VertexBuffer}'s own
+ * body, left in place and still reachable; {@link VertexBufferBackends#forNonGl} returns {@code null} for it and the
+ * vanilla code runs. Putting a {@code VertexBufferGl} in the loader would mean two copies of the same logic, one of
+ * them dead, and the dead one would stop tracking upstream changes without anyone noticing.</p>
+ *
  * <p><b>{@link #bind()} and {@link #unbind()} are kept although a non-GL backend has nothing to bind.</b> They are
  * part of the class's existing public surface, so callers keep calling them; a backend for which binding is
  * meaningless implements them as no-ops and says so. Removing them from the surface would be a source change to

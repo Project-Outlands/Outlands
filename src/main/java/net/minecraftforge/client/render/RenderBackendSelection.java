@@ -175,6 +175,18 @@ public final class RenderBackendSelection {
      * The selected backend. Selects on first use if nobody called {@link #select()} yet, so call sites never
      * need a null check.
      */
+    /**
+     * Whether the vanilla GL code paths apply, i.e. the selected backend is an OpenGL one.
+     *
+     * <p>This is what the patches ask before taking a delegation branch. It is the {@link RenderBackend#isOpenGl()}
+     * contract read the other way round: {@code true} means "no GL context exists, so do not call GL and use the
+     * backend instead". The question is answered once, before the window exists, so a patch reading it never races
+     * the selection.</p>
+     */
+    public static boolean glPath() {
+        return get().isOpenGl();
+    }
+
     public static RenderBackend get() {
         RenderBackend backend = selected;
         return backend != null ? backend : select();

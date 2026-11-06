@@ -1,50 +1,37 @@
 --- before/net/minecraft/client/renderer/WorldVertexBufferUploader.java
 +++ after/net/minecraft/client/renderer/WorldVertexBufferUploader.java
-@@ -1,82 +1,35 @@
- package net.minecraft.client.renderer;
- 
--import java.nio.Buffer;
--import java.nio.ByteBuffer;
--import java.util.List;
- import net.minecraft.client.renderer.vertex.VertexFormat;
- import net.minecraft.client.renderer.vertex.VertexFormatElement;
--import net.minecraftforge.fml.relauncher.Side;
--import net.minecraftforge.fml.relauncher.SideOnly;
-+import java.nio.ByteBuffer;
-+import java.util.List;
- 
--@SideOnly(Side.CLIENT)
-+/**
-+ * Draws a {@code BufferBuilder}'s contents.
-+ *
-+ * <p>The walk over the vertex format is gone from here. What is left is the one thing this class knows that the
-+ * backend does not: that a finished {@code BufferBuilder} is bytes, a format, a primitive mode and a vertex count.
-+ * Everything else - setting client-memory pointers, enabling client states, issuing the draw, releasing the states -
-+ * is how GL happens to consume that, and it now lives in the GL implementation.</p>
-+ *
-+ * <p>The public surface is unchanged. See {@code net.minecraftforge.client.render.vertex.VertexStreamBackend} and
-+ * {@code docs/vulkan-backend-plan.md} 8.4.2.</p>
-+ */
- public class WorldVertexBufferUploader
+@@ -13,6 +13,27 @@
  {
--    public void draw(BufferBuilder bufferBuilderIn)
-+    public void draw(net.minecraft.client.renderer.BufferBuilder bufferBuilderIn)
+     public void draw(BufferBuilder bufferBuilderIn)
      {
++        // Forge: on a non-OpenGL renderer the client-memory walk below does not apply - there is no GL context to
++        // bind the pointers in. The bytes, the layout, the mode and the count are all a backend needs, so it gets
++        // those instead. Nothing below is removed: on the GL path this branch is not taken and the original body
++        // runs unchanged. See docs/vulkan-backend-plan.md 8.4.2.
++        net.minecraftforge.client.render.vertex.VertexStreamBackend stream =
++                net.minecraftforge.client.render.vertex.VertexStreamBackends.forNonGl();
++        if (stream != null)
++        {
++            if (bufferBuilderIn.getVertexCount() > 0)
++            {
++                java.nio.ByteBuffer data = bufferBuilderIn.getByteBuffer();
++                data.position(0);
++                stream.draw(data,
++                        net.minecraftforge.client.render.vertex.VertexLayout.of(bufferBuilderIn.getVertexFormat()),
++                        bufferBuilderIn.getDrawMode(),
++                        bufferBuilderIn.getVertexCount());
++            }
++            bufferBuilderIn.reset();
++            return;
++        }
++
          if (bufferBuilderIn.getVertexCount() > 0)
          {
              VertexFormat vertexformat = bufferBuilderIn.getVertexFormat();
--            int i = vertexformat.getSize();
-             ByteBuffer bytebuffer = bufferBuilderIn.getByteBuffer();
--            List<VertexFormatElement> list = vertexformat.getElements();
--
--            for (int j = 0; j < list.size(); j++)
--            {
--                VertexFormatElement vertexformatelement = list.get(j);
--                VertexFormatElement.EnumUsage vertexformatelement$enumusage = vertexformatelement.getUsage();
--                int k = vertexformatelement.getType().getGlConstant();
--                int l = vertexformatelement.getIndex();
--                ((Buffer)bytebuffer).position(vertexformat.getOffset(j));
--
+@@ -28,26 +49,8 @@
+                 int l = vertexformatelement.getIndex();
+                 ((Buffer)bytebuffer).position(vertexformat.getOffset(j));
+ 
 -                switch (vertexformatelement$enumusage)
 -                {
 -                    case POSITION:
@@ -65,17 +52,15 @@
 -                        GlStateManager.glNormalPointer(k, i, bytebuffer);
 -                        GlStateManager.glEnableClientState(32885);
 -                }
--            }
--
--            GlStateManager.glDrawArrays(bufferBuilderIn.getDrawMode(), 0, bufferBuilderIn.getVertexCount());
--            int i1 = 0;
--
--            for (int j1 = list.size(); i1 < j1; i1++)
--            {
--                VertexFormatElement vertexformatelement1 = list.get(i1);
--                VertexFormatElement.EnumUsage vertexformatelement$enumusage1 = vertexformatelement1.getUsage();
--                int k1 = vertexformatelement1.getIndex();
--
++                // moved to VertexFormatElement.preDraw
++                vertexformatelement.getUsage().preDraw(vertexformat, j, i, bytebuffer);
+             }
+ 
+             GlStateManager.glDrawArrays(bufferBuilderIn.getDrawMode(), 0, bufferBuilderIn.getVertexCount());
+@@ -59,23 +62,8 @@
+                 VertexFormatElement.EnumUsage vertexformatelement$enumusage1 = vertexformatelement1.getUsage();
+                 int k1 = vertexformatelement1.getIndex();
+ 
 -                switch (vertexformatelement$enumusage1)
 -                {
 -                    case POSITION:
@@ -93,13 +78,8 @@
 -                    case NORMAL:
 -                        GlStateManager.glDisableClientState(32885);
 -                }
--            }
-+            bytebuffer.position(0);
-+            net.minecraftforge.client.render.vertex.VertexStreamBackends.get().draw(
-+                    bytebuffer,
-+                    net.minecraftforge.client.render.vertex.VertexLayout.of(vertexformat),
-+                    bufferBuilderIn.getDrawMode(),
-+                    bufferBuilderIn.getVertexCount());
++                // moved to VertexFormatElement.postDraw
++                vertexformatelement1.getUsage().postDraw(vertexformat, i1, i, bytebuffer);
+             }
          }
  
-         bufferBuilderIn.reset();
