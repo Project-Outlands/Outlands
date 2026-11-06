@@ -12,10 +12,11 @@ layout(location = 2) in vec2 inLightmap;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    // The lightmap coordinate is UNORM, so 0..1 spans the 16x16 lightmap grid. Vanilla's block light is the
-    // fractional part's higher half; the block light occupies the high byte of the original short.
-    float blockLight = clamp(inLightmap.y, 0.0, 1.0);
-    float skyLight = clamp(inLightmap.x, 0.0, 1.0);
+    // The lightmap coordinate is UNORM, so 0..1 spans the range of the two unsigned shorts vanilla writes.
+    // Component order is block light then sky light: BufferBuilder.lightmap writes blockLight to the element's
+    // first short and skyLight to the second, which is the opposite of the argument order of that method.
+    float blockLight = clamp(inLightmap.x, 0.0, 1.0);
+    float skyLight = clamp(inLightmap.y, 0.0, 1.0);
     float brightness = mix(0.15, 1.0, max(blockLight, skyLight));
 
     // The atlas is not bound yet; the UV's fractional part gives a stable per-texel tint so the geometry reads as
