@@ -1345,6 +1345,13 @@ public class Display {
         if (!displayCreated) {
             return;
         }
+        // Without a GL context there is no swap interval to set: SDL_GL_SetSwapInterval fails outright, and the
+        // Vulkan backend expresses the same request as a present mode. A presentation property, so the backend
+        // answers it rather than the display.
+        if (!RenderBackendSelection.get().isOpenGl()) {
+            RenderBackendSelection.get().setSwapInterval(value);
+            return;
+        }
         MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_SetSwapInterval(value)));
     }
 

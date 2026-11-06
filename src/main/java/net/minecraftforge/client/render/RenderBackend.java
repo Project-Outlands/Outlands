@@ -92,6 +92,21 @@ public interface RenderBackend {
     }
 
     /**
+     * Requests a swap interval: {@code 1} for vsync, {@code 0} for uncapped.
+     *
+     * <p>A presentation property, not a rendering one. GL sets it with {@code SDL_GL_SetSwapInterval}, which fails
+     * outright without a context; a Vulkan backend expresses the same request as a present mode. Only consulted when
+     * {@link #isOpenGl()} is {@code false}.</p>
+     *
+     * <p>Throwing rather than ignoring by default: a backend that cannot change its present mode should say so at
+     * the one moment the game asks, not leave the user with a frame rate they did not choose.</p>
+     */
+    default void setSwapInterval(int interval) {
+        throw new UnsupportedOperationException(getClass().getName() + " cannot change its swap interval to "
+                + interval + ": it has no OpenGL context, and it did not say what it does instead");
+    }
+
+    /**
      * The largest 2D texture edge this backend can create, or {@code 0} when GL should be asked.
      *
      * <p>A device capability, not a rendering operation: the game asks once during startup to decide atlas sizes,

@@ -50,6 +50,20 @@ public interface TextureBackend {
     void parameter(int id, int pname, float value);
 
     /**
+     * Queries one property of a mip level.
+     *
+     * <p>Vanilla uses this for two different things and they must not be confused: reading the size of a bound
+     * texture ({@code GL_TEXTURE_2D}, what the cloud renderer does to size its quads) and the proxy-texture trick
+     * for discovering the maximum size ({@code GL_PROXY_TEXTURE_2D}, which allocates nothing and reports whether a
+     * hypothetical upload would have succeeded). The target is passed through so an implementation can tell them
+     * apart instead of guessing from the property name.</p>
+     *
+     * @param glTarget {@code 3553} for a real texture, {@code 32868} for the proxy target
+     * @throws UnsupportedOperationException for a target this backend does not model
+     */
+    int levelParameter(int id, int level, int glTarget, int glPname);
+
+    /**
      * How many textures hold data that has not been turned into a device image yet.
      *
      * <p>Diagnostics, and the reason the deferred part of this path is visible rather than assumed: a texture that

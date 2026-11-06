@@ -45,6 +45,8 @@ import java.nio.LongBuffer;
 import static org.lwjgl.vulkan.KHRSurface.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 import static org.lwjgl.vulkan.KHRSurface.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_FIFO_KHR;
+import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR;
+import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfacePresentModesKHR;
@@ -145,6 +147,8 @@ final class VulkanSwapchain {
 
     private long swapchain;
     private int imageFormat;
+    /** 1 means vsync, the GL default and what the game asks for initially. */
+    private int swapInterval = 1;
     private int depthFormat;
     private int extentWidth;
     private int extentHeight;
@@ -500,6 +504,22 @@ final class VulkanSwapchain {
         }
     }
 
+    /**
+     * Requests a swap interval, rebuilding so it takes effect.
+     *
+     * <p>Mapped to a present mode rather than stored: {@code 1} is FIFO, which is vsync; {@code 0} is mailbox when
+     * the surface offers it, because that is uncapped without tearing, and immediate otherwise. FIFO is the only
+     * mode every implementation guarantees, so wanting it off can end in it being on - that fallback is logged,
+     * since otherwise the setting silently does nothing.</p>
+     */
+    void setSwapInterval(int interval, long window) {
+        if (interval == swapInterval) {
+            return;
+        }
+        swapInterval = interval;
+        rebuild(window);
+    }
+
     /** (Re)creates the swapchain and everything sized by the window. {@code oldSwapchain} is 0 on the first call. */
     private void rebuild(long window) {
         vkDeviceWaitIdle(device);
@@ -684,13 +704,26 @@ final class VulkanSwapchain {
         IntBuffer modes = stack.mallocInt(count.get(0));
         VkCheck.check(vkGetPhysicalDeviceSurfacePresentModesKHR(context.physicalDevice(), context.surface(), count, modes),
                 "vkGetPhysicalDeviceSurfacePresentModesKHR");
-        // FIFO is the only mode guaranteed to exist, and it is the one that means vsync.
-        for (int i = 0; i < modes.capacity(); i++) {
-            if (modes.get(i) == VK_PRESENT_MODE_FIFO_KHR) {
-                return VK_PRESENT_MODE_FIFO_KHR;
+        // Interval > 0 means vsync, and FIFO is the only mode guaranteed to exist that means it.
+        if (swapInterval > 0) {
+            for (int i = 0; i < modes.capacity(); i++) {
+                if (modes.get(i) == VK_PRESENT_MODE_FIFO_KHR) {
+                    return VK_PRESENT_MODE_FIFO_KHR;
+                }
+            }
+            return modes.get(0);
+        }
+        // Interval 0 wants uncapped: mailbox first because it does not tear, immediate second.
+        for (int wanted : new int[] {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR}) {
+            for (int i = 0; i < modes.capacity(); i++) {
+                if (modes.get(i) == wanted) {
+                    return wanted;
+                }
             }
         }
-        return modes.get(0);
+        LOGGER.warn("vsync was turned off, but this surface offers neither mailbox nor immediate presentation; "
+                + "staying on FIFO, so the frame rate remains capped");
+        return VK_PRESENT_MODE_FIFO_KHR;
     }
 
     private int chooseDepthFormat(MemoryStack stack) {

@@ -27,6 +27,11 @@ final class VertexStreamVk implements VertexStreamBackend {
 
     @Override
     public void draw(ByteBuffer data, VertexLayout layout, int mode, int vertexCount) {
+        // Recording a display list does not draw: the bytes are kept so a later glCallList can submit them. That is
+        // what lets the sky and cloud lists be built during startup, when there is no frame to draw into.
+        if (net.minecraftforge.client.render.state.backend.DisplayLists.capture(layout, mode, vertexCount, data)) {
+            return;
+        }
         throw new UnsupportedOperationException(
                 "cannot draw from client memory on the Vulkan backend yet: there is no frame recording context, so"
                         + " there is no command buffer to record into and no pipeline for this vertex layout."

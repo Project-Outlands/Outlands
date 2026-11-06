@@ -74,6 +74,31 @@ class TextureBackendVkTest {
     }
 
     @Test
+    void aRealTextureReportsItsSize() {
+        // CloudRenderer binds the cloud texture and reads width and height to size its quads. Answering from the
+        // stored level is the whole point of keeping sizes separately from the pixels.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 64, 32, null);
+
+        assertEquals(64, backend.levelParameter(id, 0, 3553, 4096), "GL_TEXTURE_WIDTH");
+        assertEquals(32, backend.levelParameter(id, 0, 3553, 4097), "GL_TEXTURE_HEIGHT");
+    }
+
+    @Test
+    void theProxyTargetIsRejectedRatherThanGuessed() {
+        // The proxy target is the maximum-size probe, which is answered by the backend capability instead. A
+        // plausible number here would silently cap every atlas without saying so.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 64, 64, null);
+
+        assertThrows(UnsupportedOperationException.class, () -> backend.levelParameter(id, 0, 32868, 4096));
+        assertThrows(UnsupportedOperationException.class, () -> backend.levelParameter(id, 0, 3553, 4099),
+                "an unmodelled property is rejected, not defaulted");
+    }
+
+    @Test
     void anUnknownIdIsLoud() {
         TextureBackend backend = new TextureBackendVk();
         assertThrows(IllegalStateException.class, () -> backend.parameter(99, 10241, 9987));

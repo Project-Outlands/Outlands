@@ -139,6 +139,32 @@ final class TextureBackendVk implements TextureBackend {
         texture(id).floatParameters.put(pname, value);
     }
 
+    /**
+     * Answers width and height for a real texture.
+     *
+     * <p>This is the cloud renderer's question - it binds the cloud texture and reads its size to build quads - not
+     * the proxy-texture maximum-size trick. The proxy target is rejected rather than answered with a plausible
+     * number, because a wrong maximum silently caps every atlas the game builds.</p>
+     */
+    @Override
+    public int levelParameter(int id, int level, int glTarget, int glPname) {
+        if (glTarget != 3553) {
+            throw new UnsupportedOperationException("texture target " + glTarget + " is not modelled: this backend"
+                    + " answers real textures (3553) only. The proxy target is a maximum-size probe and belongs to"
+                    + " RenderBackend.maxTextureSize().");
+        }
+        Level stored = texture(id).levels.get(level);
+        if (stored == null) {
+            throw new IllegalStateException("texture " + id + " has no level " + level);
+        }
+        return switch (glPname) {
+            case 4096 -> stored.width;    // GL_TEXTURE_WIDTH
+            case 4097 -> stored.height;   // GL_TEXTURE_HEIGHT
+            default -> throw new UnsupportedOperationException("texture level property " + glPname
+                    + " is not modelled; this backend knows GL_TEXTURE_WIDTH (4096) and GL_TEXTURE_HEIGHT (4097)");
+        };
+    }
+
     @Override
     public int pendingDeviceUploads() {
         return (int) textures.values().stream().filter(Texture::hasData).count();

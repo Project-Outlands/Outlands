@@ -84,9 +84,19 @@ public final class GlAnswers {
         caps.OpenGL14 = true;
         // 1.5 - buffer objects. Answering false here selects display lists, which no backend implements.
         caps.OpenGL15 = true;
-        // 2.0 / 2.1 - GLSL 1.20, the level the shipped post-processing programs are written against.
-        caps.OpenGL20 = true;
-        caps.OpenGL21 = true;
+        // 2.0 / 2.1 and the shader extensions are NOT declared yet, and this is deliberate.
+        //
+        // §8.4 fixes the contract at GL 2.1 because vanilla's post-processing is GLSL 1.20. But a capability table
+        // has to describe what exists: claiming 2.1 made RenderGlobal build the entity-outline program during
+        // startup, which reached glCreateShader and took the process down (measured). Shader support needs a
+        // GLSL-to-SPIR-V compiler at runtime - §8.2 settled the distribution format, not the compilation - so it is
+        // a milestone of its own.
+        //
+        // Declaring it off means vanilla skips those paths rather than failing in them. Every use of
+        // ShaderLinkHelper in the game is behind an OpenGlHelper.shadersSupported check, so nothing else breaks.
+        // The cost is visible and stated at startup: no entity outline, no post-processing.
+        caps.OpenGL20 = false;
+        caps.OpenGL21 = false;
         // The one extension the contract names: vanilla's Framebuffer needs it below GL 3.0.
         caps.GL_ARB_framebuffer_object = true;
         caps.GL_EXT_blend_func_separate = true;
@@ -95,9 +105,11 @@ public final class GlAnswers {
         caps.GL_ARB_multitexture = true;
         caps.GL_ARB_texture_env_combine = true;
         caps.GL_ARB_vertex_buffer_object = true;
-        caps.GL_ARB_shader_objects = true;
-        caps.GL_ARB_vertex_shader = true;
-        caps.GL_ARB_fragment_shader = true;
+        // See the OpenGL20/21 comment above: shaders are not implemented yet, so the ARB fallback must not offer a
+        // second way in.
+        caps.GL_ARB_shader_objects = false;
+        caps.GL_ARB_vertex_shader = false;
+        caps.GL_ARB_fragment_shader = false;
         return caps;
     }
 }
