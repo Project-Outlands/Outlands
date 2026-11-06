@@ -34,7 +34,7 @@ final class VertexStreamVk implements VertexStreamBackend {
         }
         // A frame is collecting: hold the draw until the backend records it. This is the ordinary path for every
         // GUI, entity and particle draw in the game.
-        if (FrameDraws.record(layout, mode, vertexCount, data)) {
+        if (FrameDraws.record(layout, mode, vertexCount, data, DrawState.current())) {
             return;
         }
         throw new UnsupportedOperationException(

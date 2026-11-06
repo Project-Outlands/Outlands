@@ -108,7 +108,13 @@ public final class ImmediateMode {
         }
         ByteBuffer data = ByteBuffer.wrap(vertices, 0, submitted * STRIDE).order(ByteOrder.nativeOrder());
         // Straight into the frame's draw list: it is already in the canonical layout, so no conversion follows.
-        FrameDraws.record(VertexLayout.of(DefaultVertexFormats.BLOCK), submittedMode, submitted, data);
+        // A false return means no frame was collecting, and dropping the draw silently is exactly the failure mode
+        // this project keeps rejecting - it looks like missing text with no explanation.
+        if (!FrameDraws.record(VertexLayout.of(DefaultVertexFormats.BLOCK), submittedMode, submitted, data,
+                net.minecraftforge.client.render.vertex.DrawState.current())) {
+            throw new IllegalStateException("immediate-mode draw of " + submitted + " vertices arrived while no frame"
+                    + " was collecting draws; it would have been dropped");
+        }
         return submitted;
     }
 

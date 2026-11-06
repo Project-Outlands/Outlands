@@ -50,6 +50,8 @@ final class VulkanStream implements AutoCloseable {
     private final int colorFormat;
     private final int depthFormat;
     private final Map<VulkanPipeline.PipelineState, VulkanPipeline> pipelines = new HashMap<>();
+    private static final java.util.concurrent.atomic.AtomicBoolean DIAGNOSE =
+            new java.util.concurrent.atomic.AtomicBoolean();
     /**
      * One buffer per frame in flight.
      *
@@ -85,6 +87,16 @@ final class VulkanStream implements AutoCloseable {
      */
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot) {
         drawsThisFrame = draws.size();
+        if (DIAGNOSE.compareAndSet(false, true)) {
+            // Once, because this is a question about what the frame contains, not a per-frame measurement.
+            java.util.Map<String, Integer> histogram = new java.util.TreeMap<>();
+            for (FrameDraws.Draw draw : draws) {
+                String key = "stride " + draw.layout().stride() + " mode " + draw.mode();
+                histogram.merge(key, draw.vertexCount(), Integer::sum);
+            }
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Frame draws: {} calls, vertices per (stride, mode): {}", draws.size(), histogram);
+        }
         // This slot's fence has been waited on, so whatever it used last time is finished.
         if (pending[slot] != null) {
             pending[slot].close();
@@ -144,16 +156,17 @@ final class VulkanStream implements AutoCloseable {
             // as "no buffer bound" on every draw rather than as an obvious error.
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
 
-            Matrix4f mvp = new Matrix4f();
-            mvp.set(matrices().projection()).mul(matrices().modelView());
             java.nio.ByteBuffer constants = stack.malloc(16 * Float.BYTES);
-            mvp.get(constants);
 
             for (int i = 0; i < draws.size(); i++) {
                 FrameDraws.Draw draw = draws.get(i);
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
-                VulkanPipeline pipeline = pipelineFor(stateFor(shape));
+                // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
+                // here instead would apply one matrix to every draw - which drew the whole menu with the panorama's
+                // perspective matrix and left the GUI off-screen.
+                VulkanPipeline pipeline = pipelineFor(stateFor(shape, draw.state()));
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+                constants.asFloatBuffer().put(draw.state().mvp());
                 vkCmdPushConstants(commandBuffer, pipeline.layout(), org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT,
                         0, constants);
                 if (shape.needsIndexing()) {
@@ -168,15 +181,6 @@ final class VulkanStream implements AutoCloseable {
         }
     }
 
-    /** The frame state whose matrices and capabilities the next draw reads. */
-    private static net.minecraftforge.client.render.state.backend.FrameState matrices() {
-        var state = FrameStates.instance();
-        if (state == null) {
-            throw new IllegalStateException("the stream path needs frame state, and none is installed");
-        }
-        return state;
-    }
-
     /**
      * The pipeline state for a draw.
      *
@@ -185,11 +189,10 @@ final class VulkanStream implements AutoCloseable {
      * blend is on or off and the comparison is fixed, which is enough for the GUI path and is stated here rather
      * than assumed silently.</p>
      */
-    private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape) {
-        var state = matrices();
+    private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape,
+            net.minecraftforge.client.render.vertex.DrawState state) {
         return new VulkanPipeline.PipelineState(VulkanPipeline.VK10Topology.of(shape.topology()),
-                state.isEnabled(Capability.DEPTH_TEST), state.depthWriteEnabled(),
-                state.isEnabled(Capability.BLEND), state.isEnabled(Capability.CULL_FACE));
+                state.depthTest(), state.depthWrite(), state.blend(), state.cull());
     }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {

@@ -20,8 +20,13 @@ import java.util.List;
  */
 public final class FrameDraws {
 
-    /** One recorded draw. */
-    public record Draw(VertexLayout layout, int mode, int vertexCount, byte[] vertices) {}
+    /**
+     * One recorded draw: its vertices plus the state it was issued with.
+     *
+     * <p>The state is part of the draw, not of the frame. Reading it at replay time would apply one matrix and one
+     * set of enable bits to every draw in the frame, which is not what GL did.</p>
+     */
+    public record Draw(VertexLayout layout, int mode, int vertexCount, byte[] vertices, DrawState state) {}
 
     private static final List<Draw> DRAWS = new ArrayList<>();
     private static volatile boolean collecting;
@@ -56,7 +61,7 @@ public final class FrameDraws {
      *
      * @return {@code false} when nothing is collecting, which means the caller has no frame to record into
      */
-    public static boolean record(VertexLayout layout, int mode, int vertexCount, ByteBuffer data) {
+    public static boolean record(VertexLayout layout, int mode, int vertexCount, ByteBuffer data, DrawState state) {
         if (!collecting) {
             return false;
         }
@@ -70,7 +75,7 @@ public final class FrameDraws {
         view.position(0);
         view.get(copy, 0, bytes);
         synchronized (DRAWS) {
-            DRAWS.add(new Draw(layout, mode, vertexCount, copy));
+            DRAWS.add(new Draw(layout, mode, vertexCount, copy, state));
         }
         return true;
     }
