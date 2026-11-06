@@ -1,6 +1,55 @@
 --- before/net/minecraft/client/shader/Framebuffer.java
 +++ after/net/minecraft/client/shader/Framebuffer.java
-@@ -117,8 +117,17 @@
+@@ -22,6 +22,9 @@
+     public int depthBuffer;
+     public float[] framebufferColor;
+     public int framebufferFilter;
++    // Forge: non-null only when the renderer is not OpenGL. The bodies below are then bypassed and the backend
++    // owns the attachments. See docs/vulkan-backend-plan.md 8.4.2.
++    private final net.minecraftforge.client.render.target.FramebufferBackend backend;
+ 
+     public Framebuffer(int width, int height, boolean useDepthIn)
+     {
+@@ -34,11 +37,21 @@
+         this.framebufferColor[1] = 1.0F;
+         this.framebufferColor[2] = 1.0F;
+         this.framebufferColor[3] = 0.0F;
++        this.backend = net.minecraftforge.client.render.target.FramebufferBackends.forNonGl();
+         this.createBindFramebuffer(width, height);
+     }
+ 
+     public void createBindFramebuffer(int width, int height)
+     {
++        if (this.backend != null)
++        {
++            this.framebufferWidth = width;
++            this.framebufferHeight = height;
++            this.framebufferTextureWidth = width;
++            this.framebufferTextureHeight = height;
++            this.backend.create(width, height, this.useDepth);
++            return;
++        }
+         if (!OpenGlHelper.isFramebufferEnabled())
+         {
+             this.framebufferWidth = width;
+@@ -61,6 +74,7 @@
+ 
+     public void deleteFramebuffer()
+     {
++        if (this.backend != null) { this.backend.delete(); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             this.unbindFramebufferTexture();
+@@ -94,6 +108,8 @@
+         this.framebufferTextureWidth = width;
+         this.framebufferTextureHeight = height;
+ 
++        if (this.backend != null) { this.backend.create(width, height, this.useDepth); return; }
++
+         if (!OpenGlHelper.isFramebufferEnabled())
+         {
+             this.framebufferClear();
+@@ -117,8 +133,17 @@
              if (this.useDepth)
              {
                  OpenGlHelper.glBindRenderbuffer(OpenGlHelper.GL_RENDERBUFFER, this.depthBuffer);
@@ -18,7 +67,76 @@
              }
  
              this.framebufferClear();
-@@ -278,4 +287,36 @@
+@@ -128,6 +153,12 @@
+ 
+     public void setFramebufferFilter(int framebufferFilterIn)
+     {
++        if (this.backend != null)
++        {
++            this.framebufferFilter = framebufferFilterIn;
++            this.backend.setFilter(framebufferFilterIn);
++            return;
++        }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             this.framebufferFilter = framebufferFilterIn;
+@@ -142,6 +173,7 @@
+ 
+     public void checkFramebufferComplete()
+     {
++        if (this.backend != null) { this.backend.checkComplete(); return; }
+         int i = OpenGlHelper.glCheckFramebufferStatus(OpenGlHelper.GL_FRAMEBUFFER);
+ 
+         if (i != OpenGlHelper.GL_FRAMEBUFFER_COMPLETE)
+@@ -171,6 +203,7 @@
+ 
+     public void bindFramebufferTexture()
+     {
++        if (this.backend != null) { this.backend.bindTexture(); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             GlStateManager.bindTexture(this.framebufferTexture);
+@@ -179,6 +212,7 @@
+ 
+     public void unbindFramebufferTexture()
+     {
++        if (this.backend != null) { this.backend.unbindTexture(); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             GlStateManager.bindTexture(0);
+@@ -187,6 +221,7 @@
+ 
+     public void bindFramebuffer(boolean p_147610_1_)
+     {
++        if (this.backend != null) { this.backend.bind(p_147610_1_); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, this.framebufferObject);
+@@ -200,6 +235,7 @@
+ 
+     public void unbindFramebuffer()
+     {
++        if (this.backend != null) { this.backend.unbind(); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, 0);
+@@ -221,6 +257,7 @@
+ 
+     public void framebufferRenderExt(int width, int height, boolean p_178038_3_)
+     {
++        if (this.backend != null) { this.backend.render(width, height, p_178038_3_); return; }
+         if (OpenGlHelper.isFramebufferEnabled())
+         {
+             GlStateManager.colorMask(true, true, true, false);
+@@ -265,6 +302,7 @@
+ 
+     public void framebufferClear()
+     {
++        if (this.backend != null) { this.backend.clear(); return; }
+         this.bindFramebuffer(true);
+         GlStateManager.clearColor(this.framebufferColor[0], this.framebufferColor[1], this.framebufferColor[2], this.framebufferColor[3]);
+         int i = 16384;
+@@ -278,4 +316,37 @@
          GlStateManager.clear(i);
          this.unbindFramebuffer();
      }
@@ -39,6 +157,7 @@
 +     */
 +    public boolean enableStencil()
 +    {
++        if (this.backend != null) { this.backend.setStencil(true); stencilEnabled = true; this.createBindFramebuffer(framebufferWidth, framebufferHeight); return true; }
 +        if (!OpenGlHelper.isFramebufferEnabled()) return false;
 +        stencilEnabled = true;
 +        this.createBindFramebuffer(framebufferWidth, framebufferHeight);
