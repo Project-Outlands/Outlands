@@ -38,7 +38,19 @@
      public static void initializeTextures()
      {
          ContextCapabilities contextcapabilities = GLContext.getCapabilities();
-@@ -296,8 +300,8 @@
+@@ -258,7 +262,10 @@
+         }
+ 
+         shadersSupported = framebufferSupported && shadersAvailable;
+-        String s = GL11.glGetString(GL11.GL_VENDOR).toLowerCase(Locale.ROOT);
++        // Through GlStateManager, not GL11: this was the last direct GL string query in the game, and on a
++        // non-GL backend it is the call that crashes the process during startup.
++        String vendor = GlStateManager.glGetString(GL11.GL_VENDOR);
++        String s = (vendor == null ? "" : vendor).toLowerCase(Locale.ROOT);
+         nvidia = s.contains("nvidia");
+         arbVbo = !contextcapabilities.OpenGL15 && contextcapabilities.GL_ARB_vertex_buffer_object;
+         vboSupported = contextcapabilities.OpenGL15 || arbVbo;
+@@ -296,8 +303,8 @@
  
          try
          {
@@ -49,7 +61,7 @@
          }
          catch (Throwable throwable)
          {
-@@ -350,14 +354,7 @@
+@@ -350,14 +357,7 @@
  
      public static void glShaderSource(int shaderIn, ByteBuffer string)
      {
@@ -65,7 +77,7 @@
      }
  
      public static void glCompileShader(int shaderIn)
-@@ -437,11 +434,11 @@
+@@ -437,11 +437,11 @@
      {
          if (arbShaders)
          {
@@ -79,7 +91,7 @@
          }
      }
  
-@@ -461,11 +458,11 @@
+@@ -461,11 +461,11 @@
      {
          if (arbShaders)
          {
@@ -93,7 +105,7 @@
          }
      }
  
-@@ -473,11 +470,11 @@
+@@ -473,11 +473,11 @@
      {
          if (arbShaders)
          {
@@ -107,7 +119,7 @@
          }
      }
  
-@@ -485,11 +482,11 @@
+@@ -485,11 +485,11 @@
      {
          if (arbShaders)
          {
@@ -121,7 +133,7 @@
          }
      }
  
-@@ -497,11 +494,11 @@
+@@ -497,11 +497,11 @@
      {
          if (arbShaders)
          {
@@ -135,7 +147,7 @@
          }
      }
  
-@@ -509,11 +506,11 @@
+@@ -509,11 +509,11 @@
      {
          if (arbShaders)
          {
@@ -149,7 +161,7 @@
          }
      }
  
-@@ -521,11 +518,11 @@
+@@ -521,11 +521,11 @@
      {
          if (arbShaders)
          {
@@ -163,7 +175,7 @@
          }
      }
  
-@@ -533,11 +530,11 @@
+@@ -533,11 +533,11 @@
      {
          if (arbShaders)
          {
@@ -177,7 +189,7 @@
          }
      }
  
-@@ -545,11 +542,11 @@
+@@ -545,11 +545,11 @@
      {
          if (arbShaders)
          {
@@ -191,7 +203,7 @@
          }
      }
  
-@@ -557,11 +554,11 @@
+@@ -557,11 +557,11 @@
      {
          if (arbShaders)
          {
@@ -205,7 +217,7 @@
          }
      }
  
-@@ -569,11 +566,11 @@
+@@ -569,11 +569,11 @@
      {
          if (arbShaders)
          {
@@ -219,7 +231,7 @@
          }
      }
  
-@@ -584,43 +581,22 @@
+@@ -584,43 +584,22 @@
  
      public static int glGenBuffers()
      {
@@ -267,7 +279,7 @@
      }
  
      public static boolean useVbo()
-@@ -854,6 +830,12 @@
+@@ -854,6 +833,12 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -280,7 +292,7 @@
      }
  
      public static void glBlendFunc(int sFactorRGB, int dFactorRGB, int sfactorAlpha, int dfactorAlpha)
-@@ -916,59 +898,28 @@
+@@ -916,59 +901,28 @@
  
      public static void openFile(File fileIn)
      {

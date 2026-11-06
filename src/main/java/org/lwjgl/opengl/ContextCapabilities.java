@@ -4,9 +4,30 @@ import java.lang.reflect.Field;
 
 public class ContextCapabilities {
 
-    org.lwjgl.opengl.GLCapabilities cap = org.lwjgl.opengl.GL.getCapabilities();
+    org.lwjgl.opengl.GLCapabilities cap;
 
     public ContextCapabilities() {
+        this(org.lwjgl.opengl.GL.getCapabilities());
+    }
+
+    /**
+     * A table with every flag false that never consults a context.
+     *
+     * <p>Needed because {@code GL.getCapabilities()} throws when the current thread has no {@code GLCapabilities}:
+     * a non-GL backend has no context to describe, but still has a feature level to declare. The declared flags
+     * are written onto the returned table directly.</p>
+     */
+    public static ContextCapabilities blank() {
+        return new ContextCapabilities(null);
+    }
+
+    private ContextCapabilities(org.lwjgl.opengl.@org.jspecify.annotations.Nullable GLCapabilities cap) {
+
+        this.cap = cap;
+
+        if (cap == null) {
+            return;
+        }
 
         Field[] fields = org.lwjgl.opengl.GLCapabilities.class.getFields();
 

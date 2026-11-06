@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render;
 
 import org.jspecify.annotations.Nullable;
+import org.lwjgl.opengl.ContextCapabilities;
 
 /**
  * A render backend: something that can own the frame.
@@ -71,6 +72,32 @@ public interface RenderBackend {
      * common, and pretending they do would produce an abstraction that fits none of them.</p>
      */
     default @Nullable Object nativeContext() {
+        return null;
+    }
+
+    /**
+     * The GL feature level this backend implements, for the game's capability branches.
+     *
+     * <p>Only consulted when {@link #isOpenGl()} is {@code false}, where there is no context to ask. It is not a
+     * claim that a GL context exists: vanilla branches on these flags ({@code useVbo()}, {@code shadersSupported},
+     * {@code framebufferSupported}), and those branches have to agree with what the backend actually implements,
+     * or vanilla takes a path nobody built.</p>
+     *
+     * <p>Returning {@code null} means "use the loader's default contract", which is the one the shim promises:
+     * GL 2.1 plus {@code ARB_framebuffer_object}. A backend that implements exactly that should return
+     * {@code null} rather than restating it.</p>
+     */
+    default @Nullable ContextCapabilities glCapabilities() {
+        return null;
+    }
+
+    /**
+     * An identification string ({@code GL_VENDOR}, {@code GL_RENDERER}, {@code GL_VERSION}) for this backend.
+     *
+     * <p>Only consulted when {@link #isOpenGl()} is {@code false}. Returning {@code null} defers to the loader's
+     * generic answer, which is sufficient for everything the game does with these strings - it prints them.</p>
+     */
+    default @Nullable String glString(int name) {
         return null;
     }
 

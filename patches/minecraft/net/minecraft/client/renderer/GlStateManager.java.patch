@@ -60,7 +60,18 @@
      }
  
      public static void rotate(Quaternion quaternionIn)
-@@ -854,7 +854,7 @@
+@@ -849,12 +849,18 @@
+ 
+     public static String glGetString(int name)
+     {
++        // A non-GL backend has no context to ask, and LWJGL's native glGetString dereferences a null function
++        // pointer without one (it crashes the process rather than throwing). The backend still has an answer.
++        if (!net.minecraftforge.client.render.RenderBackendSelection.get().isOpenGl())
++        {
++            return net.minecraftforge.client.render.GlAnswers.glString(name);
++        }
+         return GL11.glGetString(name);
+     }
  
      public static void glGetInteger(int parameterName, IntBuffer parameters)
      {
