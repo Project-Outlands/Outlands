@@ -607,6 +607,15 @@ public class SplashProgress
     public static int getMaxTextureSize()
     {
         if (max_texture_size != -1) return max_texture_size;
+        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+        {
+            // The largest texture is a device capability. GL discovers it by uploading to a proxy target and reading
+            // the resulting width, which needs a context; the backend knows the number directly.
+            max_texture_size = net.minecraftforge.client.render.RenderBackendSelection.get().maxTextureSize();
+            FMLLog.log.info("Maximum texture size reported by the {} backend: {}",
+                    net.minecraftforge.client.render.RenderBackendSelection.get().id(), max_texture_size);
+            return max_texture_size;
+        }
         for (int i = 0x4000; i > 0; i >>= 1)
         {
             GlStateManager.glTexImage2D(GL_PROXY_TEXTURE_2D, 0, GL_RGBA, i, i, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);

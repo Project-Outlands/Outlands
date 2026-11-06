@@ -1,6 +1,31 @@
 --- before/net/minecraft/client/renderer/GlStateManager.java
 +++ after/net/minecraft/client/renderer/GlStateManager.java
-@@ -111,12 +111,12 @@
+@@ -41,11 +41,15 @@
+ 
+     public static void pushAttrib()
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.pushAttributes(); return; }
+         GL11.glPushAttrib(8256);
+     }
+ 
+     public static void popAttrib()
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.popAttributes(); return; }
+         GL11.glPopAttrib();
+     }
+ 
+@@ -65,6 +69,8 @@
+         {
+             alphaState.func = func;
+             alphaState.ref = ref;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.alphaFunc(func, ref); return; }
+             GL11.glAlphaFunc(func, ref);
+         }
+     }
+@@ -111,12 +117,12 @@
  
      public static void glLight(int light, int pname, FloatBuffer params)
      {
@@ -15,7 +40,42 @@
      }
  
      public static void glNormal3f(float nx, float ny, float nz)
-@@ -287,7 +287,7 @@
+@@ -139,6 +145,8 @@
+         if (depthFunc != depthState.depthFunc)
+         {
+             depthState.depthFunc = depthFunc;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.depthFunc(depthFunc); return; }
+             GL11.glDepthFunc(depthFunc);
+         }
+     }
+@@ -173,6 +181,8 @@
+         {
+             blendState.srcFactor = srcFactor;
+             blendState.dstFactor = dstFactor;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.blendFunc(srcFactor, dstFactor); return; }
+             GL11.glBlendFunc(srcFactor, dstFactor);
+         }
+     }
+@@ -198,12 +208,16 @@
+             blendState.dstFactor = dstFactor;
+             blendState.srcFactorAlpha = srcFactorAlpha;
+             blendState.dstFactorAlpha = dstFactorAlpha;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.blendFuncSeparate(srcFactor, dstFactor, srcFactorAlpha, dstFactorAlpha); return; }
+             OpenGlHelper.glBlendFunc(srcFactor, dstFactor, srcFactorAlpha, dstFactorAlpha);
+         }
+     }
+ 
+     public static void glBlendEquation(int blendEquation)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { state2.blendEquation(blendEquation); return; }
+         GL14.glBlendEquation(blendEquation);
+     }
+ 
+@@ -287,7 +301,7 @@
  
      public static void glFog(int pname, FloatBuffer param)
      {
@@ -24,7 +84,34 @@
      }
  
      public static void glFogi(int pname, int param)
-@@ -391,7 +391,7 @@
+@@ -321,6 +335,8 @@
+ 
+     public static void glPolygonMode(int face, int mode)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.polygonMode(face, mode); return; }
+         GL11.glPolygonMode(face, mode);
+     }
+ 
+@@ -340,6 +356,8 @@
+         {
+             polygonOffsetState.factor = factor;
+             polygonOffsetState.units = units;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.polygonOffset(factor, units); return; }
+             GL11.glPolygonOffset(factor, units);
+         }
+     }
+@@ -364,6 +382,8 @@
+         if (opcode != colorLogicState.opcode)
+         {
+             colorLogicState.opcode = opcode;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.logicOp(opcode); return; }
+             GL11.glLogicOp(opcode);
+         }
+     }
+@@ -391,7 +411,7 @@
  
      public static void texGen(GlStateManager.TexGen texGen, int pname, FloatBuffer params)
      {
@@ -33,7 +120,7 @@
      }
  
      private static GlStateManager.TexGenCoord texGenCoord(GlStateManager.TexGen texGen)
-@@ -416,6 +416,7 @@
+@@ -416,6 +436,7 @@
          if (activeTextureUnit != texture - OpenGlHelper.defaultTexUnit)
          {
              activeTextureUnit = texture - OpenGlHelper.defaultTexUnit;
@@ -41,7 +128,7 @@
              OpenGlHelper.setActiveTexture(texture);
          }
      }
-@@ -432,7 +433,7 @@
+@@ -432,7 +453,7 @@
  
      public static void glTexEnv(int target, int parameterName, FloatBuffer parameters)
      {
@@ -50,7 +137,7 @@
      }
  
      public static void glTexEnvi(int target, int parameterName, int parameter)
-@@ -447,11 +448,15 @@
+@@ -447,11 +468,15 @@
  
      public static void glTexParameterf(int target, int parameterName, float parameter)
      {
@@ -66,7 +153,7 @@
          GL11.glTexParameteri(target, parameterName, parameter);
      }
  
-@@ -462,12 +467,15 @@
+@@ -462,12 +487,15 @@
  
      public static int generateTexture()
      {
@@ -83,7 +170,7 @@
  
          for (GlStateManager.TextureState glstatemanager$texturestate : textureState)
          {
-@@ -483,6 +491,8 @@
+@@ -483,6 +511,8 @@
          if (texture != textureState[activeTextureUnit].textureName)
          {
              textureState[activeTextureUnit].textureName = texture;
@@ -92,7 +179,7 @@
              GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
          }
      }
-@@ -499,6 +509,8 @@
+@@ -499,6 +529,8 @@
              @Nullable IntBuffer pixels
          )
      {
@@ -101,7 +188,7 @@
          GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
      }
  
-@@ -514,6 +526,8 @@
+@@ -514,6 +546,8 @@
              IntBuffer pixels
          )
      {
@@ -110,7 +197,86 @@
          GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
      }
  
-@@ -629,7 +643,7 @@
+@@ -544,6 +578,8 @@
+         if (mode != activeShadeModel)
+         {
+             activeShadeModel = mode;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.shadeModel(mode); return; }
+             GL11.glShadeModel(mode);
+         }
+     }
+@@ -560,6 +596,8 @@
+ 
+     public static void viewport(int x, int y, int width, int height)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.viewport(x, y, width, height); return; }
+         GL11.glViewport(x, y, width, height);
+     }
+ 
+@@ -574,6 +612,8 @@
+             colorMaskState.green = green;
+             colorMaskState.blue = blue;
+             colorMaskState.alpha = alpha;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.colorMask(red, green, blue, alpha); return; }
+             GL11.glColorMask(red, green, blue, alpha);
+         }
+     }
+@@ -583,6 +623,8 @@
+         if (depth != clearState.depth)
+         {
+             clearState.depth = depth;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.clearDepth(depth); return; }
+             GL11.glClearDepth(depth);
+         }
+     }
+@@ -598,73 +640,99 @@
+             clearState.color.green = green;
+             clearState.color.blue = blue;
+             clearState.color.alpha = alpha;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.clearColor(red, green, blue, alpha); return; }
+             GL11.glClearColor(red, green, blue, alpha);
+         }
+     }
+ 
+     public static void clear(int mask)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.clear(mask); return; }
+         GL11.glClear(mask);
+     }
+ 
+     public static void matrixMode(int mode)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.matrixMode(mode); return; }
+         GL11.glMatrixMode(mode);
+     }
+ 
+     public static void loadIdentity()
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.loadIdentity(); return; }
+         GL11.glLoadIdentity();
+     }
+ 
+     public static void pushMatrix()
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.pushMatrix(); return; }
+         GL11.glPushMatrix();
+     }
+ 
+     public static void popMatrix()
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.popMatrix(); return; }
+         GL11.glPopMatrix();
+     }
  
      public static void getFloat(int pname, FloatBuffer params)
      {
@@ -119,16 +285,66 @@
      }
  
      public static void ortho(double left, double right, double bottom, double top, double zNear, double zFar)
-@@ -664,7 +678,7 @@
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.ortho(left, right, bottom, top, zNear, zFar); return; }
+         GL11.glOrtho(left, right, bottom, top, zNear, zFar);
+     }
+ 
+     public static void rotate(float angle, float x, float y, float z)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.rotate(angle, x, y, z); return; }
+         GL11.glRotatef(angle, x, y, z);
+     }
+ 
+     public static void scale(float x, float y, float z)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.scale(x, y, z); return; }
+         GL11.glScalef(x, y, z);
+     }
+ 
+     public static void scale(double x, double y, double z)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.scale(x, y, z); return; }
+         GL11.glScaled(x, y, z);
+     }
+ 
+     public static void translate(float x, float y, float z)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.translate(x, y, z); return; }
+         GL11.glTranslatef(x, y, z);
+     }
+ 
+     public static void translate(double x, double y, double z)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.translate(x, y, z); return; }
+         GL11.glTranslated(x, y, z);
+     }
  
      public static void multMatrix(FloatBuffer matrix)
      {
 -        GL11.glMultMatrix(matrix);
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.multiply(matrix); return; }
 +        GL11.glMultMatrixf(matrix);
      }
  
      public static void rotate(Quaternion quaternionIn)
-@@ -844,17 +858,26 @@
+@@ -804,6 +872,8 @@
+ 
+     public static void glLineWidth(float width)
+     {
++        net.minecraftforge.client.render.state.backend.FrameState state = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state != null) { state.lineWidth(width); return; }
+         GL11.glLineWidth(width);
+     }
+ 
+@@ -844,17 +914,26 @@
  
      public static int glGetError()
      {
@@ -156,3 +372,16 @@
      }
  
      public static int glGetInteger(int parameterName)
+@@ -956,6 +1035,12 @@
+                 {
+                     this.currentState = state;
+ 
++                    net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++                    if (state2 != null)
++                    {
++                        state2.capability(net.minecraftforge.client.render.state.backend.Capability.ofGlEnum(this.capability), state);
++                        return;
++                    }
+                     if (state)
+                     {
+                         GL11.glEnable(this.capability);

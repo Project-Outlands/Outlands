@@ -92,6 +92,17 @@ public interface RenderBackend {
     }
 
     /**
+     * The largest 2D texture edge this backend can create, or {@code 0} when GL should be asked.
+     *
+     * <p>A device capability, not a rendering operation: the game asks once during startup to decide atlas sizes,
+     * and GL answers it by uploading to a proxy texture target and reading the resulting width - a trick that needs
+     * a context. Only consulted when {@link #isOpenGl()} is {@code false}.</p>
+     */
+    default int maxTextureSize() {
+        return 0;
+    }
+
+    /**
      * An identification string ({@code GL_VENDOR}, {@code GL_RENDERER}, {@code GL_VERSION}) for this backend.
      *
      * <p>Only consulted when {@link #isOpenGl()} is {@code false}. Returning {@code null} defers to the loader's

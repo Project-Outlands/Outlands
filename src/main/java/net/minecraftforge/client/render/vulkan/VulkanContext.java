@@ -121,6 +121,20 @@ final class VulkanContext {
         return graphicsFamily;
     }
 
+    /**
+     * The largest 2D texture edge this device can create.
+     *
+     * <p>Read from the device properties rather than cached at selection time: it is asked at most once, and
+     * keeping it next to the query makes it obvious where the number comes from.</p>
+     */
+    int maxTextureSize() {
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            vkGetPhysicalDeviceProperties(physicalDevice, properties);
+            return properties.limits().maxImageDimension2D();
+        }
+    }
+
     String deviceName() {
         return deviceName;
     }

@@ -158,6 +158,13 @@ public final class VulkanBackend implements RenderBackend {
     }
 
     @Override
+    public int maxTextureSize() {
+        // Zero when setup failed: the caller then falls through to the GL query, which will not run either, but
+        // reporting a made-up number would be worse than reporting none.
+        return context != null ? context.maxTextureSize() : 0;
+    }
+
+    @Override
     public Object nativeContext() {
         return context;
     }
