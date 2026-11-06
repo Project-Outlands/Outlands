@@ -147,6 +147,18 @@ public class SplashProgress
 
     public static void start()
     {
+        // The loading screen renders on a second thread through a shared GL context, which is the one thing a
+        // non-OpenGL backend cannot provide. There is nothing to fall back to either: the vanilla screen draws
+        // through the same missing context. So it is skipped, and said out loud rather than silently - the window
+        // stays black until the backend can draw, and that is the honest state at this stage.
+        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+        {
+            enabled = false;
+            FMLLog.log.warn("Loading screen skipped: the {} render backend has no OpenGL context to draw it with.",
+                    net.minecraftforge.client.render.RenderBackendSelection.get().id());
+            return;
+        }
+
         File configFile = new File(Minecraft.getMinecraft().gameDir, "config/splash.properties");
 
         File parent = configFile.getParentFile();
@@ -207,6 +219,16 @@ public class SplashProgress
             @Override
             public String call()
             {
+                // A crash report is exactly the wrong place to call GL: without a context the native call is a
+                // SIGSEGV, which replaces a readable exception with a core dump. The backend answers instead.
+                if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+                {
+                    return "' Vendor: '"
+                            + net.minecraftforge.client.render.GlAnswers.glString(GL_VENDOR)
+                            + "' Version: '" + net.minecraftforge.client.render.GlAnswers.glString(GL_VERSION)
+                            + "' Renderer: '" + net.minecraftforge.client.render.GlAnswers.glString(GL_RENDERER)
+                            + "' (reported by the render backend, no GL context)";
+                }
                 if (Minecraft.getMinecraft().isCallingFromMinecraftThread())
                 {
                     return "' Vendor: '" + glGetString(GL_VENDOR) +
@@ -918,6 +940,12 @@ public class SplashProgress
 
     public static void drawVanillaScreen(TextureManager renderEngine) throws LWJGLException
     {
+        // Both branches draw through GL - this one through the backend's splash thread, the fallback through the
+        // vanilla screen - so on a non-OpenGL backend neither can run.
+        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+        {
+            return;
+        }
         if(!enabled)
         {
             Minecraft.getMinecraft().drawSplashScreen(renderEngine);

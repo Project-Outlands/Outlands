@@ -1371,17 +1371,28 @@ public class Display {
     }
 
     public static String getAdapter() {
-        if (isCreated()) {
-            return GL11.glGetString(GL11.GL_VENDOR);
-        }
-        return "Unknown";
+        return glStringOrUnknown(GL11.GL_VENDOR);
     }
 
     public static String getVersion() {
-        if (isCreated()) {
-            return GL11.glGetString(GL11.GL_VERSION);
+        return glStringOrUnknown(GL11.GL_VERSION);
+    }
+
+    /**
+     * An identification string, or {@code "Unknown"} when there is nothing to ask.
+     *
+     * <p>{@link #isCreated()} is true for a Vulkan window too, and {@code glGetString} without a context is a
+     * SIGSEGV rather than an exception, so both facts have to be checked before the GL call.</p>
+     */
+    private static String glStringOrUnknown(int name) {
+        if (!isCreated()) {
+            return "Unknown";
         }
-        return "Unknown";
+        if (RenderBackendSelection.get().isOpenGl()) {
+            return GL11.glGetString(name);
+        }
+        String answer = net.minecraftforge.client.render.GlAnswers.glString(name);
+        return answer == null ? "Unknown" : answer;
     }
 
     /**
