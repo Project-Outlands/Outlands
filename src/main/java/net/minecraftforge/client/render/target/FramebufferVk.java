@@ -75,9 +75,19 @@ final class FramebufferVk implements FramebufferBackend {
         recording.requestClear(0x4000 | (useDepth ? 0x100 : 0));
     }
 
+    /**
+     * Draws this target's colour attachment over the current one.
+     *
+     * <p><b>A no-op by construction, not a missing feature.</b> This backend has one colour target: the window's
+     * image, which is also the game's main framebuffer. Drawing that image onto itself is the identity, so the
+     * offscreen indirection GL needs - render to a texture, then blit the texture to the screen - does not exist
+     * here to be replicated. Any other target never got this far: binding one is rejected.</p>
+     */
     @Override
     public void render(int width, int height, boolean disableBlend) {
-        throw needsFrame("render " + width + "x" + height);
+        if (FrameRecordings.current() == null) {
+            throw needsFrame("render " + width + "x" + height);
+        }
     }
 
     @Override

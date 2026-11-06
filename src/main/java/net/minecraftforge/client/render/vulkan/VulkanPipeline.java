@@ -72,6 +72,53 @@ final class VulkanPipeline implements AutoCloseable {
     /** Vanilla's {@code DefaultVertexFormats.BLOCK}: 28 bytes, four attributes, no normal. */
     static final int VERTEX_STRIDE = TerrainVertexFormat.STRIDE;
 
+    /**
+     * The pipeline state that is not dynamic.
+     *
+     * <p>Everything the stream path can vary per draw and that Vulkan bakes in. The vertex layout is absent on
+     * purpose: every draw is converted to the canonical layout first, so the input description is a constant and
+     * this key stays small.</p>
+     *
+     * @param topology   the Vulkan primitive topology, already converted from the caller's GL mode
+     * @param depthTest  whether fragments are depth-tested
+     * @param depthWrite whether depth is written
+     * @param blend      whether blending is enabled
+     * @param cull       whether back faces are culled
+     */
+    record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, boolean blend,
+                         boolean cull) {
+        /** The state the terrain phase has always used. */
+        static PipelineState terrain() {
+            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true);
+        }
+    }
+
+    /** The subset of {@code VkPrimitiveTopology} the stream path produces, named so a key can be read. */
+    enum VK10Topology {
+        POINT_LIST(org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_POINT_LIST),
+        LINE_LIST(org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_LINE_LIST),
+        LINE_STRIP(org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_LINE_STRIP),
+        TRIANGLE_LIST(org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
+        TRIANGLE_STRIP(org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
+
+        final int vk;
+
+        VK10Topology(int vk) {
+            this.vk = vk;
+        }
+
+        /** Maps a backend-neutral topology. */
+        static VK10Topology of(net.minecraftforge.client.render.vertex.PrimitiveShape.Topology topology) {
+            return switch (topology) {
+                case POINT_LIST -> POINT_LIST;
+                case LINE_LIST -> LINE_LIST;
+                case LINE_STRIP -> LINE_STRIP;
+                case TRIANGLE_LIST -> TRIANGLE_LIST;
+                case TRIANGLE_STRIP -> TRIANGLE_STRIP;
+            };
+        }
+    }
+
     private final VkDevice device;
     private final long layout;
     private final long pipeline;
@@ -98,6 +145,12 @@ final class VulkanPipeline implements AutoCloseable {
      */
     static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
                                  int depthFormat) {
+        return create(device, vertex, fragment, colorFormat, depthFormat, PipelineState.terrain());
+    }
+
+    /** Builds a pipeline for a state, with the canonical vertex layout. */
+    static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                 int depthFormat, PipelineState state) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
             pushConstants.get(0)
@@ -114,7 +167,7 @@ final class VulkanPipeline implements AutoCloseable {
 
             long pipeline = 0L;
             try {
-                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, stack);
+                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, stack);
                 return new VulkanPipeline(device, layout, pipeline);
             } catch (RuntimeException e) {
                 if (pipeline != 0L) {
@@ -127,7 +180,7 @@ final class VulkanPipeline implements AutoCloseable {
     }
 
     private static long createPipeline(VkDevice device, long layout, VulkanShader vertex, VulkanShader fragment,
-                                       int colorFormat, int depthFormat, MemoryStack stack) {
+                                       int colorFormat, int depthFormat, PipelineState state, MemoryStack stack) {
         VkPipelineShaderStageCreateInfo.Buffer stages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
         stages.get(0)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
@@ -162,7 +215,7 @@ final class VulkanPipeline implements AutoCloseable {
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly = VkPipelineInputAssemblyStateCreateInfo.calloc(stack)
                 .sType$Default()
-                .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+                .topology(state.topology().vk);
 
         VkPipelineViewportStateCreateInfo viewportState = VkPipelineViewportStateCreateInfo.calloc(stack)
                 .sType$Default()
@@ -172,7 +225,7 @@ final class VulkanPipeline implements AutoCloseable {
         VkPipelineRasterizationStateCreateInfo rasterization = VkPipelineRasterizationStateCreateInfo.calloc(stack)
                 .sType$Default()
                 .polygonMode(org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL)
-                .cullMode(VK_CULL_MODE_BACK_BIT)
+                .cullMode(state.cull() ? VK_CULL_MODE_BACK_BIT : org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE)
                 .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
                 .lineWidth(1.0f);
 
@@ -182,14 +235,14 @@ final class VulkanPipeline implements AutoCloseable {
 
         VkPipelineDepthStencilStateCreateInfo depthStencil = VkPipelineDepthStencilStateCreateInfo.calloc(stack)
                 .sType$Default()
-                .depthTestEnable(true)
-                .depthWriteEnable(true)
+                .depthTestEnable(state.depthTest())
+                .depthWriteEnable(state.depthWrite())
                 .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
 
         VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
                 VkPipelineColorBlendAttachmentState.calloc(1, stack);
         blendAttachment.get(0)
-                .blendEnable(false)
+                .blendEnable(state.blend())
                 .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
                 .dstColorBlendFactor(VK_BLEND_FACTOR_ONE)
                 .colorBlendOp(VK_BLEND_OP_ADD)

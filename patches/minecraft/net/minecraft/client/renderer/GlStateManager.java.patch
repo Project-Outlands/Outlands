@@ -25,7 +25,7 @@
              GL11.glAlphaFunc(func, ref);
          }
      }
-@@ -105,22 +111,30 @@
+@@ -105,22 +111,32 @@
          {
              colorMaterialState.face = face;
              colorMaterialState.mode = mode;
@@ -53,12 +53,14 @@
  
      public static void glNormal3f(float nx, float ny, float nz)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode normals (glNormal3f)", "an immediate-mode vertex accumulator"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        // Accepted and dropped: the canonical layout has no normal, and fixed-function lighting - the only thing
++        // that would consume one - is not implemented either.
++        if (state2 != null) { return; }
          GL11.glNormal3f(nx, ny, nz);
      }
  
-@@ -139,6 +153,8 @@
+@@ -139,6 +155,8 @@
          if (depthFunc != depthState.depthFunc)
          {
              depthState.depthFunc = depthFunc;
@@ -67,7 +69,7 @@
              GL11.glDepthFunc(depthFunc);
          }
      }
-@@ -148,6 +164,8 @@
+@@ -148,6 +166,8 @@
          if (flagIn != depthState.maskEnabled)
          {
              depthState.maskEnabled = flagIn;
@@ -76,7 +78,7 @@
              GL11.glDepthMask(flagIn);
          }
      }
-@@ -173,6 +191,8 @@
+@@ -173,6 +193,8 @@
          {
              blendState.srcFactor = srcFactor;
              blendState.dstFactor = dstFactor;
@@ -85,7 +87,7 @@
              GL11.glBlendFunc(srcFactor, dstFactor);
          }
      }
-@@ -198,12 +218,16 @@
+@@ -198,12 +220,16 @@
              blendState.dstFactor = dstFactor;
              blendState.srcFactorAlpha = srcFactorAlpha;
              blendState.dstFactorAlpha = dstFactorAlpha;
@@ -102,7 +104,18 @@
          GL14.glBlendEquation(blendEquation);
      }
  
-@@ -263,6 +287,8 @@
+@@ -254,7 +280,9 @@
+         if (param != fogState.mode)
+         {
+             fogState.mode = param;
+-            GL11.glFogi(GL11.GL_FOG_MODE, param);
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFogi)", "a fragment-stage fog term driven by state"); }
++        GL11.glFogi(GL11.GL_FOG_MODE, param);
+         }
+     }
+ 
+@@ -263,6 +291,8 @@
          if (param != fogState.density)
          {
              fogState.density = param;
@@ -111,7 +124,7 @@
              GL11.glFogf(GL11.GL_FOG_DENSITY, param);
          }
      }
-@@ -272,6 +298,8 @@
+@@ -272,6 +302,8 @@
          if (param != fogState.start)
          {
              fogState.start = param;
@@ -120,7 +133,7 @@
              GL11.glFogf(GL11.GL_FOG_START, param);
          }
      }
-@@ -281,17 +309,23 @@
+@@ -281,17 +313,23 @@
          if (param != fogState.end)
          {
              fogState.end = param;
@@ -145,7 +158,16 @@
          GL11.glFogi(pname, param);
      }
  
-@@ -321,6 +355,8 @@
+@@ -315,12 +353,16 @@
+         if (mode != cullState.mode)
+         {
+             cullState.mode = mode;
+-            GL11.glCullFace(mode);
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { state2.cullFace(mode); return; }
++        GL11.glCullFace(mode);
+         }
+     }
  
      public static void glPolygonMode(int face, int mode)
      {
@@ -154,7 +176,7 @@
          GL11.glPolygonMode(face, mode);
      }
  
-@@ -340,6 +376,8 @@
+@@ -340,6 +382,8 @@
          {
              polygonOffsetState.factor = factor;
              polygonOffsetState.units = units;
@@ -163,7 +185,7 @@
              GL11.glPolygonOffset(factor, units);
          }
      }
-@@ -364,6 +402,8 @@
+@@ -364,6 +408,8 @@
          if (opcode != colorLogicState.opcode)
          {
              colorLogicState.opcode = opcode;
@@ -172,7 +194,7 @@
              GL11.glLogicOp(opcode);
          }
      }
-@@ -385,13 +425,17 @@
+@@ -385,13 +431,17 @@
          if (param != glstatemanager$texgencoord.param)
          {
              glstatemanager$texgencoord.param = param;
@@ -191,7 +213,7 @@
      }
  
      private static GlStateManager.TexGenCoord texGenCoord(GlStateManager.TexGen texGen)
-@@ -416,6 +460,7 @@
+@@ -416,6 +466,7 @@
          if (activeTextureUnit != texture - OpenGlHelper.defaultTexUnit)
          {
              activeTextureUnit = texture - OpenGlHelper.defaultTexUnit;
@@ -199,7 +221,7 @@
              OpenGlHelper.setActiveTexture(texture);
          }
      }
-@@ -432,42 +477,57 @@
+@@ -432,42 +483,57 @@
  
      public static void glTexEnv(int target, int parameterName, FloatBuffer parameters)
      {
@@ -259,7 +281,7 @@
  
          for (GlStateManager.TextureState glstatemanager$texturestate : textureState)
          {
-@@ -483,6 +543,8 @@
+@@ -483,6 +549,8 @@
          if (texture != textureState[activeTextureUnit].textureName)
          {
              textureState[activeTextureUnit].textureName = texture;
@@ -268,7 +290,7 @@
              GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
          }
      }
-@@ -499,6 +561,8 @@
+@@ -499,6 +567,8 @@
              @Nullable IntBuffer pixels
          )
      {
@@ -277,7 +299,7 @@
          GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
      }
  
-@@ -514,6 +578,8 @@
+@@ -514,6 +584,8 @@
              IntBuffer pixels
          )
      {
@@ -286,7 +308,23 @@
          GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
      }
  
-@@ -526,6 +592,8 @@
+@@ -521,11 +593,24 @@
+             int target, int level, int xOffset, int yOffset, int x, int y, int width, int height
+         )
+     {
++        net.minecraftforge.client.render.state.backend.FrameState copyState = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (copyState != null)
++        {
++            // The main menu's panorama blurs itself by copying the framebuffer into a texture and drawing it back
++            // scaled. That readback is not implemented, so the copy is skipped: the panorama appears without its
++            // blur rather than the menu failing to draw at all. Said once, out loud, because a missing effect is
++            // otherwise indistinguishable from a broken one.
++            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("framebuffer copy to a texture (glCopyTexSubImage2D)",
++                    "the main menu panorama will not blur");
++            return;
++        }
+         GL11.glCopyTexSubImage2D(target, level, xOffset, yOffset, x, y, width, height);
+     }
  
      public static void glGetTexImage(int target, int level, int format, int type, IntBuffer pixels)
      {
@@ -295,7 +333,7 @@
          GL11.glGetTexImage(target, level, format, type, pixels);
      }
  
-@@ -544,6 +612,8 @@
+@@ -544,6 +629,8 @@
          if (mode != activeShadeModel)
          {
              activeShadeModel = mode;
@@ -304,7 +342,7 @@
              GL11.glShadeModel(mode);
          }
      }
-@@ -560,6 +630,8 @@
+@@ -560,6 +647,8 @@
  
      public static void viewport(int x, int y, int width, int height)
      {
@@ -313,7 +351,7 @@
          GL11.glViewport(x, y, width, height);
      }
  
-@@ -574,6 +646,8 @@
+@@ -574,6 +663,8 @@
              colorMaskState.green = green;
              colorMaskState.blue = blue;
              colorMaskState.alpha = alpha;
@@ -322,7 +360,7 @@
              GL11.glColorMask(red, green, blue, alpha);
          }
      }
-@@ -583,6 +657,8 @@
+@@ -583,6 +674,8 @@
          if (depth != clearState.depth)
          {
              clearState.depth = depth;
@@ -331,7 +369,7 @@
              GL11.glClearDepth(depth);
          }
      }
-@@ -598,73 +674,101 @@
+@@ -598,73 +691,101 @@
              clearState.color.green = green;
              clearState.color.blue = blue;
              clearState.color.alpha = alpha;
@@ -435,7 +473,7 @@
      }
  
      public static void rotate(Quaternion quaternionIn)
-@@ -715,6 +819,8 @@
+@@ -715,6 +836,8 @@
              colorState.green = colorGreen;
              colorState.blue = colorBlue;
              colorState.alpha = colorAlpha;
@@ -444,23 +482,23 @@
              GL11.glColor4f(colorRed, colorGreen, colorBlue, colorAlpha);
          }
      }
-@@ -726,11 +832,15 @@
+@@ -726,11 +849,15 @@
  
      public static void glTexCoord2f(float sCoord, float tCoord)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode texture coordinates (glTexCoord2f)", "an immediate-mode vertex accumulator"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.immediate().texCoord(sCoord, tCoord); return; }
          GL11.glTexCoord2f(sCoord, tCoord);
      }
  
      public static void glVertex3f(float x, float y, float z)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode vertices (glVertex3f)", "an immediate-mode vertex accumulator"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.immediate().vertex(x, y, z, state2.currentColor()); return; }
          GL11.glVertex3f(x, y, z);
      }
  
-@@ -744,121 +854,173 @@
+@@ -744,121 +871,194 @@
  
      public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
      {
@@ -527,15 +565,15 @@
  
      public static void glBegin(int mode)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate mode (glBegin)", "an immediate-mode vertex accumulator"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.immediate().begin(mode); return; }
          GL11.glBegin(mode);
      }
  
      public static void glEnd()
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate mode (glEnd)", "an immediate-mode vertex accumulator"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.immediate().end(); return; }
          GL11.glEnd();
      }
  
@@ -624,18 +662,39 @@
      public static void glGetInteger(int parameterName, IntBuffer parameters)
      {
 -        GL11.glGetInteger(parameterName, parameters);
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("state readback (glGetInteger)", "the corresponding state to be kept in a form this backend can report"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null)
++        {
++            // Only the viewport is read back for a purpose: ActiveRenderInfo takes it to place the camera.
++            if (parameterName == 2978)
++            {
++                int[] viewport = state2.viewport();
++                parameters.put(viewport[0]).put(viewport[1]).put(viewport[2]).put(viewport[3]);
++                return;
++            }
++            throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented(
++                    "state readback (glGetInteger, parameter " + parameterName + ")",
++                    "that piece of state to be kept in a form this backend can report");
++        }
 +        GL11.glGetIntegerv(parameterName, parameters);
      }
  
      public static int glGetInteger(int parameterName)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("state readback (glGetInteger)", "the corresponding state to be kept in a form this backend can report"); }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Every caller of the integer form is the snooper: it records GL limits for telemetry and nothing reads
++            // them back. Zero is reported once rather than per call, because a value invented here would look like
++            // a device limit and be wrong.
++            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce(
++                    "GL limit readback for the snooper (glGetInteger " + parameterName + ")",
++                    "telemetry will report 0 for the GL limits the game collects");
++            return 0;
++        }
          return GL11.glGetInteger(parameterName);
      }
  
-@@ -956,6 +1118,12 @@
+@@ -956,6 +1156,12 @@
                  {
                      this.currentState = state;
  

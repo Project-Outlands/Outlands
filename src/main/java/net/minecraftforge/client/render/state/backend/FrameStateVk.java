@@ -102,6 +102,36 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public boolean isEnabled(Capability capability) {
+        return enabled.contains(capability);
+    }
+
+    @Override
+    public float[] currentColor() {
+        return vertexColor.clone();
+    }
+
+    @Override
+    public int[] viewport() {
+        return viewport.clone();
+    }
+
+    @Override
+    public boolean depthWriteEnabled() {
+        return depthMask;
+    }
+
+    @Override
+    public org.joml.Matrix4fc projection() {
+        return matrix(5889);
+    }
+
+    @Override
+    public org.joml.Matrix4fc modelView() {
+        return matrix(5888);
+    }
+
+    @Override
     public void depthMask(boolean enabled) {
         depthMask = enabled;
     }

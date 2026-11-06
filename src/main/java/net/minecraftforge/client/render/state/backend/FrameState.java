@@ -24,6 +24,29 @@ public interface FrameState {
 
     void capability(Capability capability, boolean enabled);
 
+    /** Whether a capability is currently enabled. */
+    boolean isEnabled(Capability capability);
+
+    /** The current vertex colour, four components in 0..1. */
+    float[] currentColor();
+
+    /** The current viewport as {@code x, y, width, height}. */
+    int[] viewport();
+
+    /** Whether depth writes are enabled. */
+    boolean depthWriteEnabled();
+
+    /**
+     * The projection matrix currently in effect.
+     *
+     * <p>Read at draw time because that is when GL read it too: the draw uses whatever the stack held when it was
+     * issued, not what it held when the matrix was set.</p>
+     */
+    org.joml.Matrix4fc projection();
+
+    /** The modelview matrix currently in effect. */
+    org.joml.Matrix4fc modelView();
+
     void depthFunc(int glComparison);
 
     void alphaFunc(int glComparison, float reference);

@@ -32,6 +32,11 @@ final class VertexStreamVk implements VertexStreamBackend {
         if (net.minecraftforge.client.render.state.backend.DisplayLists.capture(layout, mode, vertexCount, data)) {
             return;
         }
+        // A frame is collecting: hold the draw until the backend records it. This is the ordinary path for every
+        // GUI, entity and particle draw in the game.
+        if (FrameDraws.record(layout, mode, vertexCount, data)) {
+            return;
+        }
         throw new UnsupportedOperationException(
                 "cannot draw from client memory on the Vulkan backend yet: there is no frame recording context, so"
                         + " there is no command buffer to record into and no pipeline for this vertex layout."

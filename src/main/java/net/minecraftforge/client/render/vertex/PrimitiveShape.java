@@ -127,6 +127,60 @@ public final class PrimitiveShape {
      * @throws IllegalArgumentException if the count cannot be expressed in this shape, or if this shape needs no
      *         indexing
      */
+    /**
+     * The indices as plain integers.
+     *
+     * <p>The renderer wants them as one type: choosing 16 or 32 bits per draw would mean rebinding the index buffer
+     * whenever the width changes mid-frame. The byte form below narrows this, so both share one computation.</p>
+     */
+    public int[] indexArray(int vertexCount) {
+        if (!needsIndexing()) {
+            throw new IllegalArgumentException("GL mode " + glMode + " needs no index buffer");
+        }
+        int count = indexCount(vertexCount);
+        int[] out = new int[count];
+        int at = 0;
+        switch (glMode) {
+            case GL_QUADS -> {
+                for (int quad = 0; quad < vertexCount / 4; quad++) {
+                    int base = quad * 4;
+                    out[at++] = base;
+                    out[at++] = base + 1;
+                    out[at++] = base + 2;
+                    out[at++] = base;
+                    out[at++] = base + 2;
+                    out[at++] = base + 3;
+                }
+            }
+            case GL_QUAD_STRIP -> {
+                for (int quad = 0; quad < (vertexCount - 2) / 2; quad++) {
+                    int base = quad * 2;
+                    out[at++] = base;
+                    out[at++] = base + 1;
+                    out[at++] = base + 2;
+                    out[at++] = base;
+                    out[at++] = base + 2;
+                    out[at++] = base + 3;
+                }
+            }
+            case GL_TRIANGLE_FAN -> {
+                for (int triangle = 0; triangle < vertexCount - 2; triangle++) {
+                    out[at++] = 0;
+                    out[at++] = triangle + 1;
+                    out[at++] = triangle + 2;
+                }
+            }
+            case GL_LINE_LOOP -> {
+                for (int segment = 0; segment < vertexCount; segment++) {
+                    out[at++] = segment;
+                    out[at++] = (segment + 1) % vertexCount;
+                }
+            }
+            default -> throw new IllegalStateException("unreachable: " + glMode);
+        }
+        return out;
+    }
+
     public byte[] indices(int vertexCount) {
         if (!needsIndexing()) {
             throw new IllegalArgumentException("GL mode " + glMode + " needs no index buffer");

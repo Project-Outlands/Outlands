@@ -140,7 +140,7 @@ final class VulkanSwapchain {
     private static final Logger LOGGER = LogManager.getLogger("Outlands|render");
 
     /** Two frames in flight. More adds latency; fewer leaves the CPU waiting on the GPU. */
-    private static final int FRAMES_IN_FLIGHT = 2;
+    static final int FRAMES_IN_FLIGHT = 2;
 
     private final VulkanContext context;
     private final VkDevice device;
@@ -149,6 +149,10 @@ final class VulkanSwapchain {
     private int imageFormat;
     /** 1 means vsync, the GL default and what the game asks for initially. */
     private int swapInterval = 1;
+    /** Drawn into this frame's rendering instance; emptied as it is replayed. */
+    private java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Draw> pendingDraws = java.util.List.of();
+    /** Replays the draws the game issued while the frame was being built. */
+    private VulkanStream stream;
     /** What the game asked of this frame; {@code null} before a backend installs one. */
     private net.minecraftforge.client.render.target.@org.jspecify.annotations.Nullable FrameRecording recording;
     private int depthFormat;
@@ -235,6 +239,11 @@ final class VulkanSwapchain {
      * first frame after a rebuild is skipped, because the swapchain is rebuilt at the end of a frame rather than
      * in the middle of one.</p>
      */
+    /** Hands the draws collected since the last frame to the next recording. */
+    void setPendingDraws(java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Draw> draws) {
+        this.pendingDraws = draws;
+    }
+
     void drawFrame(long window) {
         if (!outOfDate && windowSizeChanged(window)) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
@@ -270,7 +279,7 @@ final class VulkanSwapchain {
             }
 
             VkCheck.check(vkResetFences(device, fences[frame]), "vkResetFences");
-            record(commandBuffers[frame], imageIndex, stack);
+            record(commandBuffers[frame], imageIndex, frame, stack);
             submit(frame, imageIndex, stack);
             present(imageIndex, stack);
         }
@@ -278,7 +287,7 @@ final class VulkanSwapchain {
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
     }
 
-    private void record(VkCommandBuffer commandBuffer, int imageIndex, MemoryStack stack) {
+    private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
         VkCheck.check(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer");
         VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
                 .sType$Default()
@@ -369,6 +378,14 @@ final class VulkanSwapchain {
         frameContext.commandBuffer = commandBuffer;
         graph.run(frameContext);
         frameContext.commandBuffer = null;
+
+        // The game's own draws come after the graph, because they are what vanilla issues after it establishes the
+        // world: the world itself, then the GUI on top. They were collected while the frame was being built -
+        // vanilla issues them before Display.update() hands the frame over - so this is where they become commands.
+        if (stream != null && !pendingDraws.isEmpty()) {
+            stream.replay(commandBuffer, pendingDraws, slot);
+            pendingDraws = java.util.List.of();
+        }
 
         vkCmdEndRendering(commandBuffer);
 
@@ -522,6 +539,11 @@ final class VulkanSwapchain {
      * mode every implementation guarantees, so wanting it off can end in it being on - that fallback is logged,
      * since otherwise the setting silently does nothing.</p>
      */
+    /** Installs the replay path for the game's own draws. */
+    void setStream(VulkanStream stream) {
+        this.stream = stream;
+    }
+
     /** Installs the holder for the game's per-frame requests. */
     void setFrameRecording(net.minecraftforge.client.render.target.FrameRecording recording) {
         this.recording = recording;

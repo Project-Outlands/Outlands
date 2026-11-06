@@ -59,6 +59,8 @@ public final class VulkanBackend implements RenderBackend {
     private final java.util.Queue<ChunkMeshCapture.Captured> pendingChunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
+    /** Replays the game's own draws into the frame's rendering instance. */
+    private VulkanStream stream;
     private long window;
     private boolean failed;
 
@@ -133,8 +135,12 @@ public final class VulkanBackend implements RenderBackend {
             RenderGraph graph = RenderGraphs.get();
             swapchain = VulkanSwapchain.create(context, window, graph);
             terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat());
+            stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat());
+            swapchain.setStream(stream);
             swapchain.setFrameRecording(frameRecording);
             net.minecraftforge.client.render.target.FrameRecordings.install(frameRecording);
+            // Draws issued from here on belong to the next frame.
+            net.minecraftforge.client.render.vertex.FrameDraws.beginCollecting();
             graph.replace(terrainLayer);
             graph.freeze();
             // Only now, once the graph is frozen and the layer exists, does anything start capturing chunk meshes.
@@ -156,10 +162,14 @@ public final class VulkanBackend implements RenderBackend {
         }
         try {
             drainCaptures();
+            // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
+            // collecting from empty.
+            swapchain.setPendingDraws(net.minecraftforge.client.render.vertex.FrameDraws.drain());
             try {
                 swapchain.drawFrame(window);
             } finally {
                 frameRecording.resetForNextFrame();
+                net.minecraftforge.client.render.vertex.FrameDraws.beginCollecting();
             }
         } catch (RuntimeException e) {
             failed = true;
@@ -216,6 +226,10 @@ public final class VulkanBackend implements RenderBackend {
         if (terrainLayer != null) {
             terrainLayer.close();
             terrainLayer = null;
+        }
+        if (stream != null) {
+            stream.close();
+            stream = null;
         }
         if (context != null) {
             context.close();
