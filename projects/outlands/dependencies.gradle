@@ -50,6 +50,20 @@ dependencies {
     lwjglLibraries[0].each {
         compileOnly "org.lwjgl:$it:$props.lwjgl_version"
     }
+
+    // Vulkan, for the render backend. Deliberately NOT in lwjglLibraries: that list is expanded into a natives
+    // artifact for every architecture in lwjglLibraries[1], and lwjgl-vulkan only publishes natives for macOS
+    // (MoltenVK). On Windows and Linux it loads the system loader - vulkan-1.dll / libvulkan.so.1 - so there is
+    // nothing of ours to ship. Adding it to the list would ask Gradle for lwjgl-vulkan:natives-linux, which does
+    // not exist, and fail the build.
+    //
+    // Also kept out of 'installer' and 'runtimeOnly' until a backend actually uses them: those two are what end up
+    // in the launcher JSON, i.e. downloaded by every player, including the ones that never run Vulkan. Where the
+    // natives go is a packaging decision that belongs with the backend that needs them.
+    ['lwjgl-vulkan', 'lwjgl-vma'].each {
+        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
+        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
+    }
     lwjglLibraries[0].each {
         installer "org.lwjgl:$it:$props.lwjgl_version"
         runtimeOnly "org.lwjgl:$it::$lwjglArch"

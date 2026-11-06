@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 
 import net.minecraftforge.common.ForgeEarlyConfig;
 import net.minecraftforge.common.LoaderVersion;
+import net.minecraftforge.client.render.vulkan.VulkanBackend;
 import com.llamalad7.mixinextras.MixinExtrasBootstrap;
 import net.minecraft.launchwrapper.LaunchClassLoader;
 import net.minecraftforge.fml.common.FMLLog;
@@ -95,6 +96,10 @@ public class FMLLaunchHandler
     private void setupClient()
     {
         setupHome();
+        // The render backend has to be known before the window is created: SDL_WINDOW_OPENGL and SDL_WINDOW_VULKAN
+        // are mutually exclusive at SDL_CreateWindow, so the choice cannot be revisited afterwards. Client only -
+        // a dedicated server never creates a window and must not load a graphics backend.
+        VulkanBackend.install();
     }
 
     private void setupServer()
