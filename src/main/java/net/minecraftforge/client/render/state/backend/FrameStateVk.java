@@ -37,6 +37,8 @@ final class FrameStateVk implements FrameState {
     private int shadeModel = 7425;          // GL_SMOOTH
     private int cullFace = 1029;            // GL_BACK
     private boolean[] colorMask = {true, true, true, true};
+    private boolean depthMask = true;
+    private float[] vertexColor = {1.0F, 1.0F, 1.0F, 1.0F};
     private int blendSource = 1;            // GL_ONE
     private int blendDestination = 0;       // GL_ZERO
     private int[] blendSeparate;
@@ -100,6 +102,16 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public void depthMask(boolean enabled) {
+        depthMask = enabled;
+    }
+
+    @Override
+    public void color(float red, float green, float blue, float alpha) {
+        vertexColor = new float[] {red, green, blue, alpha};
+    }
+
+    @Override
     public void blendFunc(int glSourceFactor, int glDestinationFactor) {
         blendSource = blendFactor(glSourceFactor);
         blendDestination = blendFactor(glDestinationFactor);
@@ -158,16 +170,32 @@ final class FrameStateVk implements FrameState {
     @Override
     public void clearColor(float red, float green, float blue, float alpha) {
         clearColor = new float[] {red, green, blue, alpha};
+        // The frame asks for one clear colour, so the last value set here is the one that reaches it.
+        net.minecraftforge.client.render.target.FrameRecording recording =
+                net.minecraftforge.client.render.target.FrameRecordings.current();
+        if (recording != null) {
+            recording.setClearColor(red, green, blue, alpha);
+        }
     }
 
     @Override
     public void clearDepth(double depth) {
         clearDepth = depth;
+        net.minecraftforge.client.render.target.FrameRecording recording =
+                net.minecraftforge.client.render.target.FrameRecordings.current();
+        if (recording != null) {
+            recording.setClearDepth(depth);
+        }
     }
 
     @Override
     public void clear(int glMask) {
         clearMask = glMask;
+        net.minecraftforge.client.render.target.FrameRecording recording =
+                net.minecraftforge.client.render.target.FrameRecordings.current();
+        if (recording != null) {
+            recording.requestClear(glMask);
+        }
     }
 
     @Override

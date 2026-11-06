@@ -43,17 +43,36 @@ final class FramebufferVk implements FramebufferBackend {
 
     @Override
     public void bind(boolean setViewport) {
-        throw needsFrame("bind");
+        FrameRecording recording = FrameRecordings.current();
+        if (recording == null) {
+            throw needsFrame("bind");
+        }
+        // The window's image is the only colour target this backend has, and the game's main framebuffer is that
+        // target. A second framebuffer has nowhere to go and is rejected below rather than drawn to the screen.
+        recording.targetDefault(width, height, setViewport);
     }
 
     @Override
     public void unbind() {
-        throw needsFrame("unbind");
+        FrameRecording recording = FrameRecordings.current();
+        if (recording == null) {
+            throw needsFrame("unbind");
+        }
+        // Returning to the screen is the same request as binding it, because they are the same image.
+        recording.targetDefault(width, height, false);
     }
 
     @Override
     public void clear() {
-        throw needsFrame("clear (" + width + "x" + height + ", depth=" + useDepth + ")");
+        FrameRecording recording = FrameRecordings.current();
+        if (recording == null) {
+            throw needsFrame("clear (" + width + "x" + height + ", depth=" + useDepth + ")");
+        }
+        // The colour is this target's own; the depth value is whatever GlStateManager.clearDepth last set, because
+        // that is the call that owns it. Both converge on the frame recording.
+        recording.setClearColor(red, green, blue, alpha);
+        // GL_COLOR_BUFFER_BIT, plus depth when this target has one - the same mask vanilla would pass.
+        recording.requestClear(0x4000 | (useDepth ? 0x100 : 0));
     }
 
     @Override
@@ -63,6 +82,10 @@ final class FramebufferVk implements FramebufferBackend {
 
     @Override
     public void setColor(float red, float green, float blue, float alpha) {
+        FrameRecording recording = FrameRecordings.current();
+        if (recording != null) {
+            recording.setClearColor(red, green, blue, alpha);
+        }
         this.red = red;
         this.green = green;
         this.blue = blue;

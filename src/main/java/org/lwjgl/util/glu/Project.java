@@ -194,6 +194,14 @@ public class Project extends Util {
         matrix.put(3 * 4 + 2, -2 * zNear * zFar / deltaZ);
         matrix.put(3 * 4 + 3, 0);
 
+        // Through the frame-state backend, not straight to GL: without a context the native call is a SIGSEGV, and
+        // a non-GL renderer keeps its own matrix stack. This class is the loader's own GLU, so it asks the loader.
+        net.minecraftforge.client.render.state.backend.FrameState state =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (state != null) {
+            state.multiply(matrix);
+            return;
+        }
         glMultMatrixf(matrix);
     }
 
@@ -246,6 +254,14 @@ public class Project extends Util {
         matrix.put(1 * 4 + 2, -forward[1]);
         matrix.put(2 * 4 + 2, -forward[2]);
 
+        // Through the frame-state backend, not straight to GL: without a context the native call is a SIGSEGV, and
+        // a non-GL renderer keeps its own matrix stack. This class is the loader's own GLU, so it asks the loader.
+        net.minecraftforge.client.render.state.backend.FrameState state =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (state != null) {
+            state.multiply(matrix);
+            return;
+        }
         glMultMatrixf(matrix);
         glTranslatef(-eyex, -eyey, -eyez);
     }

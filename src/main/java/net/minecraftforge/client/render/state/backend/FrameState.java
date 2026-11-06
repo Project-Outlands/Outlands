@@ -34,6 +34,17 @@ public interface FrameState {
 
     void colorMask(boolean red, boolean green, boolean blue, boolean alpha);
 
+    /** {@code glDepthMask}: whether depth writes are enabled. */
+    void depthMask(boolean enabled);
+
+    /**
+     * The current vertex colour, which vanilla sets instead of passing a colour per vertex.
+     *
+     * <p>In a pipeline model this is per-draw data rather than pipeline state - it ends up in a push constant - but
+     * it is set far more often than it is used, so it is tracked here and read when a draw happens.</p>
+     */
+    void color(float red, float green, float blue, float alpha);
+
     void blendFunc(int glSourceFactor, int glDestinationFactor);
 
     void blendFuncSeparate(int glSourceRgb, int glDestinationRgb, int glSourceAlpha, int glDestinationAlpha);

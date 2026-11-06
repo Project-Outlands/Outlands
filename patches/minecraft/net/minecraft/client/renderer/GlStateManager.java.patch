@@ -25,22 +25,40 @@
              GL11.glAlphaFunc(func, ref);
          }
      }
-@@ -111,12 +117,12 @@
+@@ -105,22 +111,30 @@
+         {
+             colorMaterialState.face = face;
+             colorMaterialState.mode = mode;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fixed-function colour material (glColorMaterial)", "the same shader variant as glLight"); }
+             GL11.glColorMaterial(face, mode);
+         }
+     }
  
      public static void glLight(int light, int pname, FloatBuffer params)
      {
 -        GL11.glLight(light, pname, params);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fixed-function lighting (glLight)", "one shader variant per light setup, which is what GlStateManager.Profile.DEFAULT configures"); }
 +        GL11.glLightfv(light, pname, params);
      }
  
      public static void glLightModel(int pname, FloatBuffer params)
      {
 -        GL11.glLightModel(pname, params);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("the light model (glLightModel)", "the same shader variant as glLight"); }
 +        GL11.glLightModelfv(pname, params);
      }
  
      public static void glNormal3f(float nx, float ny, float nz)
-@@ -139,6 +145,8 @@
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode normals (glNormal3f)", "an immediate-mode vertex accumulator"); }
+         GL11.glNormal3f(nx, ny, nz);
+     }
+ 
+@@ -139,6 +153,8 @@
          if (depthFunc != depthState.depthFunc)
          {
              depthState.depthFunc = depthFunc;
@@ -49,7 +67,16 @@
              GL11.glDepthFunc(depthFunc);
          }
      }
-@@ -173,6 +181,8 @@
+@@ -148,6 +164,8 @@
+         if (flagIn != depthState.maskEnabled)
+         {
+             depthState.maskEnabled = flagIn;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.depthMask(flagIn); return; }
+             GL11.glDepthMask(flagIn);
+         }
+     }
+@@ -173,6 +191,8 @@
          {
              blendState.srcFactor = srcFactor;
              blendState.dstFactor = dstFactor;
@@ -58,7 +85,7 @@
              GL11.glBlendFunc(srcFactor, dstFactor);
          }
      }
-@@ -198,12 +208,16 @@
+@@ -198,12 +218,16 @@
              blendState.dstFactor = dstFactor;
              blendState.srcFactorAlpha = srcFactorAlpha;
              blendState.dstFactorAlpha = dstFactorAlpha;
@@ -75,16 +102,50 @@
          GL14.glBlendEquation(blendEquation);
      }
  
-@@ -287,7 +301,7 @@
+@@ -263,6 +287,8 @@
+         if (param != fogState.density)
+         {
+             fogState.density = param;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFogf)", "a fragment-stage fog term driven by state"); }
+             GL11.glFogf(GL11.GL_FOG_DENSITY, param);
+         }
+     }
+@@ -272,6 +298,8 @@
+         if (param != fogState.start)
+         {
+             fogState.start = param;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFogf)", "a fragment-stage fog term driven by state"); }
+             GL11.glFogf(GL11.GL_FOG_START, param);
+         }
+     }
+@@ -281,17 +309,23 @@
+         if (param != fogState.end)
+         {
+             fogState.end = param;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFogf)", "a fragment-stage fog term driven by state"); }
+             GL11.glFogf(GL11.GL_FOG_END, param);
+         }
+     }
  
      public static void glFog(int pname, FloatBuffer param)
      {
 -        GL11.glFog(pname, param);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFog)", "a fragment-stage fog term driven by state"); }
 +        GL11.glFogfv(pname, param);
      }
  
      public static void glFogi(int pname, int param)
-@@ -321,6 +335,8 @@
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("fog (glFogi)", "a fragment-stage fog term driven by state"); }
+         GL11.glFogi(pname, param);
+     }
+ 
+@@ -321,6 +355,8 @@
  
      public static void glPolygonMode(int face, int mode)
      {
@@ -93,7 +154,7 @@
          GL11.glPolygonMode(face, mode);
      }
  
-@@ -340,6 +356,8 @@
+@@ -340,6 +376,8 @@
          {
              polygonOffsetState.factor = factor;
              polygonOffsetState.units = units;
@@ -102,7 +163,7 @@
              GL11.glPolygonOffset(factor, units);
          }
      }
-@@ -364,6 +382,8 @@
+@@ -364,6 +402,8 @@
          if (opcode != colorLogicState.opcode)
          {
              colorLogicState.opcode = opcode;
@@ -111,16 +172,26 @@
              GL11.glLogicOp(opcode);
          }
      }
-@@ -391,7 +411,7 @@
+@@ -385,13 +425,17 @@
+         if (param != glstatemanager$texgencoord.param)
+         {
+             glstatemanager$texgencoord.param = param;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("texture coordinate generation (glTexGeni)", "a shader variant that computes the coordinate"); }
+             GL11.glTexGeni(glstatemanager$texgencoord.coord, GL11.GL_TEXTURE_GEN_MODE, param);
+         }
+     }
  
      public static void texGen(GlStateManager.TexGen texGen, int pname, FloatBuffer params)
      {
 -        GL11.glTexGen(texGenCoord(texGen).coord, pname, params);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("texture coordinate generation (texGen)", "a shader variant that computes the coordinate"); }
 +        GL11.glTexGenfv(texGenCoord(texGen).coord, pname, params);
      }
  
      private static GlStateManager.TexGenCoord texGenCoord(GlStateManager.TexGen texGen)
-@@ -416,6 +436,7 @@
+@@ -416,6 +460,7 @@
          if (activeTextureUnit != texture - OpenGlHelper.defaultTexUnit)
          {
              activeTextureUnit = texture - OpenGlHelper.defaultTexUnit;
@@ -128,16 +199,29 @@
              OpenGlHelper.setActiveTexture(texture);
          }
      }
-@@ -432,7 +453,7 @@
+@@ -432,42 +477,57 @@
  
      public static void glTexEnv(int target, int parameterName, FloatBuffer parameters)
      {
 -        GL11.glTexEnv(target, parameterName, parameters);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("the texture environment (glTexEnv)", "a shader variant per combine mode; vanilla uses a handful"); }
 +        GL11.glTexEnvfv(target, parameterName, parameters);
      }
  
      public static void glTexEnvi(int target, int parameterName, int parameter)
-@@ -447,27 +468,36 @@
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("the texture environment (glTexEnv)", "a shader variant per combine mode; vanilla uses a handful"); }
+         GL11.glTexEnvi(target, parameterName, parameter);
+     }
+ 
+     public static void glTexEnvf(int target, int parameterName, float parameter)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("the texture environment (glTexEnv)", "a shader variant per combine mode; vanilla uses a handful"); }
+         GL11.glTexEnvf(target, parameterName, parameter);
+     }
  
      public static void glTexParameterf(int target, int parameterName, float parameter)
      {
@@ -175,7 +259,7 @@
  
          for (GlStateManager.TextureState glstatemanager$texturestate : textureState)
          {
-@@ -483,6 +513,8 @@
+@@ -483,6 +543,8 @@
          if (texture != textureState[activeTextureUnit].textureName)
          {
              textureState[activeTextureUnit].textureName = texture;
@@ -184,7 +268,7 @@
              GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
          }
      }
-@@ -499,6 +531,8 @@
+@@ -499,6 +561,8 @@
              @Nullable IntBuffer pixels
          )
      {
@@ -193,7 +277,7 @@
          GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
      }
  
-@@ -514,6 +548,8 @@
+@@ -514,6 +578,8 @@
              IntBuffer pixels
          )
      {
@@ -202,7 +286,16 @@
          GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
      }
  
-@@ -544,6 +580,8 @@
+@@ -526,6 +592,8 @@
+ 
+     public static void glGetTexImage(int target, int level, int format, int type, IntBuffer pixels)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("texture readback (glGetTexImage)", "a staging buffer and a copy from the texture, used by the screenshot helper"); }
+         GL11.glGetTexImage(target, level, format, type, pixels);
+     }
+ 
+@@ -544,6 +612,8 @@
          if (mode != activeShadeModel)
          {
              activeShadeModel = mode;
@@ -211,7 +304,7 @@
              GL11.glShadeModel(mode);
          }
      }
-@@ -560,6 +598,8 @@
+@@ -560,6 +630,8 @@
  
      public static void viewport(int x, int y, int width, int height)
      {
@@ -220,7 +313,7 @@
          GL11.glViewport(x, y, width, height);
      }
  
-@@ -574,6 +614,8 @@
+@@ -574,6 +646,8 @@
              colorMaskState.green = green;
              colorMaskState.blue = blue;
              colorMaskState.alpha = alpha;
@@ -229,7 +322,7 @@
              GL11.glColorMask(red, green, blue, alpha);
          }
      }
-@@ -583,6 +625,8 @@
+@@ -583,6 +657,8 @@
          if (depth != clearState.depth)
          {
              clearState.depth = depth;
@@ -238,7 +331,7 @@
              GL11.glClearDepth(depth);
          }
      }
-@@ -598,73 +642,99 @@
+@@ -598,73 +674,101 @@
              clearState.color.green = green;
              clearState.color.blue = blue;
              clearState.color.alpha = alpha;
@@ -286,6 +379,8 @@
      public static void getFloat(int pname, FloatBuffer params)
      {
 -        GL11.glGetFloat(pname, params);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("state readback (getFloat)", "the corresponding state to be kept in a form this backend can report"); }
 +        GL11.glGetFloatv(pname, params);
      }
  
@@ -340,7 +435,116 @@
      }
  
      public static void rotate(Quaternion quaternionIn)
-@@ -804,31 +874,43 @@
+@@ -715,6 +819,8 @@
+             colorState.green = colorGreen;
+             colorState.blue = colorBlue;
+             colorState.alpha = colorAlpha;
++            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++            if (state2 != null) { state2.color(colorRed, colorGreen, colorBlue, colorAlpha); return; }
+             GL11.glColor4f(colorRed, colorGreen, colorBlue, colorAlpha);
+         }
+     }
+@@ -726,11 +832,15 @@
+ 
+     public static void glTexCoord2f(float sCoord, float tCoord)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode texture coordinates (glTexCoord2f)", "an immediate-mode vertex accumulator"); }
+         GL11.glTexCoord2f(sCoord, tCoord);
+     }
+ 
+     public static void glVertex3f(float x, float y, float z)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate-mode vertices (glVertex3f)", "an immediate-mode vertex accumulator"); }
+         GL11.glVertex3f(x, y, z);
+     }
+ 
+@@ -744,121 +854,173 @@
+ 
+     public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glNormalPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glNormalPointer(type, stride, buffer);
+     }
+ 
+     public static void glTexCoordPointer(int size, int type, int stride, int buffer_offset)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glTexCoordPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glTexCoordPointer(size, type, stride, buffer_offset);
+     }
+ 
+     public static void glTexCoordPointer(int size, int type, int stride, ByteBuffer buffer)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glTexCoordPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glTexCoordPointer(size, type, stride, buffer);
+     }
+ 
+     public static void glVertexPointer(int size, int type, int stride, int buffer_offset)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glVertexPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glVertexPointer(size, type, stride, buffer_offset);
+     }
+ 
+     public static void glVertexPointer(int size, int type, int stride, ByteBuffer buffer)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glVertexPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glVertexPointer(size, type, stride, buffer);
+     }
+ 
+     public static void glColorPointer(int size, int type, int stride, int buffer_offset)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glColorPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glColorPointer(size, type, stride, buffer_offset);
+     }
+ 
+     public static void glColorPointer(int size, int type, int stride, ByteBuffer buffer)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory vertex arrays (glColorPointer)", "the stream path, which takes the whole buffer instead of per-attribute pointers"); }
+         GL11.glColorPointer(size, type, stride, buffer);
+     }
+ 
+     public static void glDisableClientState(int cap)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory client state (glDisableClientState)", "the stream path"); }
+         GL11.glDisableClientState(cap);
+     }
+ 
+     public static void glEnableClientState(int cap)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("client-memory client state (glEnableClientState)", "the stream path"); }
+         GL11.glEnableClientState(cap);
+     }
+ 
+     public static void glBegin(int mode)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate mode (glBegin)", "an immediate-mode vertex accumulator"); }
+         GL11.glBegin(mode);
+     }
+ 
+     public static void glEnd()
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("immediate mode (glEnd)", "an immediate-mode vertex accumulator"); }
+         GL11.glEnd();
+     }
+ 
+     public static void glDrawArrays(int mode, int first, int count)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("a draw from the GL current state (glDrawArrays)", "the stream path, which receives the layout with the bytes"); }
+         GL11.glDrawArrays(mode, first, count);
+     }
  
      public static void glLineWidth(float width)
      {
@@ -384,7 +588,19 @@
          return GL11.glGenLists(range);
      }
  
-@@ -844,17 +926,26 @@
+     public static void glPixelStorei(int parameterName, int param)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("pixel store state (glPixelStorei)", "nothing: this backend reads vertex and pixel data linearly, so the unpack alignment it configures does not apply"); }
+         GL11.glPixelStorei(parameterName, param);
+     }
+ 
+     public static void glReadPixels(int x, int y, int width, int height, int format, int type, IntBuffer pixels)
+     {
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("pixel readback (glReadPixels)", "a staging buffer and a copy, used by screenshots"); }
+         GL11.glReadPixels(x, y, width, height, format, type, pixels);
+     }
  
      public static int glGetError()
      {
@@ -408,11 +624,18 @@
      public static void glGetInteger(int parameterName, IntBuffer parameters)
      {
 -        GL11.glGetInteger(parameterName, parameters);
++                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("state readback (glGetInteger)", "the corresponding state to be kept in a form this backend can report"); }
 +        GL11.glGetIntegerv(parameterName, parameters);
      }
  
      public static int glGetInteger(int parameterName)
-@@ -956,6 +1047,12 @@
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("state readback (glGetInteger)", "the corresponding state to be kept in a form this backend can report"); }
+         return GL11.glGetInteger(parameterName);
+     }
+ 
+@@ -956,6 +1118,12 @@
                  {
                      this.currentState = state;
  

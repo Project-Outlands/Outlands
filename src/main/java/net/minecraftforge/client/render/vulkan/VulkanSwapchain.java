@@ -149,6 +149,8 @@ final class VulkanSwapchain {
     private int imageFormat;
     /** 1 means vsync, the GL default and what the game asks for initially. */
     private int swapInterval = 1;
+    /** What the game asked of this frame; {@code null} before a backend installs one. */
+    private net.minecraftforge.client.render.target.@org.jspecify.annotations.Nullable FrameRecording recording;
     private int depthFormat;
     private int extentWidth;
     private int extentHeight;
@@ -312,8 +314,16 @@ final class VulkanSwapchain {
                 .pImageMemoryBarriers(barriers);
         vkCmdPipelineBarrier2(commandBuffer, dependencyInfo);
 
+        // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
+        // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over.
+        //
+        // The load op stays CLEAR unconditionally. Each image starts this frame at LAYOUT_UNDEFINED, so its contents
+        // are by definition undefined and loading them would be reading whatever the previous frame left in a
+        // different layout. Whether a clear was requested therefore changes the values, not the operation.
+        float[] requested = recording != null ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
         VkClearValue clearColor = VkClearValue.calloc(stack);
-        clearColor.color().float32(0, 0.0f).float32(1, 0.0f).float32(2, 0.0f).float32(3, 1.0f);
+        clearColor.color().float32(0, requested[0]).float32(1, requested[1]).float32(2, requested[2])
+                .float32(3, requested[3]);
         VkRenderingAttachmentInfo.Buffer colorAttachment = VkRenderingAttachmentInfo.calloc(1, stack);
         colorAttachment.get(0)
                 .sType$Default()
@@ -324,7 +334,7 @@ final class VulkanSwapchain {
                 .clearValue(clearColor);
 
         VkClearValue clearDepth = VkClearValue.calloc(stack);
-        clearDepth.depthStencil().depth(1.0f).stencil(0);
+        clearDepth.depthStencil().depth((float) (recording != null ? recording.pendingClearDepth() : 1.0)).stencil(0);
         VkRenderingAttachmentInfo depthAttachment = VkRenderingAttachmentInfo.calloc(stack)
                 .sType$Default()
                 .imageView(depthImageView)
@@ -512,6 +522,11 @@ final class VulkanSwapchain {
      * mode every implementation guarantees, so wanting it off can end in it being on - that fallback is logged,
      * since otherwise the setting silently does nothing.</p>
      */
+    /** Installs the holder for the game's per-frame requests. */
+    void setFrameRecording(net.minecraftforge.client.render.target.FrameRecording recording) {
+        this.recording = recording;
+    }
+
     void setSwapInterval(int interval, long window) {
         if (interval == swapInterval) {
             return;

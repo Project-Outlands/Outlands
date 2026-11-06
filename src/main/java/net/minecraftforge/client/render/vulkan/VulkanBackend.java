@@ -57,6 +57,8 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanTerrainLayer terrainLayer;
     /** Captures waiting for the next frame. Written by chunk workers, drained on the render thread. */
     private final java.util.Queue<ChunkMeshCapture.Captured> pendingChunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
+    private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
     private long window;
     private boolean failed;
 
@@ -131,6 +133,8 @@ public final class VulkanBackend implements RenderBackend {
             RenderGraph graph = RenderGraphs.get();
             swapchain = VulkanSwapchain.create(context, window, graph);
             terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat());
+            swapchain.setFrameRecording(frameRecording);
+            net.minecraftforge.client.render.target.FrameRecordings.install(frameRecording);
             graph.replace(terrainLayer);
             graph.freeze();
             // Only now, once the graph is frozen and the layer exists, does anything start capturing chunk meshes.
@@ -152,7 +156,11 @@ public final class VulkanBackend implements RenderBackend {
         }
         try {
             drainCaptures();
-            swapchain.drawFrame(window);
+            try {
+                swapchain.drawFrame(window);
+            } finally {
+                frameRecording.resetForNextFrame();
+            }
         } catch (RuntimeException e) {
             failed = true;
             LOGGER.error("Vulkan frame failed; stopping presentation", e);
@@ -199,6 +207,7 @@ public final class VulkanBackend implements RenderBackend {
 
     @Override
     public void close() {
+        net.minecraftforge.client.render.target.FrameRecordings.install(null);
         ChunkMeshCapture.setConsumer(null);
         if (swapchain != null) {
             swapchain.close();

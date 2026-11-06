@@ -16,6 +16,20 @@ public final class FrameStates {
         return RenderBackendSelection.glPath() ? null : VK;
     }
 
+    /**
+     * Reports a fixed-function or immediate-mode operation this backend does not implement yet.
+     *
+     * <p>Always throws. It exists so the guards read as "this is a known gap with a name" rather than as a silent
+     * no-op, and so the message says what would be needed. Calling it is a programming error in the guard, not
+     * something a caller can catch and continue from.</p>
+     */
+    public static UnsupportedOperationException unimplemented(String operation, String needs) {
+        return new UnsupportedOperationException("the Vulkan backend does not implement " + operation + " yet. "
+                + "Needed: " + needs + ". Vanilla's own use of it is small and enumerated in"
+                + " docs/vulkan-backend-plan.md 8.4.1, but the fixed-function and immediate-mode groups are a"
+                + " shader-variant and vertex-accumulation problem, not a translation.");
+    }
+
     /** The Vulkan instance, for diagnostics and tests. {@code null} when the GL path is active. */
     public static @Nullable FrameState instance() {
         return forNonGl();
