@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.06-2] - 2026-11-06
+
+### 🐛 Bug Fixes
+
+- [`9929887`](https://github.com/Project-Outlands/Outlands/commit/9929887202f9422229cdaddc349cdcb716cbceb8) - *(installer)* Emit artifact paths for vanilla libraries *(PR [#52](https://github.com/Project-Outlands/Outlands/pull/52) by [@H2Sxxa](https://github.com/H2Sxxa))*
+- [`1ce55ea`](https://github.com/Project-Outlands/Outlands/commit/1ce55ea83f16995546434f98134d2cf64f780f69) - Narrator broken in installer *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.06] - 2026-11-06
 
 ### 🚀 Features
