@@ -129,6 +129,30 @@ tasks.register('launcherJson') {
         json.libraries.each { byName.put(it.name as String, it) }
         json.libraries = new ArrayList(byName.values())
 
+        // MultiMC's component metadata leaves 'downloads.artifact.path' out and derives it from the Maven
+        // coordinate, while Forge-style launcher JSON carries it explicitly. Fill in the vanilla entries copied
+        // from the template so launchers that require 'path' can resolve them, native classifiers included.
+        def artifactPath = { String name, String classifier ->
+            def parts = name.split(':')
+            def versionParts = parts[2].split('@')
+            def nameClassifier = parts.length >= 4 ? parts[3].split('@')[0] : null
+            def effectiveClassifier = classifier != null ? classifier : nameClassifier
+            def extension = versionParts.length > 1 ? versionParts[1] : 'jar'
+            def suffix = effectiveClassifier == null ? '' : "-${effectiveClassifier}"
+            "${parts[0].replace('.', '/')}/${parts[1]}/${versionParts[0]}/${parts[1]}-${versionParts[0]}${suffix}.${extension}"
+        }
+        json.libraries.each { library ->
+            def artifact = library.downloads?.artifact
+            if (artifact != null && artifact.path == null) {
+                artifact.path = artifactPath(library.name as String, null)
+            }
+            library.downloads?.classifiers?.each { classifier, classifiedArtifact ->
+                if (classifiedArtifact.path == null) {
+                    classifiedArtifact.path = artifactPath(library.name as String, classifier as String)
+                }
+            }
+        }
+
         outputFile.get().asFile.text = new JsonBuilder(json).toPrettyString()
     }
 }
