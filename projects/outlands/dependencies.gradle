@@ -51,18 +51,28 @@ dependencies {
         compileOnly "org.lwjgl:$it:$props.lwjgl_version"
     }
 
-    // Vulkan, for the render backend. Deliberately NOT in lwjglLibraries: that list is expanded into a natives
-    // artifact for every architecture in lwjglLibraries[1], and lwjgl-vulkan only publishes natives for macOS
-    // (MoltenVK). On Windows and Linux it loads the system loader - vulkan-1.dll / libvulkan.so.1 - so there is
-    // nothing of ours to ship. Adding it to the list would ask Gradle for lwjgl-vulkan:natives-linux, which does
-    // not exist, and fail the build.
+    // Vulkan, for the render backend. Unlike the modules above, these are needed at runtime, not only to compile:
+    // the backend loads org.lwjgl.vulkan.* when it initialises. So they go on 'installer', which is what ends up in
+    // the launcher JSON, as well as on the compile path.
     //
-    // Also kept out of 'installer' and 'runtimeOnly' until a backend actually uses them: those two are what end up
-    // in the launcher JSON, i.e. downloaded by every player, including the ones that never run Vulkan. Where the
-    // natives go is a packaging decision that belongs with the backend that needs them.
-    ['lwjgl-vulkan', 'lwjgl-vma'].each {
+    // The natives cannot use the lwjglLibraries loop: lwjgl-vulkan publishes them for macOS only (MoltenVK), so
+    // asking for lwjgl-vulkan:natives-linux would fail resolution. On Windows and Linux it loads the system
+    // Vulkan loader instead, which is the driver's job to install.
+    project.vulkanLibraries.each {
         lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
         compileOnly "org.lwjgl:$it:$props.lwjgl_version"
+        installer "org.lwjgl:$it:$props.lwjgl_version"
+    }
+    // lwjgl-vma ships natives for every platform we support.
+    lwjglLibraries[1].each { arch ->
+        lwjglNatives "org.lwjgl:lwjgl-vma:$props.lwjgl_version:$arch"
+    }
+    project.vulkanVulkanNativeArches.each { arch ->
+        lwjglNatives "org.lwjgl:lwjgl-vulkan:$props.lwjgl_version:$arch"
+    }
+    runtimeOnly "org.lwjgl:lwjgl-vma:$props.lwjgl_version:$lwjglArch"
+    if (project.vulkanVulkanNativeArches.contains(lwjglArch)) {
+        runtimeOnly "org.lwjgl:lwjgl-vulkan:$props.lwjgl_version:$lwjglArch"
     }
     lwjglLibraries[0].each {
         installer "org.lwjgl:$it:$props.lwjgl_version"

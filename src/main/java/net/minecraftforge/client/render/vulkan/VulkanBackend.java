@@ -11,14 +11,20 @@ import org.lwjgl.sdl.SDLVideo;
 /**
  * The Vulkan render backend.
  *
- * <p><b>What this is today: a registration, not an implementation.</b> It exists so the selection path can be
- * exercised end to end - a backend that is registered, named in configuration, probed and refused - before there
- * is any Vulkan code behind it. It reports itself unavailable, so nothing about the running process changes.</p>
+ * <p>It owns the frame: instance, surface, device, swapchain, depth attachment and the frame loop. What it does
+ * not have yet is anything to draw - every frame clears to black and presents. That is the whole of this
+ * milestone: proving the window, the device and the presentation path work on a real machine before any renderer
+ * depends on them.</p>
  *
- * <p><b>What it has to become.</b> A backend that owns the frame: instance, device, swapchain, and then every one
- * of the render phases the vanilla renderer used to run. Inside a {@code SDL_WINDOW_VULKAN} window there is no GL
- * context, so no phase can be drawn by the vanilla renderer instead - see {@link RenderBackend}. That is why the
- * probe answers "can this own a frame", and why it may only answer yes once it really can.</p>
+ * <p><b>Why the probe may only answer yes when the frame really is owned.</b> Inside an {@code SDL_WINDOW_VULKAN}
+ * window there is no GL context, so no phase can be drawn by the vanilla renderer instead. A backend that cannot
+ * cover every phase it is responsible for must not be selected - see {@link RenderBackend}. Clearing the screen
+ * counts as owning the frame; drawing terrain does not have to work yet.</p>
+ *
+ * <p><b>Failure is contained.</b> If setup fails, the window has already been created as a Vulkan window and
+ * cannot be turned back into a GL one. So the backend reports the failure, logs it, and presents nothing: the
+ * alternative would be a half-initialised state that is harder to diagnose than a black window with a stack
+ * trace.</p>
  */
 public final class VulkanBackend implements RenderBackend {
 
@@ -43,6 +49,11 @@ public final class VulkanBackend implements RenderBackend {
 
     private static final VulkanBackend INSTANCE = new VulkanBackend();
 
+    private VulkanContext context;
+    private VulkanSwapchain swapchain;
+    private long window;
+    private boolean failed;
+
     private VulkanBackend() {}
 
     /**
@@ -62,7 +73,8 @@ public final class VulkanBackend implements RenderBackend {
                         BRANCH_DEVELOPMENT_PRIORITY));
         if (isAvailable()) {
             LOGGER.warn("Vulkan is the preferred render backend (branch development mode): this build boots into "
-                    + "Vulkan. Revisit the default before merge.");
+                    + "Vulkan, which currently clears the screen and draws nothing else. Revisit the default "
+                    + "before merge.");
         } else {
             LOGGER.info("Vulkan backend registered as the preferred candidate, but it reports unavailable; the "
                     + "vanilla renderer will be used.");
@@ -72,16 +84,12 @@ public final class VulkanBackend implements RenderBackend {
     /**
      * Whether Vulkan can own the frame on this machine.
      *
-     * <p><b>Deliberately {@code false} for now.</b> There is no Vulkan code behind this backend yet, so answering
-     * yes would create a window that nothing can draw to. The question is "can this own a frame", not "is this
-     * feature complete": the answer flips to a real check once instance, device, swapchain and clear work, even
-     * though the render phases will still be missing at that point.</p>
-     *
-     * <p>A probe must not create driver objects. It is asked before the window exists, and its answer decides how
-     * the window is created.</p>
+     * <p>Answered by {@link VulkanProbe} before the window exists, and cached. The question is "can this own a
+     * frame", not "is the renderer finished": the phases are still missing, and they are added behind the same
+     * window rather than behind a second decision.</p>
      */
     static boolean isAvailable() {
-        return false;
+        return VulkanProbe.isAvailable();
     }
 
     @Override
@@ -98,5 +106,63 @@ public final class VulkanBackend implements RenderBackend {
     public boolean isOpenGl() {
         // No GL context is created for this window, so there is no GL state for GlStateView to report either.
         return false;
+    }
+
+    @Override
+    public void init(long window) {
+        if (failed) {
+            return;
+        }
+        this.window = window;
+        try {
+            context = VulkanContext.create(window);
+            swapchain = VulkanSwapchain.create(context, window);
+        } catch (RuntimeException | LinkageError e) {
+            // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
+            // log it once, and present nothing rather than throwing from inside the render loop every frame.
+            failed = true;
+            LOGGER.error("Vulkan backend setup failed; the window will stay black", e);
+            close();
+        }
+    }
+
+    @Override
+    public void present() {
+        if (failed || swapchain == null) {
+            return;
+        }
+        try {
+            swapchain.drawFrame(window);
+        } catch (RuntimeException e) {
+            failed = true;
+            LOGGER.error("Vulkan frame failed; stopping presentation", e);
+            close();
+        }
+    }
+
+    @Override
+    public Object nativeContext() {
+        return context;
+    }
+
+    @Override
+    public void close() {
+        if (swapchain != null) {
+            swapchain.close();
+            swapchain = null;
+        }
+        if (context != null) {
+            context.close();
+            context = null;
+        }
+    }
+
+    /**
+     * Test hook: pins the probe answer so tests do not depend on the machine's driver. {@code null} restores real
+     * probing. Public only because the selection tests live in {@code net.minecraftforge.client.render}, next to
+     * the other backend tests; production code has no reason to call it.
+     */
+    public static void forceAvailabilityForTests(Boolean value) {
+        VulkanProbe.forceForTests(value);
     }
 }

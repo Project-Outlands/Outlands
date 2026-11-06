@@ -14,12 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * The Vulkan backend is registered and named, but cannot be selected yet.
+ * The Vulkan backend's registration, and what selection does with it.
  *
- * <p>This covers the plumbing rather than the renderer: a backend that is registered, named through the system
- * property, probed, refused and falls back. The first test is also a tripwire - it asserts that the branch
- * default cannot actually take effect, so flipping the probe has to be a deliberate act that revisits
- * {@link VulkanBackend#BRANCH_DEVELOPMENT_PRIORITY} and the shipped default at the same time.</p>
+ * <p>The probe answer is pinned in every test: the real one asks the machine's driver, and a test that asserts a
+ * fixed outcome from it would pass or fail depending on what GPU the machine has. Pinning it also keeps the
+ * selection tests honest - they are about what selection does with an answer, not about producing one.</p>
  */
 class VulkanBackendTest {
 
@@ -31,22 +30,52 @@ class VulkanBackendTest {
     }
 
     @AfterEach
-    void clearProperty() {
+    void restore() {
         System.clearProperty(RenderBackendSelection.PROPERTY);
+        VulkanBackend.forceAvailabilityForTests(null);
     }
 
     @Test
-    void installRegistersTheBackendButItCannotBeSelectedYet() {
+    void installRegistersTheBackend() {
+        VulkanBackend.forceAvailabilityForTests(false);
         VulkanBackend.install();
 
         assertNotNull(RenderBackends.get(VulkanBackend.ID), "install() must register the backend");
         assertFalse(RenderBackends.isVanilla(VulkanBackend.ID));
+    }
+
+    @Test
+    void anUnavailableBackendIsNotSelected() {
+        VulkanBackend.forceAvailabilityForTests(false);
+        VulkanBackend.install();
+
         assertSame(RenderBackend.VANILLA, RenderBackendSelection.select(),
-                "a backend that cannot own the frame must not be selected");
+                "a backend whose probe says no must not own the frame");
+    }
+
+    @Test
+    void anAvailableBackendIsSelectedOverTheVanillaFallback() {
+        VulkanBackend.forceAvailabilityForTests(true);
+        VulkanBackend.install();
+
+        // vanilla-gl is not a candidate - it is the fallback target - so being available is enough to win.
+        assertSame(RenderBackends.get(VulkanBackend.ID), RenderBackendSelection.select());
+    }
+
+    @Test
+    void forcingAnUnavailableBackendFallsBackToVanilla() {
+        VulkanBackend.forceAvailabilityForTests(false);
+        VulkanBackend.install();
+        System.setProperty(RenderBackendSelection.PROPERTY, VulkanBackend.ID);
+
+        // Being named explicitly does not bypass the probe: otherwise the window would be created with flags that
+        // nothing in the process can draw to.
+        assertSame(RenderBackend.VANILLA, RenderBackendSelection.select());
     }
 
     @Test
     void installIsIdempotent() {
+        VulkanBackend.forceAvailabilityForTests(false);
         VulkanBackend.install();
         VulkanBackend.install();
 
@@ -55,17 +84,8 @@ class VulkanBackendTest {
     }
 
     @Test
-    void forcingAnUnavailableBackendFallsBackToVanilla() {
-        VulkanBackend.install();
-        System.setProperty(RenderBackendSelection.PROPERTY, VulkanBackend.ID);
-
-        // Being named explicitly does not bypass the probe: otherwise the window would be created with flags
-        // that nothing in the process can draw to.
-        assertSame(RenderBackend.VANILLA, RenderBackendSelection.select());
-    }
-
-    @Test
     void installAfterSelectionIsIgnored() {
+        VulkanBackend.forceAvailabilityForTests(false);
         RenderBackendSelection.select();
 
         VulkanBackend.install();
@@ -76,12 +96,37 @@ class VulkanBackendTest {
 
     @Test
     void backendAsksForAVulkanWindowAndNoGlContext() {
+        VulkanBackend.forceAvailabilityForTests(false);
         VulkanBackend.install();
         RenderBackend backend = RenderBackends.get(VulkanBackend.ID);
 
         assertEquals(VulkanBackend.ID, backend.id());
         assertEquals(SDLVideo.SDL_WINDOW_VULKAN, backend.sdlWindowFlags());
         assertFalse(backend.isOpenGl(), "a Vulkan window has no GL context, so GL state is not meaningful");
-        assertNull(backend.nativeContext(), "there is no context to hand out yet");
+        assertNull(backend.nativeContext(), "no context exists before init() is called");
+    }
+
+    @Test
+    void priorityIsHighEnoughToWinByDefault() {
+        // The branch registers Vulkan above every other candidate so the branch boots into it without a property.
+        // A candidate at a normal priority must not outrank it.
+        RenderBackend other = new RenderBackend() {
+            @Override
+            public String id() {
+                return "other";
+            }
+
+            @Override
+            public long sdlWindowFlags() {
+                return SDLVideo.SDL_WINDOW_OPENGL;
+            }
+        };
+        RenderBackends.register(other);
+        RenderBackendSelection.register(new RenderBackendSelection.Candidate(other, () -> true, 100));
+
+        VulkanBackend.forceAvailabilityForTests(true);
+        VulkanBackend.install();
+
+        assertSame(RenderBackends.get(VulkanBackend.ID), RenderBackendSelection.select());
     }
 }

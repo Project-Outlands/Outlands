@@ -53,6 +53,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
 
+import net.minecraftforge.client.render.RenderBackend;
 import net.minecraftforge.client.render.RenderBackendSelection;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memUTF8;
@@ -475,8 +476,11 @@ public class Display {
             if (sdlGlContext == NULL) {
                 throw new IllegalStateException("Failed to create GL context: " + SDLError.SDL_GetError());
             }
+        } else {
+            // A non-GL backend creates its own context/surface from the window. It has to happen here and not
+            // later: the surface is a property of this window, and the device is chosen from the pair.
+            RenderBackendSelection.get().init(sdlWindow);
         }
-        // A non-GL backend creates its own context/surface from the window; there is no GL context to make current.
 
         final long flags = SDL_GetWindowFlags(sdlWindow);
         displayFocused = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
@@ -954,6 +958,13 @@ public class Display {
         if (!displayCreated) {
             return;
         }
+        final RenderBackend backend = RenderBackendSelection.get();
+        if (!backend.isOpenGl()) {
+            // Runs on the caller thread, same as the GL swap below: the backend presents the frame the caller
+            // finished recording, and must not queue it behind the client thread.
+            backend.present();
+            return;
+        }
         // Runs on the caller thread: the splash renderer swaps its own frames and would deadlock waiting
         // for the client thread to drain a queued swap.
         Sys.checkSdl(SDLVideo.SDL_GL_SwapWindow(sdlWindow));
@@ -963,6 +974,11 @@ public class Display {
         if (drawable != null) {
             drawable.destroy();
             drawable = null;
+        }
+        // Release what the backend created from the window before the window goes away: a Vulkan surface is a
+        // property of the window, so destroying the window first would leave the driver holding a dangling one.
+        if (RenderBackendSelection.isSelected()) {
+            RenderBackendSelection.get().close();
         }
         // create() installs the function provider before the display counts as created, so releasing it must not
         // depend on displayCreated: a create that fails right after GL.create() would otherwise leave the provider

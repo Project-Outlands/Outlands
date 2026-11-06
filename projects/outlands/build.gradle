@@ -112,6 +112,17 @@ ext {
             'natives-windows-arm64', 'natives-windows-x86', 'natives-windows'
         ]
     ]
+
+    // Vulkan, for the render backend. Kept out of lwjglLibraries on purpose: that list is expanded into a natives
+    // artifact for every architecture in lwjglLibraries[1], and lwjgl-vulkan only publishes natives for macOS
+    // (MoltenVK). On Windows and Linux it loads the system loader - vulkan-1.dll / libvulkan.so.1 - so there is
+    // nothing of ours to ship, and asking Gradle for lwjgl-vulkan:natives-linux would fail the build.
+    //
+    // Order matters where this list is concatenated with lwjglLibraries[0]: the natives helper matches jar names by
+    // substring, and 'lwjgl' is a substring of every module here, so the specific names have to come first.
+    vulkanLibraries = ['lwjgl-vulkan', 'lwjgl-vma']
+    // The architectures lwjgl-vulkan actually publishes natives for.
+    vulkanVulkanNativeArches = ['natives-macos', 'natives-macos-arm64']
 }
 
 apply from: 'dependencies.gradle'

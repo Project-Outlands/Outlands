@@ -75,6 +75,16 @@ public interface RenderBackend {
     }
 
     /**
+     * Presents one frame. Called where the GL backend would swap buffers, once per frame.
+     *
+     * <p>This is deliberately one method rather than a begin/end pair: the only thing the caller knows is "the
+     * frame is over, show it", which is exactly what {@code SDL_GL_SwapWindow} means. Recording, submission and
+     * presentation all happen inside it. A backend that needs to interleave CPU work with the frame will grow a
+     * richer contract when the render graph exists, not before.</p>
+     */
+    default void present() {}
+
+    /**
      * The unmodified vanilla renderer.
      *
      * <p>A singleton because there is exactly one: it is the renderer the game already runs. Its flags are the

@@ -27,7 +27,10 @@ tasks.register('installerArtifacts') {
     doLast {
         def result = [
             artifacts   : Util.getArtifacts(installerCfg, true),
-            lwjglNatives: Util.getLWJGLNatives(nativesCfg, testCfg, lwjglLibraries[0], lwjglLibraries[1])
+            // The Vulkan module names are concatenated in front of lwjglLibraries[0]: the helper matches jar names by
+            // substring, and 'lwjgl' is a substring of every module name, so the specific ones have to come first.
+            lwjglNatives: Util.getLWJGLNatives(nativesCfg, testCfg,
+                    project.vulkanLibraries + lwjglLibraries[0], lwjglLibraries[1])
         ]
         outputFile.get().asFile.text = new JsonBuilder(result).toPrettyString()
     }
