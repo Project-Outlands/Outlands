@@ -321,7 +321,17 @@
              }
          }
  
-@@ -1156,6 +1166,10 @@
+@@ -1100,6 +1110,8 @@
+             int i2 = this.mc.gameSettings.limitFramerate;
+ 
+-            if (this.mc.world != null)
++            // Cleanroom: joining assigns the WorldClient before its view entity exists, and rendering the
++            // world in that window dereferences the missing entity. Skip the world, keep the GUI.
++            if (this.mc.world != null && this.mc.getRenderViewEntity() != null)
+             {
+                 this.mc.profiler.startSection("level");
+                 int j = Math.min(Minecraft.getDebugFPS(), i2);
+@@ -1156,6 +1168,10 @@
                  GlStateManager.loadIdentity();
                  this.setupOverlayRendering();
                  this.renderEndNanoTime = System.nanoTime();
@@ -332,7 +342,7 @@
              }
  
              if (this.mc.currentScreen != null)
-@@ -1164,7 +1178,7 @@
+@@ -1164,7 +1180,7 @@
  
                  try
                  {
@@ -341,7 +351,7 @@
                  }
                  catch (Throwable throwable)
                  {
-@@ -1241,7 +1255,7 @@
+@@ -1241,7 +1257,7 @@
              }
              catch (IOException ioexception)
              {
@@ -350,7 +360,7 @@
              }
          }
      }
-@@ -1273,7 +1287,7 @@
+@@ -1273,7 +1289,7 @@
  
                      if (this.mc.playerController.getCurrentGameType() == GameType.SPECTATOR)
                      {
@@ -359,7 +369,7 @@
                      }
                      else
                      {
-@@ -1331,7 +1345,7 @@
+@@ -1331,7 +1347,7 @@
          GlStateManager.clear(16640);
          this.mc.profiler.endStartSection("camera");
          this.setupCameraTransform(partialTicks, pass);
@@ -368,7 +378,7 @@
          this.mc.profiler.endStartSection("frustum");
          ClippingHelperImpl.getInstance();
          this.mc.profiler.endStartSection("culling");
-@@ -1391,7 +1405,9 @@
+@@ -1391,7 +1407,9 @@
          GlStateManager.disableAlpha();
          renderglobal.renderBlockLayer(BlockRenderLayer.SOLID, partialTicks, pass, entity);
          GlStateManager.enableAlpha();
@@ -378,7 +388,7 @@
          this.mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).setBlurMipmap(false, false);
          renderglobal.renderBlockLayer(BlockRenderLayer.CUTOUT, partialTicks, pass, entity);
          this.mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).restoreLastBlurMipmap();
-@@ -1405,7 +1421,9 @@
+@@ -1405,7 +1423,9 @@
              GlStateManager.pushMatrix();
              RenderHelper.enableStandardItemLighting();
              this.mc.profiler.endStartSection("entities");
@@ -388,7 +398,7 @@
              RenderHelper.disableStandardItemLighting();
              this.disableLightmap();
          }
-@@ -1418,6 +1436,7 @@
+@@ -1418,6 +1438,7 @@
              EntityPlayer entityplayer = (EntityPlayer)entity;
              GlStateManager.disableAlpha();
              this.mc.profiler.endStartSection("outline");
@@ -396,7 +406,7 @@
              renderglobal.drawSelectionBox(entityplayer, this.mc.objectMouseOver, 0, partialTicks);
              GlStateManager.enableAlpha();
          }
-@@ -1468,6 +1487,17 @@
+@@ -1468,6 +1489,17 @@
          GlStateManager.shadeModel(7425);
          this.mc.profiler.endStartSection("translucent");
          renderglobal.renderBlockLayer(BlockRenderLayer.TRANSLUCENT, partialTicks, pass, entity);
@@ -414,7 +424,7 @@
          GlStateManager.shadeModel(7424);
          GlStateManager.depthMask(true);
          GlStateManager.enableCull();
-@@ -1480,6 +1510,9 @@
+@@ -1480,6 +1512,9 @@
              this.renderCloudsCheck(renderglobal, partialTicks, pass, d0, d1, d2);
          }
  
@@ -424,7 +434,7 @@
          this.mc.profiler.endStartSection("hand");
  
          if (this.renderHand)
-@@ -1624,6 +1657,13 @@
+@@ -1624,6 +1659,13 @@
  
      protected void renderRainSnow(float partialTicks)
      {
@@ -438,7 +448,7 @@
          float f = this.mc.world.getRainStrength(partialTicks);
  
          if (!(f <= 0.0F))
-@@ -1691,7 +1731,7 @@
+@@ -1691,7 +1733,7 @@
  
                          int i3 = j2;
  
@@ -447,7 +457,7 @@
                          {
                              i3 = l;
                          }
-@@ -1897,29 +1937,16 @@
+@@ -1897,29 +1939,16 @@
              this.fogColorGreen = (float)vec3d3.y;
              this.fogColorBlue = (float)vec3d3.z;
          }
@@ -487,7 +497,7 @@
          }
  
          float f13 = this.fogColor2 + (this.fogColor1 - this.fogColor2) * partialTicks;
-@@ -1978,6 +2005,9 @@
+@@ -1978,6 +2007,9 @@
                  f6 = 1.0F / this.fogColorBlue;
              }
  
@@ -497,7 +507,7 @@
              this.fogColorRed = this.fogColorRed * (1.0F - f15) + this.fogColorRed * f6 * f15;
              this.fogColorGreen = this.fogColorGreen * (1.0F - f15) + this.fogColorGreen * f6 * f15;
              this.fogColorBlue = this.fogColorBlue * (1.0F - f15) + this.fogColorBlue * f6 * f15;
-@@ -1993,6 +2023,13 @@
+@@ -1993,6 +2025,13 @@
              this.fogColorBlue = f7;
          }
  
@@ -511,7 +521,7 @@
          GlStateManager.clearColor(this.fogColorRed, this.fogColorGreen, this.fogColorBlue, 0.0F);
      }
  
-@@ -2003,7 +2040,9 @@
+@@ -2003,7 +2042,9 @@
          GlStateManager.glNormal3f(0.0F, -1.0F, 0.0F);
          GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
          IBlockState iblockstate = ActiveRenderInfo.getBlockStateAtEntityViewpoint(this.mc.world, entity, partialTicks);
@@ -522,7 +532,7 @@
          if (entity instanceof EntityLivingBase && ((EntityLivingBase)entity).isPotionActive(MobEffects.BLINDNESS))
          {
              float f1 = 5.0F;
-@@ -2089,6 +2128,7 @@
+@@ -2089,6 +2130,7 @@
                  GlStateManager.setFogStart(f * 0.05F);
                  GlStateManager.setFogEnd(Math.min(f, 192.0F) * 0.5F);
              }
