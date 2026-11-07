@@ -56,14 +56,6 @@ final class VulkanTextures implements AutoCloseable {
     private final Map<Long, Long> samplers = new HashMap<>();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
-    /**
-     * Readback buffers proving the first upload arrived intact, per slot.
-     *
-     * <p>One per slot and only for the first texture, because the question is whether the transfer path works at all,
-     * not whether it works for each of forty atlases. The comparison happens after the slot's fence, when the copy
-     * has actually executed.</p>
-     */
-    private final List<Readback>[] pendingReadback;
 
     private final VulkanImage white;
     private final long whiteSampler;
@@ -78,15 +70,6 @@ final class VulkanTextures implements AutoCloseable {
      * @param descriptorSet   the set that binds it, reused for every draw that samples this texture
      */
     private record Entry(VulkanImage image, long sampler, long descriptorSet, long uploadedVersion) {}
-
-    /**
-     * A recorded copy of an image, waiting for its frame to finish.
-     *
-     * @param buffer  host-visible memory the copy wrote into
-     * @param sent    the bytes that were uploaded, to compare against
-     * @param texture the game's handle, for the report
-     */
-    private record Readback(VulkanBuffer buffer, byte[] sent, int texture, boolean owns, String label) {}
 
     @SuppressWarnings("unchecked")
     /**
@@ -107,10 +90,8 @@ final class VulkanTextures implements AutoCloseable {
         this.source = source;
         this.srgbTextures = srgbRenderTarget;
         this.pendingStaging = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
-        this.pendingReadback = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int slot = 0; slot < this.pendingStaging.length; slot++) {
             this.pendingStaging[slot] = new ArrayList<>();
-            this.pendingReadback[slot] = new ArrayList<>();
         }
 
         // The stand-in is white in either encoding, so its format only has to match for consistency.
@@ -155,30 +136,17 @@ final class VulkanTextures implements AutoCloseable {
         // and copies because they come from an sRGB attachment. One format answers both.
         int format = textureFormat();
         if (entry == null) {
-            if (Boolean.getBoolean("outlands.render.dumpTextures")) {
-                dump(image);
-            }
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
             long set = descriptors.allocate(created.view(), sampler);
             entry = new Entry(created, sampler, set, -1L);
             entries.put(textureId, entry);
-            // One line per texture, once: this is the only place that knows both the game's handle and the bytes.
-            // Reported because "the scroll bar shows the background's dirt" has two very different causes - the
-            // draw recorded the wrong handle, or two handles hold the same image - and a fingerprint tells them
-            // apart without another round of guessing.
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Texture {} = {} fingerprint {}", textureId,
-                    image.width() + "x" + image.height(), fingerprint(image));
         } else if (entry.image().width() != image.width() || entry.image().height() != image.height()) {
             // A texture cannot be resized in place, and GL did allow it: glTexImage2D on an existing name replaces
             // the level at a possibly different size. The sampler survives, so only the image and its set change.
             entry.image().close();
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long set = descriptors.allocate(created.view(), entry.sampler());
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Texture {} resized to {}x{} (a new image means every draw must resolve it again)", textureId,
-                    image.width(), image.height());
             entry = new Entry(created, entry.sampler(), set, -1L);
             entries.put(textureId, entry);
         }
@@ -199,19 +167,7 @@ final class VulkanTextures implements AutoCloseable {
         VulkanBuffer buffer = VulkanBuffer.createStaging(context.device(), context, staged);
         pendingStaging[slot].add(buffer);
         target.upload(commandBuffer, buffer.handle());
-
-        if (!verifiedTransfer && image.id() != 0) {
-            // Record a copy of what the upload just wrote, into host-visible memory, and compare it once the frame
-            // has finished. Every claim about sampling rests on this transfer being faithful; this is the only thing
-            // in the renderer that checks it instead of assuming it.
-            verifiedTransfer = true;
-            VulkanBuffer readback = VulkanBuffer.createReadback(context.device(), context, staged.length);
-            target.copyTo(commandBuffer, readback.handle());
-            pendingReadback[slot].add(new Readback(readback, staged, image.id(), true, "upload"));
-        }
     }
-
-    private boolean verifiedTransfer;
 
     /**
      * Releases this slot's staging buffers.
@@ -220,59 +176,10 @@ final class VulkanTextures implements AutoCloseable {
      * vertex buffer. Calling it earlier would free memory a pending copy still reads.</p>
      */
     void releaseSlot(int slot) {
-        for (Readback readback : pendingReadback[slot]) {
-            try {
-                report(readback);
-            } finally {
-                if (readback.owns()) {
-                    readback.buffer().close();
-                }
-            }
-        }
-        pendingReadback[slot].clear();
-
         for (VulkanBuffer buffer : pendingStaging[slot]) {
             buffer.close();
         }
         pendingStaging[slot].clear();
-
-    }
-
-    /**
-     * Compares a readback against what was uploaded and logs the verdict.
-     *
-     * <p>A mismatch is reported with the first differing byte and the two values, because "the image is blank" and
-     * "the image is one byte off" need different fixes and look the same in a screenshot.</p>
-     */
-    private static final java.util.concurrent.atomic.AtomicBoolean DIAGNOSE =
-            new java.util.concurrent.atomic.AtomicBoolean();
-
-    private static void report(Readback readback) {
-        if (readback.sent() == null) {
-            // No expected bytes: this is a framebuffer copy being sampled, not an upload being verified. Report where
-            // the bright (sky-like) pixels sit, which is what tells an upside-down or rolled background from a
-            // correct one without another screenshot.
-            byte[] area = readback.buffer().read(256 * 256 * 4);
-            reportQuadrants(area, readback.texture());
-            return;
-        }
-        byte[] sent = readback.sent();
-        byte[] got = readback.buffer().read(sent.length);
-        int firstDifference = -1;
-        int differing = 0;
-        for (int i = 0; i < sent.length; i++) {
-            if (sent[i] != got[i]) {
-                differing++;
-                if (firstDifference < 0) {
-                    firstDifference = i;
-                }
-            }
-        }
-        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                "Upload verification for texture {}: {} of {} bytes differ, first at {} (sent {}, read back {})",
-                readback.texture(), differing, sent.length, firstDifference,
-                firstDifference < 0 ? "n/a" : Integer.toHexString(sent[firstDifference] & 0xFF),
-                firstDifference < 0 ? "n/a" : Integer.toHexString(got[firstDifference] & 0xFF));
     }
 
     /**
@@ -305,21 +212,6 @@ final class VulkanTextures implements AutoCloseable {
     }
 
     /**
-     * A short, stable summary of an image's contents: size, first texel, and a cheap sum over every texel.
-     *
-     * <p>Two handles with the same fingerprint hold the same image, which is a bug; one handle whose fingerprint does
-     * not match its resource location is a different bug. Neither can be read off a screenshot.</p>
-     */
-    private static String fingerprint(TextureImage image) {
-        int[] pixels = image.argb();
-        long sum = 0L;
-        for (int i = 0; i < pixels.length; i += Math.max(1, pixels.length / 64)) {
-            sum = sum * 31 + pixels[i];
-        }
-        return Integer.toHexString(pixels.length == 0 ? 0 : pixels[0]) + "/" + Long.toHexString(sum);
-    }
-
-    /**
      * Copies part of this frame's framebuffer into a texture.
      *
      * <p><b>Through a buffer, not image to image.</b> {@code vkCmdCopyImage} requires both images to share a format,
@@ -346,29 +238,7 @@ final class VulkanTextures implements AutoCloseable {
         // instead meant releasing the current slot freed the buffer another slot was still reading, which is exactly
         // what the validation layers reported as destroying a buffer in use.
         pendingStaging[slot].add(staging);
-        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() % 20 == 0) {
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Framebuffer copy rect: source ({},{}) {}x{} -> destination ({},{}) level {} of texture {}",
-                    copy.x(), copy.y(), copy.width(), copy.height(), copy.xOffset(), copy.yOffset(), copy.level(),
-                    copy.texture());
-        }
-        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() % 30 == 1) {
-            // The copy and the draws that sample it must name the same image. The background is a dynamic texture, and
-            // a new GuiMainMenu - which is what quitting a world builds - makes the game re-create it, so the id can
-            // outlive the image it used to mean. Comparing these two lines is how that is told apart from a copy that
-            // grabbed the wrong region.
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Copy target: texture {} -> view {} ({}x{}) uploaded version {}", copy.texture(),
-                    entry.image().view(), entry.image().width(), entry.image().height(), entry.uploadedVersion());
-        }
         entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
-
-        if (Boolean.getBoolean("outlands.render.debug")) {
-            // Borrowed, not owned: the same buffer is already in pendingStaging and is closed there. Adding it to the
-            // readback list as an owner freed it twice, which the validation layers reported as destroying an
-            // invalid buffer handle.
-            pendingReadback[slot].add(new Readback(staging, null, copy.texture(), false, "staging"));
-        }
     }
 
     /**
@@ -383,31 +253,6 @@ final class VulkanTextures implements AutoCloseable {
                 : org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
     }
 
-    /**
-     * Writes a texture's ints to a file so they can be compared with the source image.
-     *
-     * <p>The one thing never checked: the bytes reaching this backend are compared against the bytes on the device,
-     * but never against what the image file actually contains. A transposed or channel-rotated decode would pass every
-     * other check in this renderer and show up only as a picture that is subtly the wrong way round.</p>
-     */
-    private static void dump(TextureImage image) {
-        try {
-            java.nio.file.Path dir = java.nio.file.Path.of("/tmp/outlands-tex");
-            java.nio.file.Files.createDirectories(dir);
-            java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(image.argb().length * 4)
-                    .order(java.nio.ByteOrder.nativeOrder());
-            for (int pixel : image.argb()) {
-                buffer.putInt(pixel);
-            }
-            java.nio.file.Files.write(dir.resolve("tex-" + image.id() + "-" + image.width() + "x" + image.height()
-                    + ".argb"), buffer.array());
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Dumped texture {} ({}x{}) to /tmp/outlands-tex", image.id(), image.width(), image.height());
-        } catch (java.io.IOException e) {
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").warn("Could not dump a texture", e);
-        }
-    }
-
     /** Whether a texture has been filled by a framebuffer copy, and is therefore sampled u-reversed. */
     boolean isFramebufferTarget(int texture) {
         return source.isFramebufferTarget(texture);
@@ -416,88 +261,6 @@ final class VulkanTextures implements AutoCloseable {
     /** The stand-in set a draw uses when nothing is bound. */
     long whiteDescriptorSet() {
         return whiteSet;
-    }
-
-    /**
-     * Prints the mean colour of the copied region's four quadrants.
-     *
-     * <p>A background with the sky on the right and the ground on the left is rolled; one with the sky at the bottom
-     * is flipped; one with the sky at the top is right. Those three cases are indistinguishable in a written
-     * description and obvious in four numbers.</p>
-     */
-    private static void reportQuadrants(byte[] bgra, int texture) {
-        int side = 256;
-        StringBuilder out = new StringBuilder();
-        for (int quadrant = 0; quadrant < 4; quadrant++) {
-            int x0 = (quadrant % 2) * side / 2;
-            int y0 = (quadrant / 2) * side / 2;
-            long blue = 0;
-            long green = 0;
-            long red = 0;
-            long alpha = 0;
-            int count = 0;
-            for (int y = y0; y < y0 + side / 2; y += 2) {
-                for (int x = x0; x < x0 + side / 2; x += 2) {
-                    int at = (y * side + x) * 4;
-                    blue += bgra[at] & 0xFF;
-                    green += bgra[at + 1] & 0xFF;
-                    red += bgra[at + 2] & 0xFF;
-                    alpha += bgra[at + 3] & 0xFF;
-                    count++;
-                }
-            }
-            // Alpha is part of the answer: the blur layer is only visible where the copied alpha is set, and a green
-            // image with zero alpha looks identical to a green image in this report while showing the sharp panorama
-            // underneath on screen.
-            out.append(String.format(java.util.Locale.ROOT, " %s=#%02x%02x%02x/a%02x",
-                    new String[] {"topLeft", "topRight", "bottomLeft", "bottomRight"}[quadrant],
-                    red / count, green / count, blue / count, alpha / count));
-        }
-        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                "Framebuffer copy for texture {}:{}", texture, out);
-    }
-
-    /**
-     * Copies each resolved texture's image back for inspection, once.
-     *
-     * <p>Answers "what does the renderer actually display as the background" without a screenshot: the image the
-     * blur draws samples is read back after the frame that filled it has finished, and its four quadrants are
-     * reported. A background showing sky on the right has a right side that is bright, whatever the copy source
-     * looked like.</p>
-     */
-    void probeFramebufferTargets(VkCommandBuffer commandBuffer, int slot) {
-        if (PROBED.get()) {
-            return;
-        }
-        boolean any = entries.keySet().stream().anyMatch(source::isFramebufferTarget);
-        if (!any || !PROBED.compareAndSet(false, true)) {
-            // Nothing to probe yet on the first frame: the entry does not exist until it has been resolved once.
-            return;
-        }
-        for (java.util.Map.Entry<Integer, Entry> mapEntry : entries.entrySet()) {
-            if (!source.isFramebufferTarget(mapEntry.getKey())) {
-                continue;
-            }
-            VulkanImage image = mapEntry.getValue().image();
-            int bytes = image.width() * image.height() * 4;
-            VulkanBuffer readback = VulkanBuffer.createReadback(context.device(), context, bytes);
-            image.copyTo(commandBuffer, readback.handle());
-            pendingReadback[slot].add(new Readback(readback, null, mapEntry.getKey(), true, "image"));
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Probing framebuffer target {} ({}x{}) as the previous frame left it",
-                    mapEntry.getKey(), image.width(), image.height());
-        }
-    }
-
-    private static final java.util.concurrent.atomic.AtomicBoolean PROBED =
-            new java.util.concurrent.atomic.AtomicBoolean();
-    /** How many copy rectangles have been reported, so the log stays bounded. */
-    private static final java.util.concurrent.atomic.AtomicInteger COPIED =
-            new java.util.concurrent.atomic.AtomicInteger();
-
-    /** How many textures are on the device. Diagnostics. */
-    int resident() {
-        return entries.size();
     }
 
     /**

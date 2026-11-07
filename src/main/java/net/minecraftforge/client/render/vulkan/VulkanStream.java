@@ -8,8 +8,6 @@ import net.minecraftforge.client.render.vertex.DrawState;
 import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.PrimitiveShape;
 import net.minecraftforge.client.render.vertex.VertexConverter;
-import net.minecraftforge.client.render.vertex.VertexLayout;
-import net.minecraft.client.renderer.vertex.VertexFormatElement;
 
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -64,8 +62,6 @@ final class VulkanStream implements AutoCloseable {
     /** {@code GL_GREATER}, the alpha test comparison vanilla sets when it enables the test. */
     private static final int GL_GREATER = 516;
 
-    private static final java.util.concurrent.atomic.AtomicBoolean DIAGNOSE =
-            new java.util.concurrent.atomic.AtomicBoolean();
     /**
      * One buffer per frame in flight.
      *
@@ -117,11 +113,6 @@ final class VulkanStream implements AutoCloseable {
      * @param extra additional texture handles to resolve, for paths outside the draw list (the terrain node's atlas)
      */
     void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int... extra) {
-        if (Boolean.getBoolean("outlands.render.debug")) {
-            // Before anything is resolved: resolving re-uploads an allocated-but-unwritten texture, which would
-            // overwrite the very content this is asking about.
-            textures.probeFramebufferTargets(commandBuffer, slot);
-        }
         resolved.clear();
         for (FrameDraws.Operation op : ops) {
             if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
@@ -138,21 +129,10 @@ final class VulkanStream implements AutoCloseable {
         }
     }
 
-    /** Texture handles already reported, so the resolve log says one line per texture rather than one per frame. */
-    private final java.util.Set<Integer> reportedTextures = new java.util.HashSet<>();
-
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
         if (!resolved.containsKey(texture)) {
             long set = textures.descriptorSet(texture, commandBuffer, slot);
             resolved.put(texture, set);
-            if (reportedTextures.add(texture) && Boolean.getBoolean("outlands.render.debug")) {
-                // Which descriptor set a texture got, and whether it is the blank stand-in. This is the fact that
-                // separates "the draw sampled the wrong image" from "the draw sampled its own image", and neither
-                // is visible from outside. One line per texture, not per frame.
-                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                        "Resolved texture {} -> set {} ({})", texture, set,
-                        set == textures.whiteDescriptorSet() ? "WHITE STAND-IN" : "its own image");
-            }
         }
     }
 
@@ -177,18 +157,6 @@ final class VulkanStream implements AutoCloseable {
         List<FrameDraws.Draw> draws = ops.stream()
                 .filter(FrameDraws.Draw.class::isInstance).map(FrameDraws.Draw.class::cast).toList();
         drawsThisFrame = draws.size();
-        if (DIAGNOSE.compareAndSet(false, true)) {
-            // Once, because this is a question about what the frame contains, not a per-frame measurement.
-            Map<String, Integer> histogram = new java.util.TreeMap<>();
-            for (FrameDraws.Draw draw : draws) {
-                String key = "stride " + draw.layout().stride() + " mode " + draw.mode();
-                histogram.merge(key, draw.vertexCount(), Integer::sum);
-            }
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Frame draws: {} calls, {} textures, vertices per (stride, mode): {}",
-                    draws.size(), textures.resident(), histogram);
-            logProjectionSummary(draws);
-        }
         // This slot's fence has been waited on, so whatever it used last time is finished.
         releaseSlot(slot);
         if (draws.isEmpty()) {
@@ -262,26 +230,6 @@ final class VulkanStream implements AutoCloseable {
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
 
             int indexOfOp = -1;
-            int sinceCopy = 0;
-            if (Boolean.getBoolean("outlands.render.debug")) {
-                int perspective = 0;
-                int copies = 0;
-                int copyTarget = -1;
-                for (FrameDraws.Operation op : ops) {
-                    if (op instanceof FrameDraws.Draw d && d.state().mvp()[15] == 0.0F) {
-                        perspective++;
-                    } else if (op instanceof FrameDraws.FramebufferCopy c) {
-                        copies++;
-                        copyTarget = c.texture();
-                    }
-                }
-                // One line per frame: what the frame contains, and which texture the copy feeds. The main menu's
-                // background is a dynamic texture whose id changes when the game re-creates it, so seeing the id here
-                // and the one the draws resolve is how a stale binding is told from a wrong copy rectangle.
-                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                        "frame: {} draws, {} perspective, {} copies -> texture {} = resolved set {}",
-                        draws.size(), perspective, copies, copyTarget, resolved.get(copyTarget));
-            }
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
@@ -290,12 +238,16 @@ final class VulkanStream implements AutoCloseable {
                     vkCmdEndRendering(commandBuffer);
                     textures.copyFromFramebuffer(commandBuffer, copy, target, slot);
                     target.beginRendering(commandBuffer);
-                    sinceCopy = 1;
+                    // beginRenderingInstance resets the hardware viewport and scissor to the full extent of the window.
+                    // Invalidate the cache so the next draw restores its own viewport and scissor instead of falsely
+                    // assuming the hardware state is still what it was before the copy.
+                    appliedViewport[0] = Integer.MIN_VALUE;
+                    appliedScissor[0] = Integer.MIN_VALUE;
                     continue;
                 }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
-                if (draw.state().texture() == 9 && draw.vertexCount() == 12) {
+                if (textures.isFramebufferTarget(draw.state().texture()) && draw.vertexCount() == 12) {
                     // The main menu's seven blur passes are twelve-vertex quads that sample the copy and draw it back
                     // into the same corner of the framebuffer they were copied from. That feedback loop is a GL-era
                     // technique: GL's copy is a snapshot, so each pass blurs the picture one texel further and the
@@ -305,11 +257,6 @@ final class VulkanStream implements AutoCloseable {
                     // is a flat colour by the third frame. They are skipped until the blur is a real post-process the
                     // backend owns, which is where a screen-space effect belongs anyway.
                     continue;
-                }
-                if (Boolean.getBoolean("outlands.render.debug") && !PERSPECTIVE_REPORTED.get()
-                        && draw.state().mvp()[15] == 0.0F) {
-                    PERSPECTIVE_REPORTED.set(true);
-                    reportPerspectiveDraw(draw);
                 }
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
                 // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
@@ -322,14 +269,8 @@ final class VulkanStream implements AutoCloseable {
                 push.put(16, draw.state().alphaReference());
                 // GL_GREATER is the only comparison vanilla uses; anything else is rejected rather than approximated.
                 push.put(17, draw.state().alphaTest() ? 1.0F : 0.0F);
-                // Only a texture that a framebuffer copy filled is u-reversed; everything uploaded from a file is
-                // sampled exactly as the game's coordinates say.
-                // Diagnostic: -Doutlands.render.uvMode=N selects how texture coordinates are interpreted, so the
-                // background's orientation can be tested against a transposition without changing the game's own data.
-                // Default 0: textures are sampled exactly as the game's coordinates say. The mirror (1) and the
-                // transposition (2) exist because the main menu's background came out rolled, and testing those two
-                // is how the transpose was identified as the shape of the difference.
-                push.put(18, (float) Integer.getInteger("outlands.render.uvMode", 0));
+                // flipU in terrain shader (0.0F: sampled as given).
+                push.put(18, 0.0F);
                 if (draw.state().alphaTest() && draw.state().alphaComparison() != GL_GREATER) {
                     throw new UnsupportedOperationException("alpha test comparison "
                             + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"
@@ -356,133 +297,6 @@ final class VulkanStream implements AutoCloseable {
                 }
             }
         }
-    }
-
-    /**
-     * Dumps the translucent full-screen quads in a frame, once.
-     *
-     * <p>"A grey film covers the buttons and the background" is a translucent quadrilateral painted over everything,
-     * and the only way to name it is to read the colour the vertices actually carry - the global
-     * {@code GlStateManager.color} is white for most GUI draws, so the interesting value is in the vertex data. This
-     * prints each quad-sized draw's first vertex colour, its texture and its blend factors, which is enough to pick
-     * it out of a few hundred without another round of guessing.</p>
-     */
-    private void logProjectionSummary(List<FrameDraws.Draw> draws) {
-        if (!Boolean.getBoolean("outlands.render.debug")) {
-            // Off by default: these dumps answer questions about one frame, and a normal run has none of them.
-            return;
-        }
-        StringBuilder report = new StringBuilder();
-        int shown = 0;
-        for (int i = 0; i < draws.size() && shown < 40; i++) {
-            FrameDraws.Draw draw = draws.get(i);
-            // The full-screen overlays: textured quads only, plus anything drawn with no texture bound. Those are
-            // the ones whose alpha decides whether the background is visible at all.
-            if (draw.state().samplesTexture()) {
-                continue;
-            }
-            int colour = firstVertexColor(draw);
-            DrawState state = draw.state();
-            report.append('\n').append("  #").append(i)
-                    .append(" tex=").append(state.texture())
-                    .append(" argb=").append(Integer.toHexString(colour))
-                    .append(" stride=").append(draw.layout().stride())
-                    .append(" blend=").append(state.blend()
-                            ? state.blendSourceRgb() + "->" + state.blendDestinationRgb() : "off")
-                    .append(" scissor=").append(state.scissorEnabled())
-                    .append(" verts=").append(draw.vertexCount())
-                    .append(" mode=").append(draw.mode())
-                    .append(" bytes=").append(hex(draw.vertices(), draw.layout().stride()));
-            shown++;
-        }
-        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
-    }
-
-    private static final java.util.concurrent.atomic.AtomicBoolean PERSPECTIVE_REPORTED =
-            new java.util.concurrent.atomic.AtomicBoolean();
-
-    /**
-     * Reports one perspective draw completely: its matrix, its vertices, and where each vertex lands.
-     *
-     * <p>The last column is the point. Position and texture coordinate together say which part of the image the
-     * screen position shows, which is the only statement about orientation that does not depend on any of this
-     * renderer's conventions: if the vertex that lands at the top of the screen carries the texture coordinate the
-     * game author intended for the top, the picture is upright, whatever the matrices look like.</p>
-     */
-    private static void reportPerspectiveDraw(FrameDraws.Draw draw) {
-        StringBuilder out = new StringBuilder();
-        float[] m = draw.state().mvp();
-        out.append("\n  matrix (column-major):");
-        for (int i = 0; i < 16; i++) {
-            out.append(i % 4 == 0 ? "\n   " : " ");
-            out.append(String.format(java.util.Locale.ROOT, "%9.5f", m[i]));
-        }
-        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
-        int positionOffset = -1;
-        int uvOffset = -1;
-        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
-            if (attribute.usage() == VertexFormatElement.EnumUsage.POSITION) {
-                positionOffset = attribute.offset();
-            } else if (attribute.usage() == VertexFormatElement.EnumUsage.UV && attribute.uvIndex() == 0) {
-                uvOffset = attribute.offset();
-            }
-        }
-        int stride = draw.layout().stride();
-        out.append("\n  vertices (position -> uv -> ndc after the clip-space flip):");
-        for (int v = 0; v < Math.min(4, draw.vertexCount()); v++) {
-            int at = v * stride;
-            float x = data.getFloat(at + positionOffset);
-            float y = data.getFloat(at + positionOffset + 4);
-            float z = data.getFloat(at + positionOffset + 8);
-            float u = uvOffset < 0 ? 0.0F : data.getFloat(at + uvOffset);
-            float w = uvOffset < 0 ? 0.0F : data.getFloat(at + uvOffset + 4);
-            // Column-major multiply, then the same Y negation the push constant applies.
-            float cx = m[0] * x + m[4] * y + m[8] * z + m[12];
-            float cy = m[1] * x + m[5] * y + m[9] * z + m[13];
-            float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-            float ndcX = cw == 0.0F ? Float.NaN : cx / cw;
-            float ndcY = cw == 0.0F ? Float.NaN : -cy / cw;
-            out.append(String.format(java.util.Locale.ROOT,
-                    "\n   v%d pos(%5.2f,%5.2f,%5.2f) uv(%5.3f,%5.3f) -> ndc(%6.3f,%6.3f) w=%5.3f",
-                    v, x, y, z, u, w, ndcX, ndcY, cw));
-        }
-        out.append("\n  (ndc y = +1 is the TOP of the screen in Vulkan; the flip is already applied above)");
-        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info("Perspective draw:{}", out);
-    }
-
-    /** The first vertex's texture coordinate, for a diagnostic about where the sample lands. */
-
-    /** The first {@code count} bytes as hex, for a diagnostic that has to state the data rather than describe it. */
-    private static String hex(byte[] data, int count) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < Math.min(count, data.length); i++) {
-            out.append(String.format(java.util.Locale.ROOT, "%02x", data[i] & 0xFF));
-        }
-        return out.toString();
-    }
-
-    /** The first vertex's {@code 0xAARRGGBB} colour, or {@code 0} when the layout carries none. */
-    private static int firstVertexColor(FrameDraws.Draw draw) {
-        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
-        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
-            if (attribute.usage() != VertexFormatElement.EnumUsage.COLOR) {
-                continue;
-            }
-            int at = attribute.offset();
-            if (attribute.type() == VertexFormatElement.EnumType.UBYTE && attribute.count() == 4) {
-                return ((data.get(at + 3) & 0xFF) << 24) | ((data.get(at) & 0xFF) << 16)
-                        | ((data.get(at + 1) & 0xFF) << 8) | (data.get(at + 2) & 0xFF);
-            }
-            if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
-                int r = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at))) * 255.0F);
-                int g = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 4))) * 255.0F);
-                int b = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 8))) * 255.0F);
-                int a = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 12))) * 255.0F);
-                return (a << 24) | (r << 16) | (g << 8) | b;
-            }
-        }
-        return 0;
     }
 
     /**

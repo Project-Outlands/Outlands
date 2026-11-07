@@ -72,16 +72,6 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         org.joml.Matrix4f mvp = new org.joml.Matrix4f();
         mvp.set(state.projection()).mul(state.modelView());
 
-        if (Boolean.getBoolean("outlands.render.debug") && !PROJECTION_REPORTED.get()
-                && state.projection().m33() == 0.0F) {
-            // A perspective draw: print the two matrices separately. The composed matrix cannot say whether a
-            // rotation went into the projection by mistake, and that mistake would turn the picture by an angle no
-            // amount of yaw can reach - exactly the symptom being chased.
-            PROJECTION_REPORTED.set(true);
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "First perspective draw - projection:{}\n  modelview:{}",
-                    describe(state.projection()), describe(state.modelView()));
-        }
         float[] values = new float[16];
         mvp.get(values);
 
@@ -147,21 +137,6 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
      */
     public boolean samplesTexture() {
         return texture2d;
-    }
-
-    private static final java.util.concurrent.atomic.AtomicBoolean PROJECTION_REPORTED =
-            new java.util.concurrent.atomic.AtomicBoolean();
-
-    /** A matrix as four rows of four numbers, read the way the picture is: first row on top. */
-    private static String describe(org.joml.Matrix4fc m) {
-        StringBuilder out = new StringBuilder();
-        for (int row = 0; row < 4; row++) {
-            out.append("\n   ");
-            for (int column = 0; column < 4; column++) {
-                out.append(String.format(java.util.Locale.ROOT, " %9.5f", m.get(column, row)));
-            }
-        }
-        return out.toString();
     }
 
     /**

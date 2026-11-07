@@ -175,12 +175,6 @@ final class TextureBackendVk implements TextureBackend {
             throw new IllegalStateException("glCopyTexSubImage2D with no texture bound: the copy has no destination");
         }
         framebufferTargets.add(texture);
-        if (Boolean.getBoolean("outlands.render.skipFramebufferCopy")) {
-            // Isolation switch: with the copy skipped, the draws that sample its result have nothing to show and the
-            // frame falls back to whatever was drawn directly - which tells apart "the panorama is wrong" from "the
-            // blur put the wrong thing on screen" in one run instead of five.
-            return;
-        }
         if (!net.minecraftforge.client.render.vertex.FrameDraws.recordFramebufferCopy(texture, level, xOffset, yOffset,
                 x, y, width, height)) {
             throw new IllegalStateException("glCopyTexSubImage2D outside a frame: the source framebuffer does not"
