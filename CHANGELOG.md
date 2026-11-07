@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.07] - 2026-11-07
+
+### 🐛 Bug Fixes
+
+- [`d06ff43`](https://github.com/Project-Outlands/Outlands/commit/d06ff43ed9e85decba9cdc87224cb1b70814418e) - Mixin extra 0.5.5 crash *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚡ Performance
+
+- [`2a4cd65`](https://github.com/Project-Outlands/Outlands/commit/2a4cd6576c4d9a845410795a30ac440fb276334c) - Reduce remapping and config synchronization work *(PR [#54](https://github.com/Project-Outlands/Outlands/pull/54) by [@Circulate233](https://github.com/Circulate233))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`7b48139`](https://github.com/Project-Outlands/Outlands/commit/7b48139dd840b072d28efa2be1bc06784f163778) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.06-2] - 2026-11-06
 
 ### 🐛 Bug Fixes
