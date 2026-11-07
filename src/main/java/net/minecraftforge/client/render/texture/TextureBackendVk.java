@@ -46,6 +46,13 @@ final class TextureBackendVk implements TextureBackend {
         final Map<Integer, Level> levels = new HashMap<>();
         final Map<Integer, Integer> intParameters = new HashMap<>();
         final Map<Integer, Float> floatParameters = new HashMap<>();
+        /**
+         * Bumped on every write, so a device-side cache can tell an unchanged texture from a same-handle one.
+         *
+         * <p>Vanilla animates textures by writing a sub-rectangle on a timer without touching the handle, so
+         * "this id was uploaded once" is not the same question as "this id is up to date".</p>
+         */
+        long version;
 
         boolean hasData() {
             return levels.values().stream().anyMatch(level -> level.hasData);
@@ -54,6 +61,14 @@ final class TextureBackendVk implements TextureBackend {
 
     private final Map<Integer, Texture> textures = new HashMap<>();
     private final Map<Integer, Integer> boundUnit = new HashMap<>();
+    /**
+     * Which unit the game last made active, zero-based.
+     *
+     * <p>Needed because a draw samples the active unit, and the game skips {@code bindTexture} when its own
+     * per-unit cache already holds the value - so bind calls alone do not tell this backend which image a draw will
+     * sample. Mirrored from {@code GlStateManager} rather than inferred.</p>
+     */
+    private int activeUnit;
     private int nextId = 1;
 
     @Override
@@ -81,12 +96,63 @@ final class TextureBackendVk implements TextureBackend {
         texture.levels.clear();
         texture.intParameters.clear();
         texture.floatParameters.clear();
+        texture.version++;
         boundUnit.values().removeIf(bound -> bound == id);
+    }
+
+    @Override
+    public int boundTexture(int unit) {
+        return boundUnit.getOrDefault(unit, 0);
+    }
+
+    /**
+     * Level 0 as a device image would need it, or {@code null} when nothing has been written into it.
+     *
+     * <p>The sampler parameters are reported as recorded, with {@link TextureImage#UNSET} where the game never set
+     * one, so the mapping to Vulkan's enums stays in the renderer that has to make it rather than being guessed
+     * here.</p>
+     */
+    @Override
+    public TextureImage image(int id) {
+        Texture texture = textures.get(id);
+        if (texture == null) {
+            return null;
+        }
+        Level level = texture.levels.get(0);
+        if (level == null || !level.hasData) {
+            return null;
+        }
+        return new TextureImage(id, level.width, level.height, level.pixels,
+                parameter(texture, 10241), parameter(texture, 10240),
+                parameter(texture, 10242), parameter(texture, 10243),
+                texture.version);
+    }
+
+    private static int parameter(Texture texture, int pname) {
+        Integer value = texture.intParameters.get(pname);
+        return value == null ? TextureImage.UNSET : value;
     }
 
     @Override
     public void bind(int unit, int id) {
         boundUnit.put(unit, id);
+    }
+
+    @Override
+    public void activeUnit(int unit) {
+        this.activeUnit = unit;
+    }
+
+    /**
+     * The texture on the active unit.
+     *
+     * <p>{@link #boundUnit} mirrors {@code GlStateManager}'s own per-unit cache exactly, because both are written by
+     * the same call, including when that call is skipped as a cache hit. Reading it through the active unit is
+     * therefore the same answer GL gives a draw.</p>
+     */
+    @Override
+    public int boundTexture() {
+        return boundUnit.getOrDefault(activeUnit, 0);
     }
 
     @Override
@@ -104,6 +170,7 @@ final class TextureBackendVk implements TextureBackend {
         Level stored = new Level(width, height, copy);
         stored.hasData = true;
         texture.levels.put(level, stored);
+        texture.version++;
     }
 
     @Override
@@ -127,6 +194,7 @@ final class TextureBackendVk implements TextureBackend {
             System.arraycopy(source, row * width, target.pixels, (yOffset + row) * target.width + xOffset, width);
         }
         target.hasData = true;
+        texture(id).version++;
     }
 
     @Override

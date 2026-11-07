@@ -27,6 +27,27 @@ public interface RenderGraphNode {
         return 0;
     }
 
+    /**
+     * A texture this node samples, as the game's texture handle.
+     *
+     * <p>Declared rather than discovered because a backend has to resolve textures <i>before</i> its rendering
+     * instance opens: a first-use upload is a copy plus a layout transition, and Vulkan forbids both inside a render
+     * pass. The frame therefore asks every node what it needs up front, resolves those, hands the answers back
+     * through {@link #bindTextures}, and only then starts drawing.</p>
+     *
+     * @return the handle, or {@code 0} when the node samples nothing or has nothing to sample yet
+     */
+    default int requestedTexture() {
+        return 0;
+    }
+
+    /**
+     * Receives the descriptor set resolved for {@link #requestedTexture()}, once per frame, before {@link #run}.
+     *
+     * <p>An opaque handle: what a set means differs per backend, and a GL backend has no use for one.</p>
+     */
+    default void bindTextures(long descriptorSet) {}
+
     /** Runs the node. Called once per frame, inside the backend's frame. */
     void run(RenderGraphContext context);
 }

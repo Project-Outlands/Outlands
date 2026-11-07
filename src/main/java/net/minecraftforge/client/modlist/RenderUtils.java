@@ -7,6 +7,7 @@ import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraftforge.client.render.state.backend.Capability;
 import net.minecraft.util.math.MathHelper;
 import org.lwjgl.opengl.GL11;
 
@@ -20,6 +21,11 @@ public final class RenderUtils {
 
     /**
      * Creates a scissor test using minecraft screen coordinates instead of pixel coordinates.
+     *
+     * <p>Routed through the backend state on a non-GL renderer: {@code GL11.glEnable} on a window without a GL
+     * context is a segfault, not an ignored call. That is how this was found - opening the mod list crashed inside
+     * {@code glEnable} because this method reached GL directly while every other path already went through
+     * {@code GlStateManager}.</p>
      */
     public static void scissor(int screenX, int screenY, int boxWidth, int boxHeight) {
         final Minecraft mc = Minecraft.getMinecraft();
@@ -30,8 +36,27 @@ public final class RenderUtils {
         int width = Math.max(0, boxWidth * scale);
         int height = Math.max(0, boxHeight * scale);
 
+        net.minecraftforge.client.render.state.backend.FrameState state =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (state != null) {
+            state.scissor(x, y, width, height);
+            state.capability(Capability.SCISSOR_TEST, true);
+            return;
+        }
+
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(x, y, width, height);
+    }
+
+    /** Turns the scissor test off, through the backend when there is one. */
+    public static void disableScissor() {
+        net.minecraftforge.client.render.state.backend.FrameState state =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (state != null) {
+            state.capability(Capability.SCISSOR_TEST, false);
+            return;
+        }
+        GL11.glDisable(GL11.GL_SCISSOR_TEST);
     }
 
     public static boolean isMouseWithin(int x, int y, int width, int height, int mouseX, int mouseY) {
@@ -142,7 +167,7 @@ public final class RenderUtils {
             double offset = overflow * progress;
             scissor(minX, minY, maxX - minX, maxY - minY);
             font.drawString(text, minX - (int) offset, textY, color, shadow);
-            GL11.glDisable(GL11.GL_SCISSOR_TEST);
+            disableScissor();
         } else {
             int clampedX = MathHelper.clamp(centerX, minX + textWidth / 2, maxX - textWidth / 2);
             int centeredX = clampedX - font.getStringWidth(text) / 2;

@@ -22,8 +22,16 @@ import org.lwjgl.vulkan.VkVertexInputBindingDescription;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_DST_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_DST_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_SRC_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_SRC_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ZERO;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_OP_ADD;
 import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT;
@@ -84,12 +92,17 @@ final class VulkanPipeline implements AutoCloseable {
      * @param depthWrite whether depth is written
      * @param blend      whether blending is enabled
      * @param cull       whether back faces are culled
+     * @param srcColor   the GL source blend factor for RGB
+     * @param dstColor   the GL destination blend factor for RGB
+     * @param srcAlpha   the GL source blend factor for alpha
+     * @param dstAlpha   the GL destination blend factor for alpha
      */
     record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, boolean blend,
-                         boolean cull) {
+                         boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha) {
         /** The state the terrain phase has always used. */
         static PipelineState terrain() {
-            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true);
+            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true,
+                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
         }
     }
 
@@ -121,11 +134,19 @@ final class VulkanPipeline implements AutoCloseable {
 
     private final VkDevice device;
     private final long layout;
+    /** Whether this pipeline created the layout and therefore must destroy it. */
+    private final boolean ownsLayout;
     private final long pipeline;
 
-    private VulkanPipeline(VkDevice device, long layout, long pipeline) {
+    // The GL blend factor constants, spelled here so a PipelineState can name the ones GL's defaults use without
+    // importing gl11 into a Vulkan class.
+    static final int GL_ZERO = 0;
+    static final int GL_ONE = 1;
+
+    private VulkanPipeline(VkDevice device, long layout, boolean ownsLayout, long pipeline) {
         this.device = device;
         this.layout = layout;
+        this.ownsLayout = ownsLayout;
         this.pipeline = pipeline;
     }
 
@@ -145,35 +166,63 @@ final class VulkanPipeline implements AutoCloseable {
      */
     static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
                                  int depthFormat) {
-        return create(device, vertex, fragment, colorFormat, depthFormat, PipelineState.terrain());
+        return create(device, vertex, fragment, colorFormat, depthFormat, VK_NULL_HANDLE, PipelineState.terrain());
     }
 
-    /** Builds a pipeline for a state, with the canonical vertex layout. */
+    /**
+     * Builds a pipeline for a state, with the canonical vertex layout.
+     *
+     * <p>The pipeline layout is borrowed, not created: it holds the descriptor set layout and the push constant range,
+     * and every pipeline in the renderer has to share one instance - a set bound against one layout is incompatible
+     * with a pipeline built for another. {@link VulkanDescriptors} owns it.</p>
+     *
+     * @param descriptorSetLayout the set layout the shader samples through, or {@code VK_NULL_HANDLE} for a shader
+     *                            that takes no descriptors
+     */
     static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
-                                 int depthFormat, PipelineState state) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
-            pushConstants.get(0)
-                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-                    .offset(0)
-                    .size(16 * Float.BYTES);
+                                 int depthFormat, long descriptorSetLayout, PipelineState state) {
+        // No descriptors: a layout with no set layouts, which is what a caller that does not sample wants.
+        return create(device, vertex, fragment, colorFormat, depthFormat, 0L, descriptorSetLayout, state);
+    }
 
-            VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pPushConstantRanges(pushConstants);
-            LongBuffer layoutOut = stack.mallocLong(1);
-            VkCheck.check(vkCreatePipelineLayout(device, layoutInfo, null, layoutOut), "vkCreatePipelineLayout");
-            long layout = layoutOut.get(0);
+    /**
+     * Builds a pipeline against an existing pipeline layout.
+     *
+     * @param pipelineLayout the shared layout, or {@code VK_NULL_HANDLE} to create a private one
+     */
+    static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                 int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            boolean ownsLayout = pipelineLayout == VK_NULL_HANDLE;
+            long layout = pipelineLayout;
+            if (ownsLayout) {
+                VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
+                pushConstants.get(0)
+                        .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+                        .offset(0)
+                        .size(16 * Float.BYTES);
+                VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
+                        .sType$Default()
+                        .pPushConstantRanges(pushConstants);
+                if (descriptorSetLayout != VK_NULL_HANDLE) {
+                    layoutInfo.pSetLayouts(stack.longs(descriptorSetLayout));
+                }
+                LongBuffer layoutOut = stack.mallocLong(1);
+                VkCheck.check(vkCreatePipelineLayout(device, layoutInfo, null, layoutOut), "vkCreatePipelineLayout");
+                layout = layoutOut.get(0);
+            }
 
             long pipeline = 0L;
             try {
                 pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, stack);
-                return new VulkanPipeline(device, layout, pipeline);
+                return new VulkanPipeline(device, layout, ownsLayout, pipeline);
             } catch (RuntimeException e) {
                 if (pipeline != 0L) {
                     vkDestroyPipeline(device, pipeline, null);
                 }
-                vkDestroyPipelineLayout(device, layout, null);
+                if (ownsLayout) {
+                    vkDestroyPipelineLayout(device, layout, null);
+                }
                 throw e;
             }
         }
@@ -243,11 +292,11 @@ final class VulkanPipeline implements AutoCloseable {
                 VkPipelineColorBlendAttachmentState.calloc(1, stack);
         blendAttachment.get(0)
                 .blendEnable(state.blend())
-                .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
-                .dstColorBlendFactor(VK_BLEND_FACTOR_ONE)
+                .srcColorBlendFactor(blendFactor(state.srcColor()))
+                .dstColorBlendFactor(blendFactor(state.dstColor()))
                 .colorBlendOp(VK_BLEND_OP_ADD)
-                .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
-                .dstAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
+                .srcAlphaBlendFactor(blendFactor(state.srcAlpha()))
+                .dstAlphaBlendFactor(blendFactor(state.dstAlpha()))
                 .alphaBlendOp(VK_BLEND_OP_ADD)
                 .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                         | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
@@ -295,6 +344,35 @@ final class VulkanPipeline implements AutoCloseable {
     @Override
     public void close() {
         vkDestroyPipeline(device, pipeline, null);
-        vkDestroyPipelineLayout(device, layout, null);
+        if (ownsLayout) {
+            vkDestroyPipelineLayout(device, layout, null);
+        }
+    }
+
+    /**
+     * Maps a GL blend factor to Vulkan's.
+     *
+     * <p>Vanilla's two common combinations are {@code SRC_ALPHA, ONE_MINUS_SRC_ALPHA} for the GUI and
+     * {@code SRC_ALPHA, ONE} for additive effects such as the enchantment glint and particles. Both appear inside one
+     * frame, so this cannot be a constant.</p>
+     *
+     * @throws IllegalArgumentException for a factor this renderer does not translate, rather than silently
+     *                                  substituting one, which would show up as a wrong picture
+     */
+    private static int blendFactor(int glFactor) {
+        return switch (glFactor) {
+            case 0 -> VK_BLEND_FACTOR_ZERO;                              // GL_ZERO
+            case 1 -> VK_BLEND_FACTOR_ONE;                               // GL_ONE
+            case 768 -> VK_BLEND_FACTOR_SRC_COLOR;                       // GL_SRC_COLOR
+            case 769 -> VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;             // GL_ONE_MINUS_SRC_COLOR
+            case 770 -> VK_BLEND_FACTOR_SRC_ALPHA;                       // GL_SRC_ALPHA
+            case 771 -> VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;             // GL_ONE_MINUS_SRC_ALPHA
+            case 772 -> VK_BLEND_FACTOR_DST_ALPHA;                       // GL_DST_ALPHA
+            case 773 -> VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;             // GL_ONE_MINUS_DST_ALPHA
+            case 774 -> VK_BLEND_FACTOR_DST_COLOR;                       // GL_DST_COLOR
+            case 775 -> VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;             // GL_ONE_MINUS_DST_COLOR
+            case 776 -> VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;              // GL_SRC_ALPHA_SATURATE
+            default -> throw new IllegalArgumentException("blend factor " + glFactor + " is not translated");
+        };
     }
 }

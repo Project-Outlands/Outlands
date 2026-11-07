@@ -217,7 +217,7 @@
          if (activeTextureUnit != texture - OpenGlHelper.defaultTexUnit)
          {
              activeTextureUnit = texture - OpenGlHelper.defaultTexUnit;
-+            if (net.minecraftforge.client.render.texture.TextureBackends.forNonGl() != null) { return; }
++            if (net.minecraftforge.client.render.texture.TextureBackends.forNonGl() != null) { net.minecraftforge.client.render.texture.TextureBackends.forNonGl().activeUnit(activeTextureUnit); return; }
              OpenGlHelper.setActiveTexture(texture);
          }
      }

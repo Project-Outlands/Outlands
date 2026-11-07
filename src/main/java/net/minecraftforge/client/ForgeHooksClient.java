@@ -176,7 +176,9 @@ public class ForgeHooksClient
 
         if (block != null && block.isBed(state, world, pos, entity))
         {
-            GL11.glRotatef((float)(block.getBedDirection(state, world, pos).getHorizontalIndex() * 90), 0.0F, 1.0F, 0.0F);
+            // GlStateManager rather than GL11: on a non-GL renderer the context does not exist and the native call
+            // faults, while GlStateManager forwards to the backend's own matrix stack.
+            GlStateManager.rotate((float)(block.getBedDirection(state, world, pos).getHorizontalIndex() * 90), 0.0F, 1.0F, 0.0F);
         }
     }
 
@@ -473,7 +475,9 @@ public class ForgeHooksClient
             matrixBuf.put(t);
         }
         matrixBuf.flip();
-        GL11.glMultMatrixf(matrixBuf);
+        // Through GlStateManager for the same reason as the rotate above; the backend keeps the stack, and a window
+        // without a GL context turns a direct glMultMatrixf into a SIGSEGV.
+        GlStateManager.multMatrix(matrixBuf);
     }
 
     // moved and expanded from WorldVertexBufferUploader.draw
@@ -511,6 +515,15 @@ public class ForgeHooksClient
             case PADDING:
                 break;
             case GENERIC:
+                if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+                {
+                    // A pipeline backend has no client-side attribute arrays: the vertex data is an interleaved
+                    // buffer the shader reads, and there is no attribute slot to enable or point at. Recording the
+                    // attributes instead of pointing GL at them is what the draw path already does.
+                    net.minecraftforge.client.render.vertex.PendingVertexAttributes.set(attr.getIndex(), count,
+                            constant, stride);
+                    break;
+                }
                 GL20.glEnableVertexAttribArray(attr.getIndex());
                 GL20.glVertexAttribPointer(attr.getIndex(), count, constant, false, stride, buffer);
                 break;
@@ -543,6 +556,11 @@ public class ForgeHooksClient
             case PADDING:
                 break;
             case GENERIC:
+                if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
+                {
+                    net.minecraftforge.client.render.vertex.PendingVertexAttributes.clear();
+                    break;
+                }
                 GL20.glDisableVertexAttribArray(attr.getIndex());
                 break;
             default:

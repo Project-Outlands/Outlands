@@ -2,25 +2,28 @@ package net.minecraftforge.client.render.vulkan;
 
 import net.minecraftforge.client.render.state.backend.Capability;
 import net.minecraftforge.client.render.state.backend.FrameStates;
+import net.minecraftforge.client.render.texture.TextureBackends;
+import net.minecraftforge.client.render.texture.TextureImage;
+import net.minecraftforge.client.render.vertex.DrawState;
 import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.PrimitiveShape;
 import net.minecraftforge.client.render.vertex.VertexConverter;
 
-import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
 
-import java.nio.IntBuffer;
-import java.nio.LongBuffer;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
+import static org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets;
+import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
 import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
-import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdDraw;
 import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
 import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
@@ -38,8 +41,13 @@ import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
  * replay, which is after the fence for the frame that used it has been waited on.</p>
  *
  * <p><b>Pipeline cache keyed by state, not by vertex layout.</b> Every draw is converted to the canonical layout
- * first, so the input description is a constant. What varies is topology, depth and blend, which is a handful of
- * combinations rather than one per vertex format.</p>
+ * first, so the input description is a constant. What varies is topology, depth, blend and the blend factors, which
+ * is a handful of combinations rather than one per vertex format.</p>
+ *
+ * <p><b>Textures travel with the draw, like matrices.</b> The game binds a texture, draws, binds another. Reading the
+ * binding at replay time would sample one texture for the whole frame - the same mistake that once drew the entire
+ * menu with the panorama's matrix, and it fails just as quietly: the picture comes out in the wrong colours instead of
+ * raising an error.</p>
  */
 final class VulkanStream implements AutoCloseable {
 
@@ -61,9 +69,20 @@ final class VulkanStream implements AutoCloseable {
      */
     private final VulkanBuffer[] pending;
     private final VulkanBuffer[] pendingIndices;
+    private final VulkanDescriptors descriptors;
+    private final VulkanTextures textures;
+    /**
+     * Descriptor sets resolved for the frame being recorded, by texture handle.
+     *
+     * <p>Filled by {@link #prepareTextures} <i>before</i> the rendering instance opens, because resolving a texture
+     * for the first time records a copy and a layout transition, and Vulkan forbids both inside a render pass
+     * ({@code VUID-vkCmdCopyBufferToImage-renderpass}). The replay then only binds what is already there.</p>
+     */
+    private final Map<Integer, Long> resolved = new HashMap<>();
     private int drawsThisFrame;
 
-    VulkanStream(VkDevice device, VulkanContext context, int colorFormat, int depthFormat) {
+    VulkanStream(VkDevice device, VulkanContext context, int colorFormat, int depthFormat,
+                 VulkanDescriptors descriptors, VulkanTextures textures) {
         this.device = device;
         this.context = context;
         this.colorFormat = colorFormat;
@@ -72,6 +91,8 @@ final class VulkanStream implements AutoCloseable {
         this.pendingIndices = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
         this.vertex = VulkanShader.load(device, "/assets/outlands/shaders/terrain.vert.spv");
         this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
+        this.descriptors = descriptors;
+        this.textures = textures;
     }
 
     /** How many draws the last replayed frame had. Diagnostics. */
@@ -80,32 +101,64 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /**
+     * Resolves every texture this frame will sample, recording any first-use uploads.
+     *
+     * <p>Must be called after {@code vkBeginCommandBuffer} and before {@code vkCmdBeginRendering}: a texture that is
+     * new this frame becomes a staging copy plus two image layout transitions, none of which a render pass allows
+     * inside itself. Resolving them up front also means the replay is a pure sequence of binds and draws, which is
+     * what makes it cheap.</p>
+     *
+     * @param extra additional texture handles to resolve, for paths outside the draw list (the terrain node's atlas)
+     */
+    void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot, int... extra) {
+        resolved.clear();
+        for (FrameDraws.Draw draw : draws) {
+            resolve(draw.state().texture(), commandBuffer, slot);
+        }
+        for (int texture : extra) {
+            resolve(texture, commandBuffer, slot);
+        }
+    }
+
+    private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
+        if (!resolved.containsKey(texture)) {
+            resolved.put(texture, textures.descriptorSet(texture, commandBuffer, slot));
+        }
+    }
+
+    /**
+     * The set resolved for a texture earlier in this frame.
+     *
+     * @return the resolved set, or the white stand-in when the handle was not part of the pre-flight
+     */
+    long descriptorSetOf(int texture) {
+        Long set = resolved.get(texture);
+        return set != null ? set : textures.whiteDescriptorSet();
+    }
+
+    /**
      * Records every draw into {@code commandBuffer}.
      *
      * <p>Called inside the rendering instance the frame already opened, so the colour and depth attachments are
      * whatever that instance targets.</p>
      */
-    void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot) {
+    void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot, int viewportWidth,
+                int viewportHeight) {
         drawsThisFrame = draws.size();
         if (DIAGNOSE.compareAndSet(false, true)) {
             // Once, because this is a question about what the frame contains, not a per-frame measurement.
-            java.util.Map<String, Integer> histogram = new java.util.TreeMap<>();
+            Map<String, Integer> histogram = new java.util.TreeMap<>();
             for (FrameDraws.Draw draw : draws) {
                 String key = "stride " + draw.layout().stride() + " mode " + draw.mode();
                 histogram.merge(key, draw.vertexCount(), Integer::sum);
             }
             org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                    "Frame draws: {} calls, vertices per (stride, mode): {}", draws.size(), histogram);
+                    "Frame draws: {} calls, {} textures, vertices per (stride, mode): {}",
+                    draws.size(), textures.resident(), histogram);
+            logProjectionSummary(draws);
         }
         // This slot's fence has been waited on, so whatever it used last time is finished.
-        if (pending[slot] != null) {
-            pending[slot].close();
-            pending[slot] = null;
-        }
-        if (pendingIndices[slot] != null) {
-            pendingIndices[slot].close();
-            pendingIndices[slot] = null;
-        }
+        releaseSlot(slot);
         if (draws.isEmpty()) {
             return;
         }
@@ -115,8 +168,8 @@ final class VulkanStream implements AutoCloseable {
         int totalBytes = 0;
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
-            converted[i] = VertexConverter.convert(java.nio.ByteBuffer.wrap(draw.vertices()),
-                    draw.layout(), draw.vertexCount());
+            converted[i] = VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
+                    draw.layout(), draw.vertexCount(), draw.state().colorArgb());
             totalBytes += converted[i].length;
         }
         byte[] all = new byte[totalBytes];
@@ -124,7 +177,7 @@ final class VulkanStream implements AutoCloseable {
         // Indices are collected for the whole frame and always 32-bit: switching width per draw would mean
         // rebinding the index buffer mid-frame for no benefit.
         int[] indexOffsets = new int[draws.size()];
-        java.util.List<Integer> allIndices = new java.util.ArrayList<>();
+        List<Integer> allIndices = new ArrayList<>();
         int at = 0;
         for (int i = 0; i < draws.size(); i++) {
             offsets[i] = at;
@@ -140,9 +193,14 @@ final class VulkanStream implements AutoCloseable {
             }
         }
 
+        long[] textureSets = new long[draws.size()];
+        for (int i = 0; i < draws.size(); i++) {
+            textureSets[i] = descriptorSetOf(draws.get(i).state().texture());
+        }
+
         pending[slot] = VulkanBuffer.create(device, context, all);
         if (!allIndices.isEmpty()) {
-            java.nio.ByteBuffer indexBytes = java.nio.ByteBuffer.allocate(allIndices.size() * Integer.BYTES)
+            ByteBuffer indexBytes = ByteBuffer.allocate(allIndices.size() * Integer.BYTES)
                     .order(java.nio.ByteOrder.nativeOrder());
             for (int index : allIndices) {
                 indexBytes.putInt(index);
@@ -156,7 +214,13 @@ final class VulkanStream implements AutoCloseable {
             // as "no buffer bound" on every draw rather than as an obvious error.
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
 
-            java.nio.ByteBuffer constants = stack.malloc(16 * Float.BYTES);
+            ByteBuffer constants = stack.malloc(16 * Float.BYTES);
+            long boundSet = 0L;
+            // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
+            // value is the whole viewport, which is what an unclipped frame uses.
+            org.lwjgl.vulkan.VkRect2D.Buffer scissor = org.lwjgl.vulkan.VkRect2D.calloc(1, stack);
+            // Sentinel that cannot match a real rectangle, so the first draw always sets one.
+            int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
 
             for (int i = 0; i < draws.size(); i++) {
                 FrameDraws.Draw draw = draws.get(i);
@@ -166,9 +230,15 @@ final class VulkanStream implements AutoCloseable {
                 // perspective matrix and left the GUI off-screen.
                 VulkanPipeline pipeline = pipelineFor(stateFor(shape, draw.state()));
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-                constants.asFloatBuffer().put(draw.state().mvp());
+                writeMvp(constants.asFloatBuffer(), draw.state().mvp());
                 vkCmdPushConstants(commandBuffer, pipeline.layout(), org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT,
                         0, constants);
+                applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
+                if (textureSets[i] != boundSet) {
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
+                            stack.longs(textureSets[i]), null);
+                    boundSet = textureSets[i];
+                }
                 if (shape.needsIndexing()) {
                     vkCmdBindIndexBuffer(commandBuffer, pendingIndices[slot].handle(), 0L,
                             org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
@@ -182,35 +252,132 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /**
+     * Says, once, how the frame's draws are distributed over projections and textures.
+     *
+     * <p>Answered as a histogram because the question it exists for - "is the main menu's panorama in the draw list"
+     * - cannot be read off a total: the panorama is 64 x 6 = 384 draws of one 24-byte vertex format, and a count of
+     * similar-looking quads proves nothing. The matrix signature does. {@code gluPerspective} puts {@code -1} in
+     * {@code m[11]} and a cotangent-derived value in {@code m[5]}; {@code glOrtho} leaves {@code m[15] == 1} and
+     * {@code m[11] == sign(2/(top-bottom))}. A draw that should be perspective and reports orthogonal is not the
+     * panorama, whatever else it is.</p>
+     */
+    private void logProjectionSummary(List<FrameDraws.Draw> draws) {
+        // Where each texture's draws sit in the frame's order. The question this answers cannot be answered by a
+        // count: whether the panorama is the background (drawn before the GUI) or lands on top of it depends only on
+        // position in this list, and "the menu is a flat grey" reads the same either way.
+        Map<Integer, int[]> byTexture = new java.util.TreeMap<>();
+        for (int i = 0; i < draws.size(); i++) {
+            int texture = draws.get(i).state().texture();
+            int[] range = byTexture.get(texture);
+            if (range == null) {
+                range = new int[] {i, i, 0};
+                byTexture.put(texture, range);
+            }
+            range[1] = i;
+            range[2]++;
+        }
+        Map<Integer, String> order = new java.util.TreeMap<>();
+        byTexture.forEach((id, range) -> order.put(id, range[2] + " draws at " + range[0] + ".." + range[1]));
+        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                "Frame texture order: {}", order);
+    }
+
+    private static String round(float value) {
+        return String.format(java.util.Locale.ROOT, "%.3f", value);
+    }
+
+    /**
+     * Sets the scissor rectangle for a draw, if it differs from the last one applied.
+     *
+     * <p><b>The Y is converted, not passed through.</b> {@code glScissor} takes its origin at the bottom-left and the
+     * game computes the rectangle that way; Vulkan's scissor origin is the top-left. Handing GL's rectangle straight
+     * over clips the mirror image of the intended area, which on the mod list means the wrong part of a scrolling
+     * name is hidden - a mild-looking symptom for a fully wrong rectangle.</p>
+     */
+    private static void applyScissor(VkCommandBuffer commandBuffer, org.lwjgl.vulkan.VkRect2D.Buffer scissor,
+                                     int[] applied, DrawState state, int viewportWidth, int viewportHeight) {
+        int x = 0;
+        int y = 0;
+        int width = viewportWidth;
+        int height = viewportHeight;
+        if (state != null && state.scissorEnabled()) {
+            int[] box = state.scissor();
+            x = box[0];
+            // GL measures from the bottom, Vulkan from the top.
+            y = viewportHeight - box[1] - box[3];
+            width = box[2];
+            height = box[3];
+        }
+        if (applied[0] == x && applied[1] == y && applied[2] == width && applied[3] == height) {
+            return;
+        }
+        applied[0] = x;
+        applied[1] = y;
+        applied[2] = width;
+        applied[3] = height;
+
+        scissor.get(0).offset().x(x).y(y);
+        scissor.get(0).extent().width(width).height(height);
+        org.lwjgl.vulkan.VK10.vkCmdSetScissor(commandBuffer, 0, scissor);
+    }
+
+    /**
+     * Writes a draw's matrix with Vulkan's clip-space Y direction applied.
+     *
+     * <p>The game's matrices are built for GL, where NDC Y points up; Vulkan's points down. Feeding them through
+     * unchanged mirrors the whole frame vertically, which is invisible on a symmetric test pattern and obvious on a
+     * panorama: the ground ends up at the top and the sky face shows up overhead.</p>
+     *
+     * <p>The fix is the same matrix for every draw - premultiplying by {@code diag(1, -1, 1, 1)} - rather than a
+     * per-path special case, because the flip belongs to the clip space, not to any one phase: the GUI's ortho and
+     * the world's perspective are both GL-style and both need it. Negating row 1 in place is that premultiply, and
+     * it costs four multiplies instead of a matrix multiply per draw.</p>
+     */
+    private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {
+        target.put(mvp);
+        // Column-major, so row 1 is at 1, 5, 9 and 13.
+        for (int index = 1; index < 16; index += 4) {
+            target.put(index, -target.get(index));
+        }
+        target.position(0);
+    }
+
+    /**
      * The pipeline state for a draw.
      *
-     * <p>Blend, depth test and culling come from the frame state because that is where the game's
-     * {@code GlStateManager} calls landed. Depth comparison and blend factors are not in the key yet: the shader's
-     * blend is on or off and the comparison is fixed, which is enough for the GUI path and is stated here rather
-     * than assumed silently.</p>
+     * <p>Blend, depth test, culling and the blend factors come from the draw because that is what the game's
+     * {@code GlStateManager} calls had set when the draw was issued. Depth comparison is not in the key yet: vanilla
+     * changes it (the GUI uses LEQUAL, the world LESS), which is a visible difference on coplanar geometry, so it is
+     * the next entry rather than an assumption.</p>
      */
-    private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape,
-            net.minecraftforge.client.render.vertex.DrawState state) {
+    private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape, DrawState state) {
         return new VulkanPipeline.PipelineState(VulkanPipeline.VK10Topology.of(shape.topology()),
-                state.depthTest(), state.depthWrite(), state.blend(), state.cull());
+                state.depthTest(), state.depthWrite(), state.blend(), state.cull(),
+                state.blendSourceRgb(), state.blendDestinationRgb(),
+                state.blendSourceAlpha(), state.blendDestinationAlpha());
     }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {
         return pipelines.computeIfAbsent(state,
-                key -> VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat, key));
+                key -> VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+                        descriptors.pipelineLayout(), descriptors.layout(), key));
+    }
+
+    private void releaseSlot(int slot) {
+        if (pending[slot] != null) {
+            pending[slot].close();
+            pending[slot] = null;
+        }
+        if (pendingIndices[slot] != null) {
+            pendingIndices[slot].close();
+            pendingIndices[slot] = null;
+        }
     }
 
     @Override
     public void close() {
         for (int slot = 0; slot < pending.length; slot++) {
-            if (pending[slot] != null) {
-                pending[slot].close();
-                pending[slot] = null;
-            }
-            if (pendingIndices[slot] != null) {
-                pendingIndices[slot].close();
-                pendingIndices[slot] = null;
-            }
+            releaseSlot(slot);
         }
         for (VulkanPipeline pipeline : pipelines.values()) {
             pipeline.close();

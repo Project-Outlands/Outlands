@@ -160,6 +160,20 @@ public final class RenderGraph {
         return frozen;
     }
 
+    /**
+     * The nodes in the order they will run.
+     *
+     * <p>For a backend that has to do something to every node before the frame starts drawing - resolving the
+     * textures they declared is the current reason - rather than just running them.</p>
+     */
+    public synchronized List<RenderGraphNode> nodes() {
+        RenderGraphNode[] current = order;
+        if (current == null) {
+            throw new IllegalStateException("RenderGraph.nodes() before freeze()");
+        }
+        return List.of(current);
+    }
+
     /** Runs every node in order. Allocates nothing. */
     public void run(RenderGraphContext context) {
         RenderGraphNode[] current = order;

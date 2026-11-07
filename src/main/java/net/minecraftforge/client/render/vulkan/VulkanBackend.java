@@ -55,6 +55,8 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanContext context;
     private VulkanSwapchain swapchain;
     private VulkanTerrainLayer terrainLayer;
+    private VulkanDescriptors descriptors;
+    private VulkanTextures textureCache;
     /** Captures waiting for the next frame. Written by chunk workers, drained on the render thread. */
     private final java.util.Queue<ChunkMeshCapture.Captured> pendingChunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
@@ -134,9 +136,20 @@ public final class VulkanBackend implements RenderBackend {
             // sees them.
             RenderGraph graph = RenderGraphs.get();
             swapchain = VulkanSwapchain.create(context, window, graph);
-            terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat());
-            stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat());
+            // One descriptor layout and one texture cache for the whole renderer: the terrain node and the streamed
+            // draws sample through the same set 0, binding 0, so a texture is uploaded once however many paths use it.
+            net.minecraftforge.client.render.texture.TextureBackend textures =
+                    java.util.Objects.requireNonNull(
+                            net.minecraftforge.client.render.texture.TextureBackends.forNonGl(),
+                            "the Vulkan path installs a texture backend before anything can draw");
+            descriptors = new VulkanDescriptors(context.device());
+            textureCache = new VulkanTextures(context, descriptors, textures);
+            terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat(),
+                    descriptors, textureCache);
+            stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat(),
+                    descriptors, textureCache);
             swapchain.setStream(stream);
+            swapchain.setTextures(textureCache);
             swapchain.setFrameRecording(frameRecording);
             net.minecraftforge.client.render.target.FrameRecordings.install(frameRecording);
             // Draws issued from here on belong to the next frame.
@@ -203,16 +216,26 @@ public final class VulkanBackend implements RenderBackend {
      * <p>Drained on the render thread, before recording, so a rebuild that finished mid-frame is picked up next
      * frame rather than forcing the two threads to synchronise mid-draw.</p>
      */
+    /**
+     * Empties the capture queue without installing the meshes into the terrain node.
+     *
+     * <p><b>Why the node does not take them.</b> The node draws its mesh with a camera it chose itself, which was
+     * fine for a placeholder cube and is wrong for real chunks: vanilla's chunk geometry is in world coordinates, so
+     * an invented camera puts the terrain somewhere the player is not. Measured symptom: a copied chunk floating in
+     * the sky, drawn next to the same chunk the stream path already rendered from the real camera.</p>
+     *
+     * <p>Vanilla's own chunk draws reach the screen through the stream path with their own matrices, so the traffic is
+     * not lost - the node simply has nothing to add until it is handed the frame's camera. That is the next step, and
+     * it needs a per-frame matrix on {@code RenderGraphContext}, not a second fixed one here.</p>
+     *
+     * <p>Draining rather than unregistering the consumer is deliberate: registering one is what makes
+     * {@code ChunkMeshCapture.capture} report that it took the upload, and without that the patched
+     * {@code uploadChunk} falls through to the GL path, which does not exist here.</p>
+     */
     private void drainCaptures() {
-        if (pendingChunks.isEmpty() || terrainLayer == null) {
-            return;
+        while (pendingChunks.poll() != null) {
+            // Discarded on purpose; see above. Polled so the queue does not grow without bound.
         }
-        java.util.List<ChunkMeshCapture.Captured> batch = new java.util.ArrayList<>();
-        ChunkMeshCapture.Captured captured;
-        while ((captured = pendingChunks.poll()) != null) {
-            batch.add(captured);
-        }
-        terrainLayer.useCaptured(batch);
     }
 
     @Override
@@ -230,6 +253,14 @@ public final class VulkanBackend implements RenderBackend {
         if (stream != null) {
             stream.close();
             stream = null;
+        }
+        if (textureCache != null) {
+            textureCache.close();
+            textureCache = null;
+        }
+        if (descriptors != null) {
+            descriptors.close();
+            descriptors = null;
         }
         if (context != null) {
             context.close();

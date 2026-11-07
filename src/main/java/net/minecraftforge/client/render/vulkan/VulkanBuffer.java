@@ -10,6 +10,7 @@ import org.lwjgl.vulkan.VkBufferCreateInfo;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -63,11 +64,29 @@ final class VulkanBuffer implements AutoCloseable {
      */
     static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
                                byte[] data) {
+        return create(device, context, data,
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    }
+
+    /**
+     * Creates host-visible memory holding {@code data}, for use as a copy source.
+     *
+     * <p>The upload path's half of a staged transfer: the bytes go here, and a {@code vkCmdCopyBufferToImage} reads
+     * them. Device-local is not requested - this memory is written by the host and read once by the copy engine, so
+     * the preference for ReBAR that the vertex buffers use would be wrong here.</p>
+     */
+    static VulkanBuffer createStaging(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                                      byte[] data) {
+        return create(device, context, data, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    }
+
+    private static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                                       byte[] data, int usage) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo createInfo = VkBufferCreateInfo.calloc(stack)
                     .sType$Default()
                     .size(data.length)
-                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+                    .usage(usage)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer bufferOut = stack.mallocLong(1);
             VkCheck.check(vkCreateBuffer(device, createInfo, null, bufferOut), "vkCreateBuffer");

@@ -153,6 +153,7 @@ final class VulkanSwapchain {
     private java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Draw> pendingDraws = java.util.List.of();
     /** Replays the draws the game issued while the frame was being built. */
     private VulkanStream stream;
+    private VulkanTextures textures;
     /** What the game asked of this frame; {@code null} before a backend installs one. */
     private net.minecraftforge.client.render.target.@org.jspecify.annotations.Nullable FrameRecording recording;
     private int depthFormat;
@@ -182,6 +183,7 @@ final class VulkanSwapchain {
 
     private final class FrameContext implements RenderGraphContext {
         VkCommandBuffer commandBuffer;
+        int slot;
 
         @Override
         public int width() {
@@ -196,6 +198,11 @@ final class VulkanSwapchain {
         @Override
         public Object nativeContext() {
             return commandBuffer;
+        }
+
+        @Override
+        public int frameSlot() {
+            return slot;
         }
     }
 
@@ -260,6 +267,12 @@ final class VulkanSwapchain {
 
         final int frame = frameIndex;
         VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
+        // This slot's work has finished, so the staging buffers its recorded texture copies read from are free.
+        // Released here rather than inside the stream's replay because the graph's nodes run before it and upload
+        // through the same cache: freeing them at replay time would free the copy the node recorded moments earlier.
+        if (textures != null) {
+            textures.releaseSlot(frame);
+        }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer imageIndexOut = stack.mallocInt(1);
@@ -293,6 +306,23 @@ final class VulkanSwapchain {
                 .sType$Default()
                 .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         VkCheck.check(vkBeginCommandBuffer(commandBuffer, beginInfo), "vkBeginCommandBuffer");
+
+        // Textures first, while nothing is rendering: a first-use upload is a buffer-to-image copy plus two layout
+        // transitions, all of which Vulkan forbids inside a render pass. Done here it is recorded once, before the
+        // instance opens, and the replay below only binds.
+        if (stream != null) {
+            // Every node's declared texture, not just the terrain's: a node that samples something has the same
+            // ordering requirement, and the graph is where the node list already lives.
+            java.util.List<net.minecraftforge.client.render.graph.RenderGraphNode> nodes = graph.nodes();
+            int[] nodeTextures = new int[nodes.size()];
+            for (int i = 0; i < nodes.size(); i++) {
+                nodeTextures[i] = nodes.get(i).requestedTexture();
+            }
+            stream.prepareTextures(commandBuffer, pendingDraws, slot, nodeTextures);
+            for (net.minecraftforge.client.render.graph.RenderGraphNode node : nodes) {
+                node.bindTextures(stream.descriptorSetOf(node.requestedTexture()));
+            }
+        }
 
         // Both attachments start undefined: nothing from a previous frame is needed, so the barriers only move
         // layouts and do not have to make anything available.
@@ -376,6 +406,7 @@ final class VulkanSwapchain {
         // The phases run inside the rendering instance because they draw into these attachments. Each one is a
         // no-op for now; the graph is what makes "replace terrain.layer" a thing a mod can do.
         frameContext.commandBuffer = commandBuffer;
+        frameContext.slot = slot;
         graph.run(frameContext);
         frameContext.commandBuffer = null;
 
@@ -383,7 +414,7 @@ final class VulkanSwapchain {
         // world: the world itself, then the GUI on top. They were collected while the frame was being built -
         // vanilla issues them before Display.update() hands the frame over - so this is where they become commands.
         if (stream != null && !pendingDraws.isEmpty()) {
-            stream.replay(commandBuffer, pendingDraws, slot);
+            stream.replay(commandBuffer, pendingDraws, slot, extentWidth, extentHeight);
             pendingDraws = java.util.List.of();
         }
 
@@ -540,6 +571,10 @@ final class VulkanSwapchain {
      * since otherwise the setting silently does nothing.</p>
      */
     /** Installs the replay path for the game's own draws. */
+    void setTextures(VulkanTextures textures) {
+        this.textures = textures;
+    }
+
     void setStream(VulkanStream stream) {
         this.stream = stream;
     }

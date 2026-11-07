@@ -185,6 +185,17 @@ public class Util {
      * @return int
      */
     protected static int glGetIntegerv(int what) {
+        // On a non-GL renderer there is no context to query, and the direct native call is a SIGSEGV. The only
+        // question the GLU code asks is the maximum texture size, and the backend already has an answer for that
+        // via RenderBackend.maxTextureSize(); asking GL instead would be reading a device property from a device
+        // that is not in use.
+        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath()) {
+            if (what == org.lwjgl.opengl.GL11.GL_MAX_TEXTURE_SIZE) {
+                return net.minecraftforge.client.render.RenderBackendSelection.get().maxTextureSize();
+            }
+            throw new UnsupportedOperationException("GLU asked for GL state " + what
+                    + " on a backend that has no GL context; only GL_MAX_TEXTURE_SIZE is answerable here");
+        }
         scratch.rewind();
         org.lwjgl.opengl.GL11.glGetIntegerv(what, scratch);
         return scratch.get();

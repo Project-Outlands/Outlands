@@ -74,7 +74,9 @@ public class ModListExtended<E extends GuiListExtended.IGuiListEntry> extends Gu
         GlStateManager.shadeModel(GL11.GL_FLAT);
         GlStateManager.enableAlpha();
         GlStateManager.disableBlend();
-        GL11.glDisable(GL11.GL_SCISSOR_TEST);
+        // Through the backend on a non-GL renderer: GL11 on a window without a context is a segfault, and
+        // this exact line was the one that killed the mod list.
+        net.minecraftforge.client.modlist.RenderUtils.disableScissor();
     }
 
     protected void drawScrollBar(int maxScroll, Tessellator tess) {

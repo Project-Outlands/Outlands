@@ -50,6 +50,7 @@ final class FrameStateVk implements FrameState {
     private float polygonOffsetFactor;
     private float polygonOffsetUnits;
     private int[] viewport = {0, 0, 0, 0};
+    private int[] scissor = {0, 0, 0, 0};
     private float[] clearColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private double clearDepth = 1.0;
     private int clearMask;
@@ -156,6 +157,21 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public int blendSource() {
+        return blendSource;
+    }
+
+    @Override
+    public int blendDestination() {
+        return blendDestination;
+    }
+
+    @Override
+    public int[] blendFactors() {
+        return blendSeparate == null ? null : blendSeparate.clone();
+    }
+
+    @Override
     public void blendEquation(int glMode) {
         blendEquation = switch (glMode) {
             case 32774, 32775, 32776, 32777, 32778, 32779 -> glMode;   // ADD, MIN, MAX, SUBTRACT, REVERSE_SUBTRACT
@@ -195,6 +211,16 @@ final class FrameStateVk implements FrameState {
     @Override
     public void viewport(int x, int y, int width, int height) {
         viewport = new int[] {x, y, width, height};
+    }
+
+    @Override
+    public void scissor(int x, int y, int width, int height) {
+        scissor = new int[] {x, y, width, height};
+    }
+
+    @Override
+    public int[] scissorBox() {
+        return scissor.clone();
     }
 
     @Override

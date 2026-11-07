@@ -48,6 +48,21 @@ public final class VertexConverter {
      * @return {@code vertexCount * }{@link #STRIDE} bytes
      */
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount) {
+        return convert(source, layout, vertexCount, 0xFFFFFFFF);
+    }
+
+    /**
+     * Converts, using {@code fallbackColor} for vertices whose format carries no colour.
+     *
+     * <p><b>Why a fallback colour and not white.</b> Vanilla colours a whole draw with
+     * {@code GlStateManager.color(...)} and then emits vertices without a colour attribute - {@code FontRenderer} does
+     * exactly that, for the glyphs and for their shadow. Substituting white made every string render at full
+     * brightness with a white shadow instead of a dark one, which reads as washed-out text and was the first thing
+     * noticed on the language screen.</p>
+     *
+     * @param fallbackColor {@code 0xAARRGGBB} used when the layout has no colour element
+     */
+    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -65,7 +80,7 @@ public final class VertexConverter {
             int sourceBase = vertex * inStride;
 
             // Neutrals first, so a format that lacks an attribute still produces a sane vertex.
-            target.putInt(base + COLOR_OFFSET, 0xFFFFFFFF);
+            target.putInt(base + COLOR_OFFSET, fallbackColor);
             target.putFloat(base + UV_OFFSET, 0.0F);
             target.putFloat(base + UV_OFFSET + 4, 0.0F);
             target.putInt(base + LIGHTMAP_OFFSET, FULL_LIGHTMAP | (FULL_LIGHTMAP << 16));

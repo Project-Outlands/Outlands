@@ -282,9 +282,22 @@ public abstract class GuiScrollingList
         ScaledResolution res = new ScaledResolution(client);
         double scaleW = client.displayWidth / res.getScaledWidth_double();
         double scaleH = client.displayHeight / res.getScaledHeight_double();
-        GL11.glEnable(GL11.GL_SCISSOR_TEST);
-        GL11.glScissor((int)(left      * scaleW), (int)(client.displayHeight - (bottom * scaleH)),
-                       (int)(listWidth * scaleW), (int)(viewHeight * scaleH));
+        // Not GL11 directly: on a non-GL renderer the context is absent and the native call faults. The backend
+        // neutral form takes the same bottom-up rectangle and converts it where the origin differs.
+        net.minecraftforge.client.render.state.backend.FrameState glState =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (glState != null)
+        {
+            glState.scissor((int)(left * scaleW), (int)(client.displayHeight - (bottom * scaleH)),
+                            (int)(listWidth * scaleW), (int)(viewHeight * scaleH));
+            glState.capability(net.minecraftforge.client.render.state.backend.Capability.SCISSOR_TEST, true);
+        }
+        else
+        {
+            GL11.glEnable(GL11.GL_SCISSOR_TEST);
+            GL11.glScissor((int)(left      * scaleW), (int)(client.displayHeight - (bottom * scaleH)),
+                           (int)(listWidth * scaleW), (int)(viewHeight * scaleH));
+        }
 
         if (this.client.world != null)
         {
@@ -405,7 +418,7 @@ public abstract class GuiScrollingList
         GlStateManager.shadeModel(GL11.GL_FLAT);
         GlStateManager.enableAlpha();
         GlStateManager.disableBlend();
-        GL11.glDisable(GL11.GL_SCISSOR_TEST);
+        net.minecraftforge.client.modlist.RenderUtils.disableScissor();
     }
 
     protected void drawGradientRect(int left, int top, int right, int bottom, int color1, int color2)

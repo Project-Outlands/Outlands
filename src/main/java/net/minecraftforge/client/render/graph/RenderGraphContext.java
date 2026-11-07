@@ -24,4 +24,18 @@ public interface RenderGraphContext {
     /** The backend's own handle for the work in progress, or {@code null} when it has none. */
     @Nullable
     Object nativeContext();
+
+    /**
+     * Which frame in flight this recording belongs to.
+     *
+     * <p>A backend with more than one frame in flight has to know this to manage anything it hands to the GPU and
+     * frees later: a buffer a copy shader reads is only safe to release once <i>this</i> frame's fence has been
+     * waited on, and with two frames in flight "after the current frame" releases memory the other one is still
+     * reading. The validation layers report that as a destroyed resource in use, which is how it was found.</p>
+     *
+     * <p>Zero for a backend that has one frame in flight, which is the only sensible answer there.</p>
+     */
+    default int frameSlot() {
+        return 0;
+    }
 }

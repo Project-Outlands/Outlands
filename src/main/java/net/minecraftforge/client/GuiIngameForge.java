@@ -622,7 +622,7 @@ public class GuiIngameForge extends GuiIngame
     {
         bind(ICONS);
         if (pre(JUMPBAR)) return;
-        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
         GlStateManager.disableBlend();
 
         mc.profiler.startSection("jumpBar");
@@ -641,7 +641,7 @@ public class GuiIngameForge extends GuiIngame
 
         GlStateManager.enableBlend();
         mc.profiler.endSection();
-        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
 
         post(JUMPBAR);
     }

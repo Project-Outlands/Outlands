@@ -22,6 +22,7 @@ import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
 import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
+import static org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets;
 import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
 import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
 import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
@@ -47,6 +48,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final VkDevice device;
     private final VulkanContext context;
     private final VulkanPipeline pipeline;
+    private final VulkanTextures textures;
     private VulkanBuffer vertices;
     private VulkanBuffer indices;
     private List<TerrainMeshPacker.Slice> slices;
@@ -62,11 +64,12 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final Matrix4f modelViewProjection = new Matrix4f();
 
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
-                               VulkanBuffer vertices, VulkanBuffer indices, TerrainMeshPacker.Pack pack,
-                               String source) {
+                               VulkanTextures textures, VulkanBuffer vertices, VulkanBuffer indices,
+                               TerrainMeshPacker.Pack pack, String source) {
         this.device = device;
         this.context = context;
         this.pipeline = pipeline;
+        this.textures = textures;
         this.vertices = vertices;
         this.indices = indices;
         this.slices = pack.slices();
@@ -84,13 +87,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         return source;
     }
 
-    static VulkanTerrainLayer create(VulkanContext context, int colorFormat, int depthFormat) {
+    static VulkanTerrainLayer create(VulkanContext context, int colorFormat, int depthFormat,
+                                     VulkanDescriptors descriptors, VulkanTextures textures) {
         VkDevice device = context.device();
         VulkanShader vertex = VulkanShader.load(device, "/assets/outlands/shaders/terrain.vert.spv");
         VulkanShader fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
         VulkanPipeline pipeline;
         try {
-            pipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat);
+            // The terrain shader samples the block atlas exactly like a streamed draw does, so it needs the same
+            // descriptor set layout and takes the texture through the same cache.
+            pipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+                    descriptors.pipelineLayout(), descriptors.layout(), VulkanPipeline.PipelineState.terrain());
         } finally {
             // The module is only needed to build the pipeline; the pipeline owns the compiled code from then on.
             vertex.close();
@@ -109,7 +116,40 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             pipeline.close();
             throw e;
         }
-        return new VulkanTerrainLayer(device, context, pipeline, vertices, indices, pack, "placeholder");
+        return new VulkanTerrainLayer(device, context, pipeline, textures, vertices, indices, pack, "placeholder");
+    }
+
+    /** The descriptor set for the atlas, resolved by the frame before the rendering instance opened. */
+    private long resolvedTexture;
+
+    /** Records which set to bind. Called once per frame, before recording starts drawing. */
+    @Override
+    public void bindTextures(long descriptorSet) {
+        this.resolvedTexture = descriptorSet;
+    }
+
+    /**
+     * The texture handle this node samples, so the frame can resolve it alongside the draw list's textures.
+     *
+     * <p>The block atlas: the captured chunk meshes carry vanilla's own atlas coordinates, so anything else would
+     * sample the right UVs from the wrong image.</p>
+     */
+    @Override
+    public int requestedTexture() {
+        return atlasTexture();
+    }
+
+    /**
+     * The block atlas's handle, or {@code 0} before the atlas exists.
+     *
+     * <p>Read per frame rather than cached: the texture manager recreates the atlas on a resource reload, and holding
+     * the old handle would sample an image the game has since deleted. Asking is cheap - it is a field read on the
+     * texture map.</p>
+     */
+    private static int atlasTexture() {
+        net.minecraft.client.renderer.texture.TextureMap map =
+                net.minecraft.client.Minecraft.getMinecraft().getTextureMapBlocks();
+        return map == null ? 0 : map.getGlTextureId();
     }
 
     @Override
@@ -135,9 +175,20 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             ByteBuffer matrix = stack.malloc(16 * Float.BYTES);
             matrix.order(ByteOrder.nativeOrder());
             modelViewProjection.get(matrix);
+            // Same clip-space Y flip the streamed draws apply: this node's matrix is GL-style too, and Vulkan's NDC
+            // Y points the other way. Column-major, so row 1 is at 1, 5, 9 and 13.
+            java.nio.FloatBuffer flipped = matrix.asFloatBuffer();
+            for (int index = 1; index < 16; index += 4) {
+                flipped.put(index, -flipped.get(index));
+            }
 
             vkCmdPushConstants(commandBuffer, pipeline.layout(), VK_SHADER_STAGE_VERTEX_BIT, 0, matrix);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+
+            // The atlas set, resolved before the rendering instance opened. Resolving it here would record a copy
+            // inside a render pass, which Vulkan does not allow - the validation layers named that one exactly.
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
+                    stack.longs(resolvedTexture), null);
 
             // Bound once for the whole terrain: this is what packing buys.
             LongBuffer buffer = stack.longs(vertices.handle());

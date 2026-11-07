@@ -70,6 +70,25 @@ public interface FrameState {
 
     void blendFunc(int glSourceFactor, int glDestinationFactor);
 
+    /**
+     * The source and destination factors for RGB, as GL set them.
+     *
+     * <p>Read at draw time: blend factors are baked into a Vulkan pipeline, so they take part in the pipeline key
+     * and have to travel with the draw rather than being read once per frame.</p>
+     */
+    int blendSource();
+
+    int blendDestination();
+
+    /**
+     * The four separate factors, or {@code null} when the last call was the non-separate {@code blendFunc}.
+     *
+     * <p>Returning {@code null} rather than repeating the two shared factors keeps the distinction visible: the two
+     * calls mean the same thing now, but only one of them says so explicitly, and a backend that later has to report
+     * what the game actually asked for needs to be able to tell.</p>
+     */
+    int[] blendFactors();
+
     void blendFuncSeparate(int glSourceRgb, int glDestinationRgb, int glSourceAlpha, int glDestinationAlpha);
 
     void blendEquation(int glMode);
@@ -83,6 +102,21 @@ public interface FrameState {
     void polygonOffset(float factor, float units);
 
     void viewport(int x, int y, int width, int height);
+
+    /**
+     * {@code glScissor}: the rectangle everything is clipped to while {@link Capability#SCISSOR_TEST} is on.
+     *
+     * <p>Part of the draw's state rather than of the frame's, because Vulkan has scissor as dynamic state that a
+     * draw picks up and vanilla sets it around individual widgets - the mod list changes it per entry to clip a
+     * scrolling name.</p>
+     *
+     * <p>Coordinates arrive in GL's convention, with the origin at the bottom-left, because that is what the game
+     * computed. A backend whose origin is elsewhere converts it.</p>
+     */
+    void scissor(int x, int y, int width, int height);
+
+    /** The current scissor rectangle as {@code x, y, width, height} in GL's bottom-up coordinates. */
+    int[] scissorBox();
 
     void clearColor(float red, float green, float blue, float alpha);
 
