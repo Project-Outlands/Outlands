@@ -113,8 +113,7 @@
      {
          Display.setResizable(true);
 -        Display.setTitle("Minecraft 1.12.2");
-+        Display.setTitle("Outlands");
- 
+-
 -        try
 -        {
 -            Display.create(new PixelFormat().withDepthBits(24));
@@ -138,6 +137,8 @@
 -
 -            Display.create();
 -        }
++        Display.setTitle("Outlands");
++
 +        Display.create((new PixelFormat()).withDepthBits(24));
 +        net.minecraftforge.client.ForgeHooksClient.initializeLoadingTracker();
      }
@@ -436,16 +437,16 @@
          }
  
          this.processKeyBinds();
-@@ -2260,21 +2255,26 @@
+@@ -2260,19 +2255,24 @@
      {
          while (Mouse.next())
          {
--            int i = Mouse.getEventButton();
--            KeyBinding.setKeyBindState(i - 100, Mouse.getEventButtonState());
 +            if (net.minecraftforge.client.ForgeHooksClient.postMouseEvent()) continue;
- 
++
+             int i = Mouse.getEventButton();
+-            KeyBinding.setKeyBindState(i - 100, Mouse.getEventButtonState());
+-
 -            if (Mouse.getEventButtonState())
-+            int i = Mouse.getEventButton();
 +            if (i >= 0)
              {
 -                if (this.player.isSpectator() && i == 2)
@@ -459,16 +460,14 @@
 -                    KeyBinding.onTick(i - 100);
 +                    KeyBinding.onInputEvent(i - 100, Mouse.getEventButtonState(), false, Mouse.getEventSnapshot());
                  }
-             }
- 
++            }
++
 +            if (Mouse.getEventButtonState() && this.player.isSpectator() && i == 2)
 +            {
 +                this.ingameGUI.getSpectatorGui().onMiddleClick();
-+            }
-+
-             long j = getSystemTime() - this.systemTime;
+             }
  
-             if (j <= 200L)
+             long j = getSystemTime() - this.systemTime;
 @@ -2315,6 +2315,7 @@
                      this.currentScreen.handleMouseInput();
                  }
@@ -828,13 +827,14 @@
      public boolean isReducedDebug()
      {
          return this.player != null && this.player.hasReducedDebug() || this.gameSettings.reducedDebugInfo;
-@@ -3398,4 +3286,9 @@
+@@ -3397,5 +3285,10 @@
+     public Tutorial getTutorial()
      {
          return this.tutorial;
-     }
++    }
 +
 +    public SearchTreeManager getSearchTreeManager()
 +    {
 +        return this.searchTreeManager;
-+    }
+     }
  }

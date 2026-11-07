@@ -280,14 +280,16 @@
      }
  
      public static boolean useVbo()
-@@ -835,5 +815,6 @@
+@@ -834,6 +814,7 @@
+ 
      public static void setClientActiveTexture(int texture)
      {
 +        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -847,5 +828,11 @@
+@@ -846,6 +827,12 @@
+ 
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
 +        if (target == lightmapTexUnit)
@@ -299,8 +301,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
-
-@@ -854,6 +841,12 @@
+@@ -854,10 +841,17 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -313,15 +314,12 @@
      }
  
      public static void glBlendFunc(int sFactorRGB, int dFactorRGB, int sfactorAlpha, int dfactorAlpha)
-@@ -860,3 +853,4 @@
      {
 +        if (net.minecraftforge.client.render.state.backend.FrameStates.blendFuncSeparate(sFactorRGB, dFactorRGB, sfactorAlpha, dfactorAlpha)) { return; }
          if (openGL14)
          {
-@@ -888,7 +882,9 @@
-     public static void renderDirections(int p_188785_0_)
-     {
-         GlStateManager.disableTexture2D();
+             if (extBlendFuncSeparate)
+@@ -891,7 +885,9 @@
          GlStateManager.depthMask(false);
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -329,7 +327,27 @@
 +        // Through GlStateManager, not GL11: this is the F3 overlay's axis lines, and the direct call was a
 +        // segfault on a backend with no GL context.
 +        GlStateManager.glLineWidth(4.0F);
-@@ -916,59 +912,28 @@
+         bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
+         bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
+         bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
+@@ -900,7 +896,7 @@
+         bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
+         bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(0, 0, 0, 255).endVertex();
+         tessellator.draw();
+-        GL11.glLineWidth(2.0F);
++        GlStateManager.glLineWidth(2.0F);
+         bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
+         bufferbuilder.pos(0.0, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
+         bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
+@@ -909,66 +905,35 @@
+         bufferbuilder.pos(0.0, 0.0, 0.0).color(127, 127, 255, 255).endVertex();
+         bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(127, 127, 255, 255).endVertex();
+         tessellator.draw();
+-        GL11.glLineWidth(1.0F);
++        GlStateManager.glLineWidth(1.0F);
+         GlStateManager.depthMask(true);
+         GlStateManager.enableTexture2D();
+     }
  
      public static void openFile(File fileIn)
      {

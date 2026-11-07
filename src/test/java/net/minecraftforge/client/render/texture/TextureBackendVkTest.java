@@ -103,4 +103,28 @@ class TextureBackendVkTest {
         TextureBackend backend = new TextureBackendVk();
         assertThrows(IllegalStateException.class, () -> backend.parameter(99, 10241, 9987));
     }
+
+    @Test
+    void texture2dStateIsTrackedPerUnit() {
+        TextureBackend backend = new TextureBackendVk();
+        // Unit 0 starts enabled
+        org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled());
+        org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled(0));
+        org.junit.jupiter.api.Assertions.assertFalse(backend.isTexture2DEnabled(1));
+
+        // Switch to unit 1, enable it
+        backend.activeUnit(1);
+        org.junit.jupiter.api.Assertions.assertFalse(backend.isTexture2DEnabled());
+        backend.setTexture2DEnabled(true);
+        org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled());
+        org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled(1));
+
+        // Disable unit 1
+        backend.setTexture2DEnabled(false);
+        org.junit.jupiter.api.Assertions.assertFalse(backend.isTexture2DEnabled());
+
+        // Switch back to unit 0 - it must still be enabled!
+        backend.activeUnit(0);
+        org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled());
+    }
 }

@@ -102,17 +102,15 @@
          GL14.glBlendEquation(blendEquation);
      }
  
-@@ -254,7 +278,9 @@
+@@ -254,6 +278,8 @@
          if (param != fogState.mode)
          {
              fogState.mode = param;
--            GL11.glFogi(GL11.GL_FOG_MODE, param);
 +            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
 +            if (state2 != null) { state2.fogMode(param); return; }
-+            GL11.glFogi(GL11.GL_FOG_MODE, param);
+             GL11.glFogi(GL11.GL_FOG_MODE, param);
          }
      }
- 
 @@ -263,6 +289,8 @@
          if (param != fogState.density)
          {
@@ -217,7 +215,18 @@
              OpenGlHelper.setActiveTexture(texture);
          }
      }
-@@ -432,42 +479,54 @@
+@@ -423,51 +470,65 @@
+     public static void enableTexture2D()
+     {
+         textureState[activeTextureUnit].texture2DState.setEnabled();
++        if (net.minecraftforge.client.render.texture.TextureBackends.forNonGl() != null) { net.minecraftforge.client.render.texture.TextureBackends.forNonGl().setTexture2DEnabled(activeTextureUnit, true); }
+     }
+ 
+     public static void disableTexture2D()
+     {
+         textureState[activeTextureUnit].texture2DState.setDisabled();
++        if (net.minecraftforge.client.render.texture.TextureBackends.forNonGl() != null) { net.minecraftforge.client.render.texture.TextureBackends.forNonGl().setTexture2DEnabled(activeTextureUnit, false); }
+     }
  
      public static void glTexEnv(int target, int parameterName, FloatBuffer parameters)
      {
@@ -274,7 +283,7 @@
  
          for (GlStateManager.TextureState glstatemanager$texturestate : textureState)
          {
-@@ -483,6 +542,8 @@
+@@ -483,6 +544,8 @@
          if (texture != textureState[activeTextureUnit].textureName)
          {
              textureState[activeTextureUnit].textureName = texture;
@@ -283,7 +292,7 @@
              GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
          }
      }
-@@ -499,6 +560,8 @@
+@@ -499,6 +562,8 @@
              @Nullable IntBuffer pixels
          )
      {
@@ -292,7 +301,7 @@
          GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
      }
  
-@@ -514,6 +577,8 @@
+@@ -514,6 +579,8 @@
              IntBuffer pixels
          )
      {
@@ -301,7 +310,7 @@
          GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
      }
  
-@@ -521,11 +586,24 @@
+@@ -521,11 +588,24 @@
              int target, int level, int xOffset, int yOffset, int x, int y, int width, int height
          )
      {
@@ -326,7 +335,7 @@
          GL11.glGetTexImage(target, level, format, type, pixels);
      }
  
-@@ -544,6 +622,8 @@
+@@ -544,6 +624,8 @@
          if (mode != activeShadeModel)
          {
              activeShadeModel = mode;
@@ -335,7 +344,7 @@
              GL11.glShadeModel(mode);
          }
      }
-@@ -560,6 +640,8 @@
+@@ -560,6 +642,8 @@
  
      public static void viewport(int x, int y, int width, int height)
      {
@@ -344,7 +353,7 @@
          GL11.glViewport(x, y, width, height);
      }
  
-@@ -574,6 +656,8 @@
+@@ -574,6 +658,8 @@
              colorMaskState.green = green;
              colorMaskState.blue = blue;
              colorMaskState.alpha = alpha;
@@ -353,7 +362,7 @@
              GL11.glColorMask(red, green, blue, alpha);
          }
      }
-@@ -583,6 +667,8 @@
+@@ -583,6 +669,8 @@
          if (depth != clearState.depth)
          {
              clearState.depth = depth;
@@ -362,7 +371,7 @@
              GL11.glClearDepth(depth);
          }
      }
-@@ -598,73 +684,100 @@
+@@ -598,73 +686,100 @@
              clearState.color.green = green;
              clearState.color.blue = blue;
              clearState.color.alpha = alpha;
@@ -465,7 +474,7 @@
      }
  
      public static void rotate(Quaternion quaternionIn)
-@@ -715,6 +828,8 @@
+@@ -715,6 +830,8 @@
              colorState.green = colorGreen;
              colorState.blue = colorBlue;
              colorState.alpha = colorAlpha;
@@ -474,7 +483,7 @@
              GL11.glColor4f(colorRed, colorGreen, colorBlue, colorAlpha);
          }
      }
-@@ -726,11 +841,15 @@
+@@ -726,11 +843,15 @@
  
      public static void glTexCoord2f(float sCoord, float tCoord)
      {
@@ -490,7 +499,7 @@
          GL11.glVertex3f(x, y, z);
      }
  
-@@ -744,121 +863,197 @@
+@@ -744,121 +865,197 @@
  
      public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
      {
@@ -689,7 +698,7 @@
          return GL11.glGetInteger(parameterName);
      }
  
-@@ -956,6 +1151,12 @@
+@@ -956,6 +1153,12 @@
                  {
                      this.currentState = state;
  

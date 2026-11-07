@@ -63,6 +63,33 @@ public interface TextureBackend {
     void activeUnit(int unit);
 
     /**
+     * Reports whether 2D texturing is enabled on the given unit.
+     *
+     * @param unit the texture unit, zero-based
+     */
+    boolean isTexture2DEnabled(int unit);
+
+    /**
+     * Reports whether 2D texturing is enabled on the active unit.
+     */
+    boolean isTexture2DEnabled();
+
+    /**
+     * Enables or disables 2D texturing on the given unit.
+     *
+     * @param unit the texture unit, zero-based
+     * @param enabled whether texturing is enabled
+     */
+    void setTexture2DEnabled(int unit, boolean enabled);
+
+    /**
+     * Enables or disables 2D texturing on the active unit.
+     *
+     * @param enabled whether texturing is enabled
+     */
+    void setTexture2DEnabled(boolean enabled);
+
+    /**
      * Uploads a mip level, replacing its contents.
      *
      * @param pixels ARGB ints, rows from top to bottom, or {@code null} to allocate without data

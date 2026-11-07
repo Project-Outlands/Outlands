@@ -139,6 +139,17 @@ public interface FrameState {
      */
     float[] lightmap();
 
+    /**
+     * The texture handle the game uploads its lightmap into.
+     *
+     * <p>Reported rather than discovered: the backend has to sample that image, and nothing about a 16x16 texture says
+     * it is the lightmap. {@code 0} means the game has not created one yet.</p>
+     */
+    void lightmapTexture(int texture);
+
+    /** The lightmap texture handle, or {@code 0}. */
+    int lightmapTexture();
+
     // endregion
 
     void shadeModel(int glModel);

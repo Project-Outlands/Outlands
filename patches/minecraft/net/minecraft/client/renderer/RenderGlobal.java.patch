@@ -121,7 +121,8 @@
                  {
                      this.chunksToUpdate.add(renderchunk4);
                  }
-@@ -1192,3 +1205,8 @@
+@@ -1191,6 +1204,11 @@
+             GlStateManager.glEnableClientState(32886);
          }
  
 +        // The chunk meshes were captured when they finished building, so they never reached a GL buffer and this
@@ -130,6 +131,8 @@
 +        // collected chunks, and it draws nothing. A no-op on the GL path, which draws exactly as before.
 +        net.minecraftforge.client.render.state.backend.FrameStates.recordTerrainLayer(blockLayerIn.ordinal());
          this.renderContainer.renderChunkLayer(blockLayerIn);
+ 
+         if (OpenGlHelper.useVbo())
 @@ -1318,6 +1336,13 @@
  
      public void renderSky(float partialTicks, int pass)

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -85,7 +86,7 @@ class DisplayListVkTest {
         lists.begin(id, GL_COMPILE);
         assertThrows(IllegalStateException.class, () -> lists.begin(id, GL_COMPILE), "GL forbids nesting");
         lists.end();
-        assertThrows(IllegalStateException.class, () -> lists.call(id + 99), "calling a list never generated");
+        assertDoesNotThrow(() -> lists.call(id + 99), "calling a list never generated is a no-op");
     }
 
     @Test
@@ -105,6 +106,6 @@ class DisplayListVkTest {
 
         lists.delete(id, 2);
         assertEquals(0, lists.drawCount(id));
-        assertThrows(IllegalStateException.class, () -> lists.call(id));
+        assertDoesNotThrow(() -> lists.call(id));
     }
 }

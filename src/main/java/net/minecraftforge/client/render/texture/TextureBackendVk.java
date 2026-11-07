@@ -63,6 +63,11 @@ final class TextureBackendVk implements TextureBackend {
     /** Textures that have received a framebuffer copy, and therefore need an sRGB image. */
     private final java.util.Set<Integer> framebufferTargets = new java.util.HashSet<>();
     private final Map<Integer, Integer> boundUnit = new HashMap<>();
+    private final boolean[] unitTexture2dEnabled = new boolean[32];
+    {
+        // Unit 0 starts enabled in Minecraft
+        unitTexture2dEnabled[0] = true;
+    }
     /**
      * Which unit the game last made active, zero-based.
      *
@@ -160,6 +165,28 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public int boundTexture() {
         return boundUnit.getOrDefault(activeUnit, 0);
+    }
+
+    @Override
+    public boolean isTexture2DEnabled(int unit) {
+        return unit >= 0 && unit < unitTexture2dEnabled.length && unitTexture2dEnabled[unit];
+    }
+
+    @Override
+    public boolean isTexture2DEnabled() {
+        return isTexture2DEnabled(activeUnit);
+    }
+
+    @Override
+    public void setTexture2DEnabled(int unit, boolean enabled) {
+        if (unit >= 0 && unit < unitTexture2dEnabled.length) {
+            unitTexture2dEnabled[unit] = enabled;
+        }
+    }
+
+    @Override
+    public void setTexture2DEnabled(boolean enabled) {
+        setTexture2DEnabled(activeUnit, enabled);
     }
 
     /**

@@ -142,6 +142,15 @@ public final class FrameStates {
      *
      * @return whether the backend took it, i.e. whether the vanilla GL path should be skipped
      */
+    public static boolean lightmapTexture(int texture) {
+        FrameState state = forNonGl();
+        if (state == null) {
+            return false;
+        }
+        state.lightmapTexture(texture);
+        return true;
+    }
+
     public static boolean lightmap(float u, float v) {
         FrameState state = forNonGl();
         if (state == null) {

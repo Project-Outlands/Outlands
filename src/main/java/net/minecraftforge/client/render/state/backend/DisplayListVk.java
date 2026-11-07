@@ -95,18 +95,19 @@ final class DisplayListVk implements DisplayListBackend {
             // turned a harmless call the game has always made into a crash on the frame the sky first rendered.
             return;
         }
+        if (!FrameDraws.isCollecting()) {
+            int vertices = draws.stream().mapToInt(Draw::vertexCount).sum();
+            throw new UnsupportedOperationException(
+                    "cannot replay display list " + id + " on the Vulkan backend yet: it holds " + draws.size()
+                            + " draws / " + vertices + " vertices, and replaying means drawing, which needs a frame that is collecting. Recording"
+                            + " itself worked - that is why the list has contents. Needed: the backend to have begun"
+                            + " collecting the frame, which happens once the device exists.");
+        }
         // Replaying a list is recording its draws again: GL bakes the vertex data into the list and takes matrix and
         // enable state at call time, which is exactly what DrawState.current() is here.
         for (Draw draw : draws) {
-            if (FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), ByteBuffer.wrap(draw.vertices()),
-                    DrawState.current())) {
-                continue;
-            }
-            throw new UnsupportedOperationException(
-                    "cannot replay display list " + id + " on the Vulkan backend yet: it holds " + draws.size()
-                            + " draws, and replaying means drawing, which needs a frame that is collecting. Recording"
-                            + " itself worked - that is why the list has contents. Needed: the backend to have begun"
-                            + " collecting the frame, which happens once the device exists.");
+            FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), ByteBuffer.wrap(draw.vertices()),
+                    DrawState.current());
         }
     }
 

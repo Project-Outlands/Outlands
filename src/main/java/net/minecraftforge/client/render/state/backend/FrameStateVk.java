@@ -75,6 +75,8 @@ final class FrameStateVk implements FrameState {
     private float fogEnd = 1.0F;
     /** The lightmap coordinate a draw gets when its format carries none. Null until the game sets one. */
     private float[] lightmap;
+    /** The texture the game's lightmap lives in, or {@code 0}. */
+    private int lightmapTexture;
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -82,6 +84,13 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void capability(Capability capability, boolean enable) {
+        if (capability == Capability.TEXTURE_2D) {
+            net.minecraftforge.client.render.texture.TextureBackend tb =
+                    net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+            if (tb != null) {
+                tb.setTexture2DEnabled(enable);
+            }
+        }
         if (enable) {
             enabled.add(capability);
         } else {
@@ -123,6 +132,16 @@ final class FrameStateVk implements FrameState {
     @Override
     public float[] lightmap() {
         return lightmap == null ? null : lightmap.clone();
+    }
+
+    @Override
+    public void lightmapTexture(int texture) {
+        lightmapTexture = texture;
+    }
+
+    @Override
+    public int lightmapTexture() {
+        return lightmapTexture;
     }
 
     @Override
@@ -188,6 +207,13 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public boolean isEnabled(Capability capability) {
+        if (capability == Capability.TEXTURE_2D) {
+            net.minecraftforge.client.render.texture.TextureBackend tb =
+                    net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+            if (tb != null) {
+                return tb.isTexture2DEnabled();
+            }
+        }
         return enabled.contains(capability);
     }
 

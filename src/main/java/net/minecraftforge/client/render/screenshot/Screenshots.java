@@ -113,7 +113,6 @@ public final class Screenshots {
             }
             Files.createDirectories(request.file().toPath().getParent());
             javax.imageio.ImageIO.write(image, "png", request.file());
-            post(request.message());
         } catch (Exception e) {
             LOGGER.error("could not write the screenshot {}", request.file(), e);
             post(new TextComponentString("无法保存截图: " + e));

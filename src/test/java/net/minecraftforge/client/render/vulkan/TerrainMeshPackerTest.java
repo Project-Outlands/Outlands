@@ -21,6 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TerrainMeshPackerTest {
 
     /** Builds a mesh whose vertex bytes are distinguishable per mesh, so placement is observable. */
+    /** The same mesh the old helper returned, wrapped with an origin and a layer, which is what packing now needs. */
+    private static TerrainMeshPacker.Entry entry(TerrainMeshBuilder.Mesh mesh) {
+        return new TerrainMeshPacker.Entry(mesh, 0, 0, 0, 0);
+    }
+
     private static TerrainMeshBuilder.Mesh mesh(int quadCount, byte tag) {
         byte[] quads = new byte[quadCount * 4 * TerrainVertexFormat.STRIDE];
         for (int i = 0; i < quads.length; i++) {
@@ -31,7 +36,7 @@ class TerrainMeshPackerTest {
 
     @Test
     void slicesPointAtEachChunksOwnData() {
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(mesh(1, (byte) 1), mesh(2, (byte) 2)));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(mesh(1, (byte) 1)), entry(mesh(2, (byte) 2))));
 
         assertEquals(2, pack.slices().size());
 
@@ -49,7 +54,7 @@ class TerrainMeshPackerTest {
 
     @Test
     void vertexBytesAreConcatenatedInOrder() {
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(mesh(1, (byte) 7), mesh(1, (byte) 9)));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(mesh(1, (byte) 7)), entry(mesh(1, (byte) 9))));
 
         int perMesh = 4 * TerrainVertexFormat.STRIDE;
         assertEquals(perMesh * 2, pack.vertices().length);
@@ -59,7 +64,7 @@ class TerrainMeshPackerTest {
 
     @Test
     void indicesStayChunkRelativeAndTheOffsetCarriesTheBase() {
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(mesh(1, (byte) 1), mesh(1, (byte) 1)));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(mesh(1, (byte) 1)), entry(mesh(1, (byte) 1))));
 
         ByteBuffer indices = ByteBuffer.wrap(pack.indices()).order(ByteOrder.nativeOrder());
         int[] read = new int[12];
@@ -73,7 +78,7 @@ class TerrainMeshPackerTest {
 
     @Test
     void aSmallPackStaysSixteenBit() {
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(mesh(1, (byte) 0), mesh(1, (byte) 0)));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(mesh(1, (byte) 0)), entry(mesh(1, (byte) 0))));
         assertFalse(pack.index32());
         assertEquals(12 * Short.BYTES, pack.indices().length);
     }
@@ -82,7 +87,7 @@ class TerrainMeshPackerTest {
     void oneLargeMeshWidensTheWholePack() {
         // 16384 quads is 65536 vertices: past what a 16-bit index can address once the pack shares an index space.
         TerrainMeshBuilder.Mesh big = mesh(16_384, (byte) 0);
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(big, mesh(1, (byte) 0)));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(big), entry(mesh(1, (byte) 0))));
 
         assertTrue(pack.index32(), "the pack must widen when any slice pushes it past 65535 vertices");
         assertEquals((16_384 + 1) * 6 * Integer.BYTES, pack.indices().length);
@@ -92,7 +97,7 @@ class TerrainMeshPackerTest {
     void wideningPreservesIndexValues() {
         TerrainMeshBuilder.Mesh big = mesh(16_384, (byte) 0);
         TerrainMeshBuilder.Mesh small = mesh(1, (byte) 0);
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(big, small));
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(big), entry(small)));
 
         ByteBuffer indices = ByteBuffer.wrap(pack.indices()).order(ByteOrder.nativeOrder());
         int lastSliceStart = pack.slices().get(1).firstIndex();
@@ -114,10 +119,10 @@ class TerrainMeshPackerTest {
     @Test
     void packingSavesNothingInBytesButRemovesBufferObjects() {
         // Worth stating as a test so nobody expects packing to shrink memory: it does not, it removes bindings.
-        List<TerrainMeshBuilder.Mesh> meshes = List.of(mesh(2, (byte) 1), mesh(3, (byte) 2));
+        List<TerrainMeshPacker.Entry> meshes = List.of(entry(mesh(2, (byte) 1)), entry(mesh(3, (byte) 2)));
         TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(meshes);
 
-        int separateVertices = meshes.stream().mapToInt(m -> m.vertices().length).sum();
+        int separateVertices = meshes.stream().mapToInt(m -> m.mesh().vertices().length).sum();
         assertEquals(separateVertices, pack.vertices().length);
     }
 }

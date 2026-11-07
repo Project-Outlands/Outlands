@@ -1,6 +1,7 @@
 --- before/net/minecraft/util/ScreenShotHelper.java
 +++ after/net/minecraft/util/ScreenShotHelper.java
-@@ -39,3 +39,8 @@
+@@ -38,6 +38,11 @@
+ 
      public static ITextComponent saveScreenshot(File gameDirectory, @Nullable String screenshotName, int width, int height, Framebuffer buffer)
      {
 +        net.minecraft.util.text.ITextComponent handled = net.minecraftforge.client.render.screenshot.Screenshots.request(width, height, screenshotName);
@@ -9,6 +10,8 @@
 +            return handled;
 +        }
          try
+         {
+             File file1 = new File(gameDirectory, "screenshots");
 @@ -54,10 +59,14 @@
                  file2 = new File(file1, screenshotName);
              }
