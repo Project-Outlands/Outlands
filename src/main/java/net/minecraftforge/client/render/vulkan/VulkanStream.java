@@ -263,75 +263,6 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             int sinceCopy = 0;
-            if (Boolean.getBoolean("outlands.render.debug") && FRAMES_LOGGED.get() < 20) {
-                int perspectiveDraws = 0;
-                for (FrameDraws.Draw d : draws) {
-                    if (d.state().mvp()[11] == 0.0F) {
-                        perspectiveDraws++;
-                    }
-                }
-                StringBuilder heads = new StringBuilder();
-                for (int i = 0; i < Math.min(4, draws.size()); i++) {
-                    heads.append(" #").append(i).append('=').append(java.util.Arrays.toString(
-                            draws.get(i).state().viewport()));
-                }
-                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                        "Frame {}: {} draws, {} perspective, first viewports:{}",
-                        FRAMES_LOGGED.get(), draws.size(), perspectiveDraws, heads);
-            }
-            if (Boolean.getBoolean("outlands.render.debug") && FRAMES_LOGGED.getAndIncrement() < 2) {
-                StringBuilder tail = new StringBuilder();
-                for (int i = 0; i < draws.size(); i++) {
-                    if (!textures.isFramebufferTarget(draws.get(i).state().texture())) {
-                        continue;
-                    }
-                    FrameDraws.Draw d = draws.get(i);
-                    tail.append("\n  #").append(i)
-                            .append(" tex=").append(d.state().texture())
-                            .append(" stride=").append(d.layout().stride())
-                            .append(" verts=").append(d.vertexCount())
-                            .append(" mode=").append(d.mode())
-                            .append(" viewport=").append(java.util.Arrays.toString(d.state().viewport()))
-                            .append(" scissor=").append(d.state().scissorEnabled()
-                                    ? java.util.Arrays.toString(d.state().scissor()) : "off")
-                            .append(" cull=").append(d.state().cull() ? "on" : "off")
-                            .append(" depth=").append(d.state().depthTest() ? "on" : "off")
-                            .append(" write=").append(d.state().depthWrite() ? "on" : "off")
-                            .append(" blend=").append(d.state().blend()
-                                    ? d.state().blendSourceRgb() + "/" + d.state().blendDestinationRgb() : "off")
-                            .append(" colour=").append(java.util.Arrays.toString(d.state().color()))
-                            .append(" textured=").append(d.state().texture2d());
-                    if (d.vertexCount() == 4 && d.state().texture() == 9 && d.vertices().length >= 4 * d.layout().stride()) {
-                        java.nio.ByteBuffer v = java.nio.ByteBuffer.wrap(d.vertices());
-                        int stride = d.layout().stride();
-                        int positionOffset = -1;
-                        int uvOffset = -1;
-                        for (net.minecraftforge.client.render.vertex.VertexLayout.Attribute a : d.layout().attributes()) {
-                            if (a.usage() == net.minecraft.client.renderer.vertex.VertexFormatElement.EnumUsage.POSITION) {
-                                positionOffset = a.offset();
-                            } else if (a.usage() == net.minecraft.client.renderer.vertex.VertexFormatElement.EnumUsage.UV
-                                    && a.uvIndex() == 0) {
-                                uvOffset = a.offset();
-                            }
-                        }
-                        tail.append("\n     offsets pos=").append(positionOffset).append(" uv=").append(uvOffset)
-                            .append(" bytes=").append(d.vertices().length).append(" hex=");
-                        for (int k = 0; k < Math.min(48, d.vertices().length); k++) {
-                            tail.append(String.format(java.util.Locale.ROOT, "%02x", d.vertices()[k]));
-                        }
-                        for (int k = 0; k < 4 && positionOffset >= 0 && uvOffset >= 0; k++) {
-                            int base = k * stride;
-                            tail.append(String.format(java.util.Locale.ROOT,
-                                    "\n     v%d pos=(%.1f, %.1f, %.2f) uv=(%.4f, %.4f)",
-                                    k, v.getFloat(base + positionOffset), v.getFloat(base + positionOffset + 4),
-                                    v.getFloat(base + positionOffset + 8),
-                                    v.getFloat(base + uvOffset), v.getFloat(base + uvOffset + 4)));
-                        }
-                    }
-                }
-                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                        "Draws sampling the framebuffer copy, frame of {}:{}", draws.size(), tail);
-            }
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
@@ -345,22 +276,21 @@ final class VulkanStream implements AutoCloseable {
                 }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
+                if (draw.state().texture() == 9 && draw.vertexCount() == 12) {
+                    // The main menu's seven blur passes are twelve-vertex quads that sample the copy and draw it back
+                    // into the same corner of the framebuffer they were copied from. That feedback loop is a GL-era
+                    // technique: GL's copy is a snapshot, so each pass blurs the picture one texel further and the
+                    // result stays a picture. Here the frame is not one rendering instance - every copy closes it and
+                    // reopens with LOAD - and the loop converges to the mean colour of the region instead. Measured
+                    // over four runs: without these draws the background is the panorama at every frame, with them it
+                    // is a flat colour by the third frame. They are skipped until the blur is a real post-process the
+                    // backend owns, which is where a screen-space effect belongs anyway.
+                    continue;
+                }
                 if (Boolean.getBoolean("outlands.render.debug") && !PERSPECTIVE_REPORTED.get()
                         && draw.state().mvp()[15] == 0.0F) {
                     PERSPECTIVE_REPORTED.set(true);
                     reportPerspectiveDraw(draw);
-                }
-                if (sinceCopy > 0 && sinceCopy <= 6 && Boolean.getBoolean("outlands.render.debug")) {
-                    // What the draws after a framebuffer copy actually sample. Naming a different texture than the
-                    // copy wrote into would mean the background is an unrelated image stretched over the screen -
-                    // indistinguishable from a mis-oriented copy in a screenshot, obvious here.
-                    org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                            "After copy #{}: texture {} verts {} m15 {} uv0 {} scissor {}",
-                            sinceCopy, draw.state().texture(), draw.vertexCount(), draw.state().mvp()[15],
-                            firstUv(draw), draw.state().scissorEnabled());
-                    sinceCopy++;
-                } else if (sinceCopy > 6) {
-                    sinceCopy = 0;
                 }
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
                 // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
@@ -450,11 +380,6 @@ final class VulkanStream implements AutoCloseable {
                 "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
     }
 
-    private static final String[] TAIL = new String[6];
-    /** How many frames the tail has been reported for, so the first frames - the main menu - are the ones captured. */
-    private static final java.util.concurrent.atomic.AtomicInteger FRAMES_LOGGED =
-            new java.util.concurrent.atomic.AtomicInteger();
-
     private static final java.util.concurrent.atomic.AtomicBoolean PERSPECTIVE_REPORTED =
             new java.util.concurrent.atomic.AtomicBoolean();
 
@@ -508,16 +433,6 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /** The first vertex's texture coordinate, for a diagnostic about where the sample lands. */
-    private static String firstUv(FrameDraws.Draw draw) {
-        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
-        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
-            if (attribute.usage() == VertexFormatElement.EnumUsage.UV && attribute.uvIndex() == 0) {
-                return "(" + data.getFloat(attribute.offset()) + ","
-                        + data.getFloat(attribute.offset() + 4) + ")";
-            }
-        }
-        return "none";
-    }
 
     /** The first {@code count} bytes as hex, for a diagnostic that has to state the data rather than describe it. */
     private static String hex(byte[] data, int count) {

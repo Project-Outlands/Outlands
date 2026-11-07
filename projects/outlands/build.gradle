@@ -315,9 +315,6 @@ forgedev.runs {
             if (project.hasProperty('outlands.uvMode')) {
                 jvmArgs("-Doutlands.render.uvMode=${project.property('outlands.uvMode')}")
             }
-            if (project.hasProperty('outlands.probe')) {
-                jvmArgs('-Doutlands.render.probe=true')
-            }
             if (project.hasProperty('outlands.dumpTextures')) {
                 jvmArgs('-Doutlands.render.dumpTextures=true')
             }

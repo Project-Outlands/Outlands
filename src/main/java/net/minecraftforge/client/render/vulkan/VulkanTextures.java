@@ -251,7 +251,6 @@ final class VulkanTextures implements AutoCloseable {
             // correct one without another screenshot.
             byte[] area = readback.buffer().read(256 * 256 * 4);
             reportQuadrants(area, readback.texture());
-            dumpCopy(area, readback.texture(), readback.label());
             return;
         }
         byte[] sent = readback.sent();
@@ -414,43 +413,6 @@ final class VulkanTextures implements AutoCloseable {
      * is flipped; one with the sky at the top is right. Those three cases are indistinguishable in a written
      * description and obvious in four numbers.</p>
      */
-    /**
-     * Writes the copied region out as a PNG, once.
-     *
-     * <p>Four quadrant means say whether the picture is rolled, flipped or right, but they cannot say whether the
-     * copied region holds the whole panorama or a slice of it. The file settles that at a glance: the blur it feeds
-     * is a screen-space effect, so an image that is not a complete panorama cannot be made to look like one.</p>
-     */
-    private static void dumpCopy(byte[] bgra, int texture, String label) {
-        int index = DUMPED.incrementAndGet();
-        if (index > 12) {
-            return;
-        }
-        int side = 256;
-        java.awt.image.BufferedImage image =
-                new java.awt.image.BufferedImage(side, side, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < side; y++) {
-            for (int x = 0; x < side; x++) {
-                int at = (y * side + x) * 4;
-                int b = bgra[at] & 0xFF;
-                int g = bgra[at + 1] & 0xFF;
-                int r = bgra[at + 2] & 0xFF;
-                int a = bgra[at + 3] & 0xFF;
-                image.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
-            }
-        }
-        try {
-            java.io.File out = new java.io.File("/tmp/fb_copy_" + index + "_" + label + ".png");
-            javax.imageio.ImageIO.write(image, "png", out);
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info("Wrote {}", out);
-        } catch (java.io.IOException e) {
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").warn("Could not write the copy", e);
-        }
-    }
-
-    private static final java.util.concurrent.atomic.AtomicInteger DUMPED =
-            new java.util.concurrent.atomic.AtomicInteger();
-
     private static void reportQuadrants(byte[] bgra, int texture) {
         int side = 256;
         StringBuilder out = new StringBuilder();
