@@ -76,6 +76,7 @@ import static org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_STENCIL_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TILING_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -807,10 +808,27 @@ final class VulkanSwapchain {
         VkCheck.check(vkGetPhysicalDeviceSurfaceFormatsKHR(context.physicalDevice(), context.surface(), count, formats),
                 "vkGetPhysicalDeviceSurfaceFormatsKHR");
 
-        // B8G8R8A8_SRGB with a non-linear sRGB colour space is the one combination guaranteed to exist everywhere.
+        // B8G8R8A8_UNORM, deliberately, not the SRGB variant that is the "obviously correct" choice.
+        //
+        // The game was authored against GL without an sRGB framebuffer: every byte it writes is a gamma-space value,
+        // every colour it sets is gamma-space, and all of its blending maths assumes that. Rendering into an sRGB
+        // attachment would encode each stored fragment again, and the parts that cannot be decoded on the way in -
+        // vertex colours, which arrive as plain numbers - come out visibly wrong: the font's 25% shadow at 0x3F
+        // renders as 0x88, which reads as a pale ghost behind every string rather than a dark shadow.
+        //
+        // Matching the original's encoding is the faithful choice here, not the physically tidy one. A colour-managed
+        // pipeline would have to convert colours at every one of the game's own call sites, which is not a renderer
+        // change but a rewrite of how the game specifies colour.
         for (int i = 0; i < formats.capacity(); i++) {
             VkSurfaceFormatKHR format = formats.get(i);
-            if (format.format() == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            if (format.format() == VK_FORMAT_B8G8R8A8_UNORM
+                    && format.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return format.format();
+            }
+        }
+        for (int i = 0; i < formats.capacity(); i++) {
+            VkSurfaceFormatKHR format = formats.get(i);
+            if (format.format() == VK_FORMAT_B8G8R8A8_UNORM) {
                 return format.format();
             }
         }

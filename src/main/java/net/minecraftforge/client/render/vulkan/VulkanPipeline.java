@@ -81,6 +81,14 @@ final class VulkanPipeline implements AutoCloseable {
     static final int VERTEX_STRIDE = TerrainVertexFormat.STRIDE;
 
     /**
+     * What a draw hands its shaders: {@code mat4} plus the alpha test's reference and enable flag.
+     *
+     * <p>72 bytes, well inside the 128 every device guarantees. Named so the stream's writer and the pipeline's
+     * layout cannot drift apart, which they would as two separate literals.</p>
+     */
+    static final int PUSH_CONSTANT_BYTES = 16 * Float.BYTES + 2 * Float.BYTES;
+
+    /**
      * The pipeline state that is not dynamic.
      *
      * <p>Everything the stream path can vary per draw and that Vulkan bakes in. The vertex layout is absent on

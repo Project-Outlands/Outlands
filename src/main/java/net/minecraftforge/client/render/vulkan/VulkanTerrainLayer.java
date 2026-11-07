@@ -19,6 +19,7 @@ import java.util.List;
 import static org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT16;
 import static org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32;
 import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
+import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
 import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
@@ -172,9 +173,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         projection.mul(view, modelViewProjection);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            ByteBuffer matrix = stack.malloc(16 * Float.BYTES);
+            // The full push constant block, not just the matrix: the block now also carries the alpha test's two
+            // numbers, and pushing a shorter range leaves them undefined for the fragment stage. Undefined there
+            // means an arbitrary threshold, which discards arbitrary fragments.
+            ByteBuffer matrix = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
             matrix.order(ByteOrder.nativeOrder());
             modelViewProjection.get(matrix);
+            matrix.putFloat(16 * Float.BYTES, 0.0F);   // alpha reference, unused when the test is off
+            matrix.putFloat(16 * Float.BYTES + 4, 0.0F); // alpha test off: the terrain draws every fragment
             // Same clip-space Y flip the streamed draws apply: this node's matrix is GL-style too, and Vulkan's NDC
             // Y points the other way. Column-major, so row 1 is at 1, 5, 9 and 13.
             java.nio.FloatBuffer flipped = matrix.asFloatBuffer();
@@ -182,7 +188,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 flipped.put(index, -flipped.get(index));
             }
 
-            vkCmdPushConstants(commandBuffer, pipeline.layout(), VK_SHADER_STAGE_VERTEX_BIT, 0, matrix);
+            vkCmdPushConstants(commandBuffer, pipeline.layout(),
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, matrix);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
 
             // The atlas set, resolved before the rendering instance opened. Resolving it here would record a copy

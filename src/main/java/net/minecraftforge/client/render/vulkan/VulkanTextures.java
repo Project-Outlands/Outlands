@@ -86,7 +86,7 @@ final class VulkanTextures implements AutoCloseable {
      * @param sent    the bytes that were uploaded, to compare against
      * @param texture the game's handle, for the report
      */
-    private record Readback(VulkanBuffer buffer, byte[] sent, int texture) {}
+    private record Readback(VulkanBuffer buffer, byte[] sent, int texture, boolean owns) {}
 
     @SuppressWarnings("unchecked")
     /**
@@ -201,7 +201,7 @@ final class VulkanTextures implements AutoCloseable {
             verifiedTransfer = true;
             VulkanBuffer readback = VulkanBuffer.createReadback(context.device(), context, staged.length);
             target.copyTo(commandBuffer, readback.handle());
-            pendingReadback[slot].add(new Readback(readback, staged, image.id()));
+            pendingReadback[slot].add(new Readback(readback, staged, image.id(), true));
         }
     }
 
@@ -218,7 +218,9 @@ final class VulkanTextures implements AutoCloseable {
             try {
                 report(readback);
             } finally {
-                readback.buffer().close();
+                if (readback.owns()) {
+                    readback.buffer().close();
+                }
             }
         }
         pendingReadback[slot].clear();
@@ -228,10 +230,6 @@ final class VulkanTextures implements AutoCloseable {
         }
         pendingStaging[slot].clear();
 
-        if (copyScratch != null) {
-            copyScratch.close();
-            copyScratch = null;
-        }
     }
 
     /**
@@ -240,7 +238,18 @@ final class VulkanTextures implements AutoCloseable {
      * <p>A mismatch is reported with the first differing byte and the two values, because "the image is blank" and
      * "the image is one byte off" need different fixes and look the same in a screenshot.</p>
      */
+    private static final java.util.concurrent.atomic.AtomicBoolean DIAGNOSE =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     private static void report(Readback readback) {
+        if (readback.sent() == null) {
+            // No expected bytes: this is a framebuffer copy being sampled, not an upload being verified. Report where
+            // the bright (sky-like) pixels sit, which is what tells an upside-down or rolled background from a
+            // correct one without another screenshot.
+            byte[] area = readback.buffer().read(256 * 256 * 4);
+            reportQuadrants(area, readback.texture());
+            return;
+        }
         byte[] sent = readback.sent();
         byte[] got = readback.buffer().read(sent.length);
         int firstDifference = -1;
@@ -315,7 +324,8 @@ final class VulkanTextures implements AutoCloseable {
      * <p>The source rectangle arrives in GL's bottom-up framebuffer coordinates and the destination image is
      * top-down, so the row is flipped here - the same convention the upload path already documents.</p>
      */
-    void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy, FrameRenderTarget target) {
+    void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy, FrameRenderTarget target,
+                             int slot) {
         Entry entry = entries.get(copy.texture());
         if (entry == null) {
             // Resolved by prepareTextures, which runs before the instance opens; landing here means a copy whose
@@ -325,12 +335,20 @@ final class VulkanTextures implements AutoCloseable {
         }
         int copyBytes = copy.width() * copy.height() * 4;
         VulkanBuffer staging = VulkanBuffer.createTransfer(context.device(), context, copyBytes);
-        copyScratch = staging;
+        // Same rule as a texture upload: the copy is recorded, so the bytes are still being read when the frame
+        // finishes. Held per slot and released with the rest of that slot's transfers. Keeping it in a single field
+        // instead meant releasing the current slot freed the buffer another slot was still reading, which is exactly
+        // what the validation layers reported as destroying a buffer in use.
+        pendingStaging[slot].add(staging);
         entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
-    }
 
-    /** The buffer the last framebuffer copy used, released with the slot like any other recorded transfer. */
-    private VulkanBuffer copyScratch;
+        if (Boolean.getBoolean("outlands.render.debug") && DIAGNOSE.compareAndSet(false, true)) {
+            // Borrowed, not owned: the same buffer is already in pendingStaging and is closed there. Adding it to the
+            // readback list as an owner freed it twice, which the validation layers reported as destroying an
+            // invalid buffer handle.
+            pendingReadback[slot].add(new Readback(staging, null, copy.texture(), false));
+        }
+    }
 
     /**
      * The byte order this renderer uses, with the encoding the render target requires.
@@ -347,6 +365,40 @@ final class VulkanTextures implements AutoCloseable {
     /** The stand-in set a draw uses when nothing is bound. */
     long whiteDescriptorSet() {
         return whiteSet;
+    }
+
+    /**
+     * Prints the mean colour of the copied region's four quadrants.
+     *
+     * <p>A background with the sky on the right and the ground on the left is rolled; one with the sky at the bottom
+     * is flipped; one with the sky at the top is right. Those three cases are indistinguishable in a written
+     * description and obvious in four numbers.</p>
+     */
+    private static void reportQuadrants(byte[] bgra, int texture) {
+        int side = 256;
+        StringBuilder out = new StringBuilder();
+        for (int quadrant = 0; quadrant < 4; quadrant++) {
+            int x0 = (quadrant % 2) * side / 2;
+            int y0 = (quadrant / 2) * side / 2;
+            long blue = 0;
+            long green = 0;
+            long red = 0;
+            int count = 0;
+            for (int y = y0; y < y0 + side / 2; y += 2) {
+                for (int x = x0; x < x0 + side / 2; x += 2) {
+                    int at = (y * side + x) * 4;
+                    blue += bgra[at] & 0xFF;
+                    green += bgra[at + 1] & 0xFF;
+                    red += bgra[at + 2] & 0xFF;
+                    count++;
+                }
+            }
+            out.append(String.format(java.util.Locale.ROOT, " %s=#%02x%02x%02x",
+                    new String[] {"topLeft", "topRight", "bottomLeft", "bottomRight"}[quadrant],
+                    red / count, green / count, blue / count));
+        }
+        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                "Framebuffer copy for texture {}:{}", texture, out);
     }
 
     /** How many textures are on the device. Diagnostics. */

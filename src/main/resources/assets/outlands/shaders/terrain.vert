@@ -13,9 +13,13 @@ layout(location = 1) in vec4 inColor;      // offset 12, R8G8B8A8_UNORM
 layout(location = 2) in vec2 inUv;         // offset 16, R32G32_SFLOAT
 layout(location = 3) in vec2 inLightmap;   // offset 24, R16G16_UNORM
 
-// One mat4 per draw. 64 bytes, inside the 128 every device guarantees.
+// One mat4 per draw plus the alpha test's two numbers: 72 bytes, inside the 128 every device guarantees.
+// The block is declared identically in the fragment stage, because Vulkan requires matching declarations when both
+// stages read the same push constant range.
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
+    float alphaReference;   // 64
+    float alphaTest;        // 68, 0 or 1
 } pc;
 
 layout(location = 0) out vec4 outColor;

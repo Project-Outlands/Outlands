@@ -82,6 +82,21 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public boolean alphaTestEnabled() {
+        return enabled.contains(Capability.ALPHA_TEST);
+    }
+
+    @Override
+    public float alphaReference() {
+        return alphaReference;
+    }
+
+    @Override
+    public int alphaComparison() {
+        return alphaComparison;
+    }
+
+    @Override
     public void shadeModel(int glModel) {
         shadeModel = switch (glModel) {
             case 7424, 7425 -> glModel;   // GL_FLAT, GL_SMOOTH

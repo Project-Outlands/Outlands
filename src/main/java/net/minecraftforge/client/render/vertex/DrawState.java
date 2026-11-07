@@ -29,10 +29,14 @@ package net.minecraftforge.client.render.vertex;
  * @param scissor              the scissor rectangle as {@code x, y, width, height} in GL's bottom-up pixels
  * @param color                the current vertex colour, four components in 0..1
  * @param texture2d            whether texturing was enabled, i.e. whether this draw samples the bound texture at all
+ * @param alphaTest            whether the alpha test was enabled, which decides whether a fragment exists at all
+ * @param alphaReference       the alpha test's reference value
+ * @param alphaComparison      the alpha test's GL comparison
  */
 public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
-                        int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d) {
+                        int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
+                        boolean alphaTest, float alphaReference, int alphaComparison) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -90,7 +94,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.SCISSOR_TEST),
                 state.scissorBox(),
                 state.currentColor(),
-                state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D));
+                state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D),
+                state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison());
     }
 
     /**

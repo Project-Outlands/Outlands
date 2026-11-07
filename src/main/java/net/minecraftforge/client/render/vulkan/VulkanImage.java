@@ -287,27 +287,21 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-            // One copy per row, in reverse.
+            // Straight through, no row reversal.
             //
-            // GL's glCopyTexSubImage2D puts the framebuffer's *bottom* row into the destination's texel row 0, which
-            // is the row that v = 0 samples. The staging buffer starts at the source region's top row, because that
-            // is how a top-down image read works out, so writing it straight through would mirror the result
-            // vertically against every coordinate the game computed. Placing the last staging row at the first
-            // destination row is that flip, and it costs one copy command per row on a 256-row rectangle.
-            for (int row = 0; row < copy.height(); row++) {
-                VkBufferImageCopy.Buffer toImage = VkBufferImageCopy.calloc(1, stack);
-                toImage.get(0)
-                        .bufferOffset((long) row * copy.width() * 4)
-                        .bufferRowLength(0)
-                        .bufferImageHeight(0);
-                toImage.get(0).imageOffset().x(copy.xOffset())
-                        .y(copy.yOffset() + (copy.height() - 1 - row)).z(0);
-                toImage.get(0).imageExtent().width(copy.width()).height(1).depth(1);
-                toImage.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .mipLevel(copy.level()).baseArrayLayer(0).layerCount(1);
-                org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
-                        org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
-            }
+            // GL's glCopyTexSubImage2D puts the framebuffer's bottom row at the destination's texel row 0, but this
+            // framebuffer's row 0 is the top of the screen, and the quad sampling the copy puts v = 0 at the top of
+            // the screen as well - so a straight copy reproduces the picture the sharp panorama already showed.
+            // Reversing the rows to imitate GL's wording instead produced an upside-down background, which is how
+            // this was decided: the observable behaviour of the original, not its description.
+            VkBufferImageCopy.Buffer toImage = VkBufferImageCopy.calloc(1, stack);
+            toImage.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+            toImage.get(0).imageOffset().x(copy.xOffset()).y(copy.yOffset()).z(0);
+            toImage.get(0).imageExtent().width(copy.width()).height(copy.height()).depth(1);
+            toImage.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(copy.level()).baseArrayLayer(0).layerCount(1);
+            org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
 
             transition(commandBuffer, stack,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,

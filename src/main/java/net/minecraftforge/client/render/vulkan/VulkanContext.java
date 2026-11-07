@@ -374,7 +374,12 @@ final class VulkanContext {
                 .sType$Default()
                 .pNext(enable12.address())
                 .dynamicRendering(supported13.dynamicRendering())
-                .synchronization2(supported13.synchronization2());
+                .synchronization2(supported13.synchronization2())
+                // Needed by the alpha test: GLSL's discard compiles to OpDemoteToHelperInvocation for a Vulkan 1.3
+                // target, and a shader module that declares a capability the device did not enable is rejected -
+                // which is how this surfaced. The alpha test is what stops a transparent texel from writing its
+                // colour, so it is not optional for the GUI.
+                .shaderDemoteToHelperInvocation(supported13.shaderDemoteToHelperInvocation());
         VkPhysicalDeviceVulkan14Features enable14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
                 .sType$Default()
                 .pNext(enable13.address())
@@ -386,6 +391,7 @@ final class VulkanContext {
         reportMissing("descriptorIndexing", supported12.descriptorIndexing());
         reportMissing("dynamicRendering", supported13.dynamicRendering());
         reportMissing("synchronization2", supported13.synchronization2());
+        reportMissing("shaderDemoteToHelperInvocation", supported13.shaderDemoteToHelperInvocation());
         reportMissing("pushDescriptor", supported14.pushDescriptor());
         reportMissing("hostImageCopy", supported14.hostImageCopy());
         reportMissing("maintenance5", supported14.maintenance5());

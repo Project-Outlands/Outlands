@@ -51,6 +51,26 @@ public interface FrameState {
 
     void alphaFunc(int glComparison, float reference);
 
+    /** Whether the alpha test is active, i.e. whether fragments below the reference are discarded. */
+    boolean alphaTestEnabled();
+
+    /**
+     * The alpha test's reference value.
+     *
+     * <p>Read at draw time with {@link #alphaTestEnabled()} because it decides whether fragments exist at all. It is
+     * not a cosmetic detail: without it a transparent texel still writes its colour when blending happens to be off,
+     * which is how the main menu's wordmark turned into a black rectangle.</p>
+     */
+    float alphaReference();
+
+    /**
+     * The alpha test's comparison, as a GL enum.
+     *
+     * <p>Reported rather than interpreted so the backend can reject a comparison it does not implement instead of
+     * quietly testing something else.</p>
+     */
+    int alphaComparison();
+
     void shadeModel(int glModel);
 
     void cullFace(int glFace);

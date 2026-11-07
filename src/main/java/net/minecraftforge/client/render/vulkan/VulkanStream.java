@@ -61,6 +61,9 @@ final class VulkanStream implements AutoCloseable {
     private final int colorFormat;
     private final int depthFormat;
     private final Map<VulkanPipeline.PipelineState, VulkanPipeline> pipelines = new HashMap<>();
+    /** {@code GL_GREATER}, the alpha test comparison vanilla sets when it enables the test. */
+    private static final int GL_GREATER = 516;
+
     private static final java.util.concurrent.atomic.AtomicBoolean DIAGNOSE =
             new java.util.concurrent.atomic.AtomicBoolean();
     /**
@@ -242,7 +245,7 @@ final class VulkanStream implements AutoCloseable {
             // as "no buffer bound" on every draw rather than as an obvious error.
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
 
-            ByteBuffer constants = stack.malloc(16 * Float.BYTES);
+            ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
             long boundSet = 0L;
             // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
             // value is the whole viewport, which is what an unclipped frame uses.
@@ -257,7 +260,7 @@ final class VulkanStream implements AutoCloseable {
                     // and reopened with LOAD afterwards. Splitting is the only way to keep both the source content
                     // and the ordering vanilla asked for; Vulkan forbids the copy itself inside a render pass.
                     vkCmdEndRendering(commandBuffer);
-                    textures.copyFromFramebuffer(commandBuffer, copy, target);
+                    textures.copyFromFramebuffer(commandBuffer, copy, target, slot);
                     target.beginRendering(commandBuffer);
                     continue;
                 }
@@ -269,8 +272,19 @@ final class VulkanStream implements AutoCloseable {
                 // perspective matrix and left the GUI off-screen.
                 VulkanPipeline pipeline = pipelineFor(stateFor(shape, draw.state()));
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-                writeMvp(constants.asFloatBuffer(), draw.state().mvp());
-                vkCmdPushConstants(commandBuffer, pipeline.layout(), org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT,
+                java.nio.FloatBuffer push = constants.asFloatBuffer();
+                writeMvp(push, draw.state().mvp());
+                push.put(16, draw.state().alphaReference());
+                // GL_GREATER is the only comparison vanilla uses; anything else is rejected rather than approximated.
+                push.put(17, draw.state().alphaTest() ? 1.0F : 0.0F);
+                if (draw.state().alphaTest() && draw.state().alphaComparison() != GL_GREATER) {
+                    throw new UnsupportedOperationException("alpha test comparison "
+                            + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"
+                            + " (516) only, which is the one vanilla sets");
+                }
+                vkCmdPushConstants(commandBuffer, pipeline.layout(),
+                        org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
+                                | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
                         0, constants);
                 applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
                 if (textureSets[indexOfOp] != boundSet) {
@@ -411,6 +425,7 @@ final class VulkanStream implements AutoCloseable {
      * it costs four multiplies instead of a matrix multiply per draw.</p>
      */
     private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {
+        target.position(0);
         target.put(mvp);
         // Column-major, so row 1 is at 1, 5, 9 and 13.
         for (int index = 1; index < 16; index += 4) {

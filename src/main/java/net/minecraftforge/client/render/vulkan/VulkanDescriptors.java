@@ -83,10 +83,14 @@ final class VulkanDescriptors implements AutoCloseable {
             this.setLayout = layoutOut.get(0);
 
             VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
+            // Must match VulkanPipeline's own copy of this range exactly, and it must cover the fragment stage:
+            // the alpha test's reference value lives in these bytes and the fragment shader reads it. A range that
+            // only names the vertex stage is what the validation layers reported as
+            // VUID-VkGraphicsPipelineCreateInfo-layout-07987.
             pushConstants.get(0)
-                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
                     .offset(0)
-                    .size(16 * Float.BYTES);
+                    .size(VulkanPipeline.PUSH_CONSTANT_BYTES);
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                     .sType$Default()
                     .pSetLayouts(stack.longs(setLayout))

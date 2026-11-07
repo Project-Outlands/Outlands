@@ -15,10 +15,27 @@ layout(location = 2) in vec2 inLightmap;   // block light, sky light, both 0..1
 // solid-colour quads vanilla draws without a texture.
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 
+// The fixed-function alpha test, as a discard.
+//
+// GL removed fragments whose alpha failed a comparison, and vanilla's GUI depends on it: a fully transparent texel
+// discarded here never writes anything, while without it the same texel writes its colour whenever blending happens
+// to be off. That is the difference between the main menu's wordmark floating over the panorama and the same
+// wordmark sitting on a black rectangle.
+layout(push_constant) uniform PushConstants {
+    mat4 modelViewProjection;
+    float alphaReference;
+    float alphaTest;
+} pc;
+
 layout(location = 0) out vec4 outColor;
 
 void main() {
     vec4 sample4 = texture(atlas, inUv);
+
+    // GL_GREATER is the only comparison vanilla sets, and the backend rejects the others rather than guessing.
+    if (pc.alphaTest > 0.5 && !(sample4.a > pc.alphaReference)) {
+        discard;
+    }
 
     // Component order is block light then sky light: BufferBuilder.lightmap writes blockLight to the element's first
     // short and skyLight to the second, which is the opposite of the argument order of that method.
