@@ -28,6 +28,7 @@ import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
 import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
 import static org.lwjgl.vulkan.VK10.vkCmdDraw;
 import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
+import static org.lwjgl.vulkan.VK13.vkCmdEndRendering;
 import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
 
 /**
@@ -112,11 +113,16 @@ final class VulkanStream implements AutoCloseable {
      *
      * @param extra additional texture handles to resolve, for paths outside the draw list (the terrain node's atlas)
      */
-    void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot, int... extra) {
+    void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int... extra) {
         resolved.clear();
-        for (FrameDraws.Draw draw : draws) {
-            if (draw.state().samplesTexture()) {
+        for (FrameDraws.Operation op : ops) {
+            if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
                 resolve(draw.state().texture(), commandBuffer, slot);
+            } else if (op instanceof FrameDraws.FramebufferCopy copy) {
+                // The destination has to exist before the copy can write into it, and it is resolved here for the
+                // same reason every other texture is: image creation and its first layout transition belong outside
+                // the rendering instance.
+                resolve(copy.texture(), commandBuffer, slot);
             }
         }
         for (int texture : extra) {
@@ -158,8 +164,10 @@ final class VulkanStream implements AutoCloseable {
      * <p>Called inside the rendering instance the frame already opened, so the colour and depth attachments are
      * whatever that instance targets.</p>
      */
-    void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot, int viewportWidth,
-                int viewportHeight) {
+    void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
+                int viewportHeight, FrameRenderTarget target) {
+        List<FrameDraws.Draw> draws = ops.stream()
+                .filter(FrameDraws.Draw.class::isInstance).map(FrameDraws.Draw.class::cast).toList();
         drawsThisFrame = draws.size();
         if (DIAGNOSE.compareAndSet(false, true)) {
             // Once, because this is a question about what the frame contains, not a per-frame measurement.
@@ -242,8 +250,19 @@ final class VulkanStream implements AutoCloseable {
             // Sentinel that cannot match a real rectangle, so the first draw always sets one.
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
 
-            for (int i = 0; i < draws.size(); i++) {
-                FrameDraws.Draw draw = draws.get(i);
+            int indexOfOp = -1;
+            for (FrameDraws.Operation op : ops) {
+                if (op instanceof FrameDraws.FramebufferCopy copy) {
+                    // The copy reads the framebuffer this instance is painting, so the instance is closed around it
+                    // and reopened with LOAD afterwards. Splitting is the only way to keep both the source content
+                    // and the ordering vanilla asked for; Vulkan forbids the copy itself inside a render pass.
+                    vkCmdEndRendering(commandBuffer);
+                    textures.copyFromFramebuffer(commandBuffer, copy, target);
+                    target.beginRendering(commandBuffer);
+                    continue;
+                }
+                FrameDraws.Draw draw = (FrameDraws.Draw) op;
+                indexOfOp++;
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
                 // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
                 // here instead would apply one matrix to every draw - which drew the whole menu with the panorama's
@@ -254,18 +273,18 @@ final class VulkanStream implements AutoCloseable {
                 vkCmdPushConstants(commandBuffer, pipeline.layout(), org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT,
                         0, constants);
                 applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
-                if (textureSets[i] != boundSet) {
+                if (textureSets[indexOfOp] != boundSet) {
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
-                            stack.longs(textureSets[i]), null);
-                    boundSet = textureSets[i];
+                            stack.longs(textureSets[indexOfOp]), null);
+                    boundSet = textureSets[indexOfOp];
                 }
                 if (shape.needsIndexing()) {
                     vkCmdBindIndexBuffer(commandBuffer, pendingIndices[slot].handle(), 0L,
                             org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[i],
-                            offsets[i] / VertexConverter.STRIDE, 0);
+                    vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[indexOfOp],
+                            offsets[indexOfOp] / VertexConverter.STRIDE, 0);
                 } else {
-                    vkCmdDraw(commandBuffer, draw.vertexCount(), 1, offsets[i] / VertexConverter.STRIDE, 0);
+                    vkCmdDraw(commandBuffer, draw.vertexCount(), 1, offsets[indexOfOp] / VertexConverter.STRIDE, 0);
                 }
             }
         }

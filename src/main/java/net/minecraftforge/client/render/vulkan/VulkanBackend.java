@@ -143,7 +143,8 @@ public final class VulkanBackend implements RenderBackend {
                             net.minecraftforge.client.render.texture.TextureBackends.forNonGl(),
                             "the Vulkan path installs a texture backend before anything can draw");
             descriptors = new VulkanDescriptors(context.device());
-            textureCache = new VulkanTextures(context, descriptors, textures);
+            textureCache = new VulkanTextures(context, descriptors, textures,
+                    isSrgbFormat(swapchain.imageFormat()));
             terrainLayer = VulkanTerrainLayer.create(context, swapchain.imageFormat(), swapchain.depthFormat(),
                     descriptors, textureCache);
             stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat(),
@@ -208,6 +209,20 @@ public final class VulkanBackend implements RenderBackend {
     @Override
     public Object nativeContext() {
         return context;
+    }
+
+    /**
+     * Whether a colour format stores sRGB-encoded values.
+     *
+     * <p>The renderer needs this to decide the format of every texture it creates: sampling has to decode with the
+     * same encoding the attachment encodes with, or the picture is brightened twice. Only the formats a swapchain
+     * realistically reports are listed, and an unknown one is treated as linear, which is the conservative answer -
+     * it renders the bytes as stored rather than inventing a transfer function.</p>
+     */
+    private static boolean isSrgbFormat(int format) {
+        return format == org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_SRGB
+                || format == org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_SRGB
+                || format == org.lwjgl.vulkan.VK10.VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     }
 
     /**

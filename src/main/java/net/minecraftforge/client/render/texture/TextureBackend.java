@@ -72,6 +72,32 @@ public interface TextureBackend {
     /** Uploads into part of a mip level. */
     void subUpload(int id, int level, int xOffset, int yOffset, int width, int height, IntBuffer pixels);
 
+    /**
+     * Copies a rectangle of the framebuffer into the bound texture.
+     *
+     * <p><b>Not an upload.</b> The source is what the frame is painting right now, so this cannot be executed when
+     * it is called: the draws it reads may not have run yet. It is recorded at its place in the frame's sequence and
+     * executed there, which is what makes the main menu's panorama blur work - copy, then draw the copy back scaled
+     * three times.</p>
+     *
+     * @param level   destination mip level
+     * @param xOffset left edge in the destination
+     * @param yOffset top edge in the destination
+     * @param x       left edge of the source rectangle, in pixels
+     * @param y       bottom edge of the source rectangle, in GL's bottom-up framebuffer coordinates
+     */
+    void copyFromFramebuffer(int level, int xOffset, int yOffset, int x, int y, int width, int height);
+
+    /**
+     * Whether a texture has ever been the destination of a framebuffer copy.
+     *
+     * <p>A renderer needs this before creating the device image: the framebuffer holds sRGB-encoded values, so an
+     * image that receives them has to be created as an sRGB format for sampling to decode them back to what was
+     * drawn. A texture that only ever holds uploaded file data must not be, which is why the answer has to come from
+     * the texture rather than from a format chosen per renderer.</p>
+     */
+    boolean isFramebufferTarget(int id);
+
     /** Records an integer sampler parameter (filter, wrap, mipmap range). */
     void parameter(int id, int pname, int value);
 

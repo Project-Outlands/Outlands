@@ -2,6 +2,7 @@ package net.minecraftforge.client.render.vulkan;
 
 import net.minecraftforge.client.render.texture.TextureBackend;
 import net.minecraftforge.client.render.texture.TextureImage;
+import net.minecraftforge.client.render.vertex.FrameDraws;
 
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -88,10 +89,23 @@ final class VulkanTextures implements AutoCloseable {
     private record Readback(VulkanBuffer buffer, byte[] sent, int texture) {}
 
     @SuppressWarnings("unchecked")
-    VulkanTextures(VulkanContext context, VulkanDescriptors descriptors, TextureBackend source) {
+    /**
+     * Whether uploaded textures are created as sRGB images.
+     *
+     * <p>Decided by the render target, not by preference. The surface is an sRGB format, so the hardware encodes
+     * every fragment it stores from linear to sRGB; a texture holding sRGB-encoded bytes has to say so, or sampling
+     * hands those bytes over as if they were linear and the next encode brightens them a second time. That double
+     * encode is what made the whole game look washed out - the same texture drawn through a UNORM image comes out
+     * pale, and no amount of shader work fixes it because the error is in the format.</p>
+     */
+    private final boolean srgbTextures;
+
+    VulkanTextures(VulkanContext context, VulkanDescriptors descriptors, TextureBackend source,
+                   boolean srgbRenderTarget) {
         this.context = context;
         this.descriptors = descriptors;
         this.source = source;
+        this.srgbTextures = srgbRenderTarget;
         this.pendingStaging = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
         this.pendingReadback = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int slot = 0; slot < this.pendingStaging.length; slot++) {
@@ -99,7 +113,8 @@ final class VulkanTextures implements AutoCloseable {
             this.pendingReadback[slot] = new ArrayList<>();
         }
 
-        this.white = VulkanImage.create(context.device(), context, 1, 1);
+        // The stand-in is white in either encoding, so its format only has to match for consistency.
+        this.white = VulkanImage.create(context.device(), context, 1, 1, textureFormat());
         this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET);
         this.whiteSet = descriptors.allocate(white.view(), whiteSampler);
     }
@@ -136,8 +151,11 @@ final class VulkanTextures implements AutoCloseable {
             return entry.descriptorSet();
         }
 
+        // Both uploaded files and framebuffer copies hold sRGB-encoded bytes - PNGs because that is what a PNG is,
+        // and copies because they come from an sRGB attachment. One format answers both.
+        int format = textureFormat();
         if (entry == null) {
-            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height());
+            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
             long set = descriptors.allocate(created.view(), sampler);
             entry = new Entry(created, sampler, set, -1L);
@@ -153,7 +171,7 @@ final class VulkanTextures implements AutoCloseable {
             // A texture cannot be resized in place, and GL did allow it: glTexImage2D on an existing name replaces
             // the level at a possibly different size. The sampler survives, so only the image and its set change.
             entry.image().close();
-            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height());
+            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long set = descriptors.allocate(created.view(), entry.sampler());
             entry = new Entry(created, entry.sampler(), set, -1L);
             entries.put(textureId, entry);
@@ -209,6 +227,11 @@ final class VulkanTextures implements AutoCloseable {
             buffer.close();
         }
         pendingStaging[slot].clear();
+
+        if (copyScratch != null) {
+            copyScratch.close();
+            copyScratch = null;
+        }
     }
 
     /**
@@ -279,6 +302,46 @@ final class VulkanTextures implements AutoCloseable {
             sum = sum * 31 + pixels[i];
         }
         return Integer.toHexString(pixels.length == 0 ? 0 : pixels[0]) + "/" + Long.toHexString(sum);
+    }
+
+    /**
+     * Copies part of this frame's framebuffer into a texture.
+     *
+     * <p><b>Through a buffer, not image to image.</b> {@code vkCmdCopyImage} requires both images to share a format,
+     * and they do not have to: the surface is whatever the driver reports and the texture is this renderer's own.
+     * A buffer round trip is one extra transfer and no compatibility question, which for a 256x256 blur source once
+     * per frame is the right trade.</p>
+     *
+     * <p>The source rectangle arrives in GL's bottom-up framebuffer coordinates and the destination image is
+     * top-down, so the row is flipped here - the same convention the upload path already documents.</p>
+     */
+    void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy, FrameRenderTarget target) {
+        Entry entry = entries.get(copy.texture());
+        if (entry == null) {
+            // Resolved by prepareTextures, which runs before the instance opens; landing here means a copy whose
+            // destination the frame never declared, so nothing can receive it.
+            throw new IllegalStateException("framebuffer copy into texture " + copy.texture()
+                    + " that was never resolved for this frame");
+        }
+        int copyBytes = copy.width() * copy.height() * 4;
+        VulkanBuffer staging = VulkanBuffer.createTransfer(context.device(), context, copyBytes);
+        copyScratch = staging;
+        entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
+    }
+
+    /** The buffer the last framebuffer copy used, released with the slot like any other recorded transfer. */
+    private VulkanBuffer copyScratch;
+
+    /**
+     * The byte order this renderer uses, with the encoding the render target requires.
+     *
+     * <p>{@code B8G8R8A8} because the texture backend holds {@code 0xAARRGGBB} ints, which on a little-endian machine
+     * is already the B, G, R, A order a {@code GL_BGRA} upload describes.</p>
+     */
+    private int textureFormat() {
+        return srgbTextures
+                ? org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_SRGB
+                : org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
     }
 
     /** The stand-in set a draw uses when nothing is bound. */

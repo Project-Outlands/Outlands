@@ -77,6 +77,7 @@ import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TILING_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_VIEW_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -150,7 +151,7 @@ final class VulkanSwapchain {
     /** 1 means vsync, the GL default and what the game asks for initially. */
     private int swapInterval = 1;
     /** Drawn into this frame's rendering instance; emptied as it is replayed. */
-    private java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Draw> pendingDraws = java.util.List.of();
+    private java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Operation> pendingDraws = java.util.List.of();
     /** Replays the draws the game issued while the frame was being built. */
     private VulkanStream stream;
     private VulkanTextures textures;
@@ -181,9 +182,33 @@ final class VulkanSwapchain {
     /** Reused every frame: the render path must not allocate a context per frame. */
     private final FrameContext frameContext = new FrameContext();
 
-    private final class FrameContext implements RenderGraphContext {
+    private final class FrameContext implements RenderGraphContext, FrameRenderTarget {
         VkCommandBuffer commandBuffer;
         int slot;
+        int imageIndex;
+
+        @Override
+        public void beginRendering(VkCommandBuffer commandBuffer) {
+            // LOAD, not CLEAR: this is a second instance over the same attachments, and its whole purpose is to keep
+            // what the first one painted.
+            beginRenderingInstance(commandBuffer, imageIndex,
+                    org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_LOAD);
+        }
+
+        @Override
+        public long colorImage() {
+            return images[imageIndex];
+        }
+
+        @Override
+        public long colorImageView() {
+            return imageViews[imageIndex];
+        }
+
+        @Override
+        public int colorFormat() {
+            return imageFormat;
+        }
 
         @Override
         public int width() {
@@ -247,7 +272,7 @@ final class VulkanSwapchain {
      * in the middle of one.</p>
      */
     /** Hands the draws collected since the last frame to the next recording. */
-    void setPendingDraws(java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Draw> draws) {
+    void setPendingDraws(java.util.List<net.minecraftforge.client.render.vertex.FrameDraws.Operation> draws) {
         this.pendingDraws = draws;
     }
 
@@ -298,6 +323,74 @@ final class VulkanSwapchain {
         }
 
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
+    }
+
+    /**
+     * Opens a rendering instance over the frame's attachments.
+     *
+     * <p>Extracted because a frame is not one instance: the main menu's framebuffer copy has to happen with no pass
+     * open, so the sequence is begin, draw the panorama, end, copy, begin with {@code LOAD}, draw the blur. The load
+     * op is the one thing that differs between the two calls, and it is a parameter rather than a flag so the
+     * difference is visible at both sites.</p>
+     *
+     * <p>{@code CLEAR} for the first instance: each image starts the frame at {@code LAYOUT_UNDEFINED}, so its
+     * contents are by definition undefined and loading them would read whatever the previous frame left in a
+     * different layout. {@code LOAD} for a resume, whose whole purpose is keeping what is already there.</p>
+     */
+    private void beginRenderingInstance(VkCommandBuffer commandBuffer, int imageIndex, int colorLoadOp) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
+            // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over. A resumed
+            // instance ignores it, because a load op of LOAD does not consult the clear value.
+            float[] requested = recording != null
+                    ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
+            VkClearValue clearColor = VkClearValue.calloc(stack);
+            clearColor.color().float32(0, requested[0]).float32(1, requested[1]).float32(2, requested[2])
+                    .float32(3, requested[3]);
+            VkRenderingAttachmentInfo.Buffer colorAttachment = VkRenderingAttachmentInfo.calloc(1, stack);
+            colorAttachment.get(0)
+                    .sType$Default()
+                    .imageView(imageViews[imageIndex])
+                    .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                    .loadOp(colorLoadOp)
+                    .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                    .clearValue(clearColor);
+
+            VkClearValue clearDepth = VkClearValue.calloc(stack);
+            clearDepth.depthStencil()
+                    .depth((float) (recording != null ? recording.pendingClearDepth() : 1.0)).stencil(0);
+            VkRenderingAttachmentInfo depthAttachment = VkRenderingAttachmentInfo.calloc(stack)
+                    .sType$Default()
+                    .imageView(depthImageView)
+                    .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                    // LOADed on resume as well: the blur reads colour, but a depth clear mid-frame would discard the
+                    // occlusion the earlier draws established for anything drawn afterwards.
+                    .loadOp(colorLoadOp)
+                    .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .clearValue(clearDepth);
+
+            VkRect2D renderArea = VkRect2D.calloc(stack);
+            renderArea.offset().x(0).y(0);
+            renderArea.extent().width(extentWidth).height(extentHeight);
+
+            VkRenderingInfo renderingInfo = VkRenderingInfo.calloc(stack)
+                    .sType$Default()
+                    .renderArea(renderArea)
+                    .layerCount(1)
+                    .pColorAttachments(colorAttachment)
+                    .pDepthAttachment(depthAttachment);
+            vkCmdBeginRendering(commandBuffer, renderingInfo);
+
+            // Viewport and scissor are dynamic state, so a resize never needs a new pipeline - and a resumed
+            // instance starts with them undefined, so they are set here rather than once per frame.
+            VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
+            viewport.get(0).x(0.0f).y(0.0f).width(extentWidth).height(extentHeight).minDepth(0.0f).maxDepth(1.0f);
+            vkCmdSetViewport(commandBuffer, 0, viewport);
+            VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
+            scissor.get(0).offset().x(0).y(0);
+            scissor.get(0).extent().width(extentWidth).height(extentHeight);
+            vkCmdSetScissor(commandBuffer, 0, scissor);
+        }
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
@@ -353,60 +446,14 @@ final class VulkanSwapchain {
                 .pImageMemoryBarriers(barriers);
         vkCmdPipelineBarrier2(commandBuffer, dependencyInfo);
 
-        // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
-        // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over.
-        //
-        // The load op stays CLEAR unconditionally. Each image starts this frame at LAYOUT_UNDEFINED, so its contents
-        // are by definition undefined and loading them would be reading whatever the previous frame left in a
-        // different layout. Whether a clear was requested therefore changes the values, not the operation.
-        float[] requested = recording != null ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
-        VkClearValue clearColor = VkClearValue.calloc(stack);
-        clearColor.color().float32(0, requested[0]).float32(1, requested[1]).float32(2, requested[2])
-                .float32(3, requested[3]);
-        VkRenderingAttachmentInfo.Buffer colorAttachment = VkRenderingAttachmentInfo.calloc(1, stack);
-        colorAttachment.get(0)
-                .sType$Default()
-                .imageView(imageViews[imageIndex])
-                .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                .clearValue(clearColor);
-
-        VkClearValue clearDepth = VkClearValue.calloc(stack);
-        clearDepth.depthStencil().depth((float) (recording != null ? recording.pendingClearDepth() : 1.0)).stencil(0);
-        VkRenderingAttachmentInfo depthAttachment = VkRenderingAttachmentInfo.calloc(stack)
-                .sType$Default()
-                .imageView(depthImageView)
-                .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                .clearValue(clearDepth);
-
-        VkRect2D renderArea = VkRect2D.calloc(stack);
-        renderArea.offset().x(0).y(0);
-        renderArea.extent().width(extentWidth).height(extentHeight);
-
-        VkRenderingInfo renderingInfo = VkRenderingInfo.calloc(stack)
-                .sType$Default()
-                .renderArea(renderArea)
-                .layerCount(1)
-                .pColorAttachments(colorAttachment)
-                .pDepthAttachment(depthAttachment);
-        vkCmdBeginRendering(commandBuffer, renderingInfo);
-
-        // Viewport and scissor are dynamic state, so a resize never needs a new pipeline.
-        VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
-        viewport.get(0).x(0.0f).y(0.0f).width(extentWidth).height(extentHeight).minDepth(0.0f).maxDepth(1.0f);
-        vkCmdSetViewport(commandBuffer, 0, viewport);
-        VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
-        scissor.get(0).offset().x(0).y(0);
-        scissor.get(0).extent().width(extentWidth).height(extentHeight);
-        vkCmdSetScissor(commandBuffer, 0, scissor);
+        beginRenderingInstance(commandBuffer, imageIndex,
+                org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_CLEAR);
 
         // The phases run inside the rendering instance because they draw into these attachments. Each one is a
         // no-op for now; the graph is what makes "replace terrain.layer" a thing a mod can do.
         frameContext.commandBuffer = commandBuffer;
         frameContext.slot = slot;
+        frameContext.imageIndex = imageIndex;
         graph.run(frameContext);
         frameContext.commandBuffer = null;
 
@@ -414,7 +461,7 @@ final class VulkanSwapchain {
         // world: the world itself, then the GUI on top. They were collected while the frame was being built -
         // vanilla issues them before Display.update() hands the frame over - so this is where they become commands.
         if (stream != null && !pendingDraws.isEmpty()) {
-            stream.replay(commandBuffer, pendingDraws, slot, extentWidth, extentHeight);
+            stream.replay(commandBuffer, pendingDraws, slot, extentWidth, extentHeight, frameContext);
             pendingDraws = java.util.List.of();
         }
 
@@ -642,7 +689,8 @@ final class VulkanSwapchain {
             createInfo
                     .imageExtent(imageExtent)
                     .imageArrayLayers(1)
-                    .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+                    // TRANSFER_SRC so the main menu's blur can read the framebuffer it is painting into.
+                    .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                     .imageSharingMode(VK_SHARING_MODE_EXCLUSIVE)
                     .preTransform(capabilities.currentTransform())
                     .compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)

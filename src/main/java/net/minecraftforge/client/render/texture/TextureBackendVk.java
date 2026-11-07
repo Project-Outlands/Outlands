@@ -60,6 +60,8 @@ final class TextureBackendVk implements TextureBackend {
     }
 
     private final Map<Integer, Texture> textures = new HashMap<>();
+    /** Textures that have received a framebuffer copy, and therefore need an sRGB image. */
+    private final java.util.Set<Integer> framebufferTargets = new java.util.HashSet<>();
     private final Map<Integer, Integer> boundUnit = new HashMap<>();
     /**
      * Which unit the game last made active, zero-based.
@@ -106,7 +108,7 @@ final class TextureBackendVk implements TextureBackend {
     }
 
     /**
-     * Level 0 as a device image would need it, or {@code null} when nothing has been written into it.
+     * Level 0 as a device image would need it, or {@code null} when the handle has no allocated level 0 at all.
      *
      * <p>The sampler parameters are reported as recorded, with {@link TextureImage#UNSET} where the game never set
      * one, so the mapping to Vulkan's enums stays in the renderer that has to make it rather than being guessed
@@ -119,9 +121,14 @@ final class TextureBackendVk implements TextureBackend {
             return null;
         }
         Level level = texture.levels.get(0);
-        if (level == null || !level.hasData) {
+        if (level == null) {
             return null;
         }
+        // An allocated level counts even when nothing was written into it. That is not a corner case: the main
+        // menu's blur texture is allocated and then filled by a framebuffer copy, never by glTexSubImage2D. Treating
+        // "allocated, unwritten" as "no image" left that texture with no device image for the copy to land in, which
+        // surfaced as "framebuffer copy into texture 9 that was never resolved for this frame". Zero content is the
+        // right interpretation - it is what GL considers undefined-but-present, and the copy replaces it wholesale.
         return new TextureImage(id, level.width, level.height, level.pixels,
                 parameter(texture, 10241), parameter(texture, 10240),
                 parameter(texture, 10242), parameter(texture, 10243),
@@ -153,6 +160,31 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public int boundTexture() {
         return boundUnit.getOrDefault(activeUnit, 0);
+    }
+
+    /**
+     * Records the copy at this point in the frame's sequence.
+     *
+     * <p>The destination is the texture bound on the active unit, which is what GL's {@code glCopyTexSubImage2D}
+     * always meant: it targets the bound texture, not a named one.</p>
+     */
+    @Override
+    public void copyFromFramebuffer(int level, int xOffset, int yOffset, int x, int y, int width, int height) {
+        int texture = boundTexture();
+        if (texture == 0) {
+            throw new IllegalStateException("glCopyTexSubImage2D with no texture bound: the copy has no destination");
+        }
+        framebufferTargets.add(texture);
+        if (!net.minecraftforge.client.render.vertex.FrameDraws.recordFramebufferCopy(texture, level, xOffset, yOffset,
+                x, y, width, height)) {
+            throw new IllegalStateException("glCopyTexSubImage2D outside a frame: the source framebuffer does not"
+                    + " exist yet, so there is nothing to copy from");
+        }
+    }
+
+    @Override
+    public boolean isFramebufferTarget(int id) {
+        return framebufferTargets.contains(id);
     }
 
     @Override

@@ -315,12 +315,12 @@
 +        net.minecraftforge.client.render.state.backend.FrameState copyState = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
 +        if (copyState != null)
 +        {
-+            // The main menu's panorama blurs itself by copying the framebuffer into a texture and drawing it back
-+            // scaled. That readback is not implemented, so the copy is skipped: the panorama appears without its
-+            // blur rather than the menu failing to draw at all. Said once, out loud, because a missing effect is
-+            // otherwise indistinguishable from a broken one.
-+            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("framebuffer copy to a texture (glCopyTexSubImage2D)",
-+                    "the main menu panorama will not blur");
++            // Recorded at its place in the frame rather than executed here: the source is the framebuffer this
++            // frame is painting, so the copy can only happen inside that frame and after the draws it reads.
++            // Executing it eagerly would copy whatever the previous frame left behind, which draws a blur of the
++            // wrong picture - and, before the backend could do it at all, left the panorama unblurred.
++            net.minecraftforge.client.render.texture.TextureBackends.forNonGl().copyFromFramebuffer(level, xOffset,
++                    yOffset, x, y, width, height);
 +            return;
 +        }
          GL11.glCopyTexSubImage2D(target, level, xOffset, yOffset, x, y, width, height);

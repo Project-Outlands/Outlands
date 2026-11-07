@@ -93,6 +93,13 @@ final class VulkanBuffer implements AutoCloseable {
         return create(device, context, new byte[size], VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     }
 
+    /** Host-visible memory usable as a copy source and destination. */
+    static VulkanBuffer createTransfer(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                                       int size) {
+        return create(device, context, new byte[size],
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    }
+
     /** Reads {@code length} bytes back into a new array. Blocks on the memory being host-visible and coherent. */
     byte[] read(int length) {
         if (length > size) {

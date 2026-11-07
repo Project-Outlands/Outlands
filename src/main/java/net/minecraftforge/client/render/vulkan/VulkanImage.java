@@ -1,5 +1,7 @@
 package net.minecraftforge.client.render.vulkan;
 
+import net.minecraftforge.client.render.vertex.FrameDraws;
+
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -59,16 +61,22 @@ final class VulkanImage implements AutoCloseable {
     private final long view;
     private final int width;
     private final int height;
+    private final int format;
     /** Whether this image has been in a layout it can be copied into and sampled from. */
     private boolean initialised;
 
-    private VulkanImage(VkDevice device, long image, long memory, long view, int width, int height) {
+    private VulkanImage(VkDevice device, long image, long memory, long view, int width, int height, int format) {
         this.device = device;
         this.image = image;
         this.memory = memory;
         this.view = view;
         this.width = width;
         this.height = height;
+        this.format = format;
+    }
+
+    int format() {
+        return format;
     }
 
     long view() {
@@ -84,6 +92,17 @@ final class VulkanImage implements AutoCloseable {
     }
 
     static VulkanImage create(VkDevice device, VulkanContext context, int width, int height) {
+        return create(device, context, width, height, VK_FORMAT_B8G8R8A8_UNORM);
+    }
+
+    /**
+     * Creates an image with an explicit format.
+     *
+     * <p>Used for textures that receive a framebuffer copy: the framebuffer holds sRGB-encoded values, so the image
+     * has to say so for sampling to decode them. Uploaded file data stays on the plain UNORM format, because that is
+     * the convention every other uploaded texture already follows.</p>
+     */
+    static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format) {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("an image needs a positive size, got " + width + "x" + height);
         }
@@ -91,7 +110,7 @@ final class VulkanImage implements AutoCloseable {
             VkImageCreateInfo createInfo = VkImageCreateInfo.calloc(stack)
                     .sType$Default()
                     .imageType(VK_IMAGE_TYPE_2D)
-                    .format(VK_FORMAT_B8G8R8A8_UNORM)
+                    .format(format)
                     .mipLevels(1)
                     .arrayLayers(1)
                     .samples(VK_SAMPLE_COUNT_1_BIT)
@@ -123,8 +142,8 @@ final class VulkanImage implements AutoCloseable {
                 memory = memoryOut.get(0);
                 VkCheck.check(vkBindImageMemory(device, image, memory, 0L), "vkBindImageMemory");
 
-                view = createView(device, image, stack);
-                return new VulkanImage(device, image, memory, view, width, height);
+                view = createView(device, image, stack, format);
+                return new VulkanImage(device, image, memory, view, width, height, format);
             } catch (RuntimeException e) {
                 if (view != 0L) {
                     vkDestroyImageView(device, view, null);
@@ -138,12 +157,12 @@ final class VulkanImage implements AutoCloseable {
         }
     }
 
-    private static long createView(VkDevice device, long image, MemoryStack stack) {
+    private static long createView(VkDevice device, long image, MemoryStack stack, int format) {
         org.lwjgl.vulkan.VkImageViewCreateInfo viewInfo = org.lwjgl.vulkan.VkImageViewCreateInfo.calloc(stack)
                 .sType$Default()
                 .image(image)
                 .viewType(VK_IMAGE_VIEW_TYPE_2D)
-                .format(VK_FORMAT_B8G8R8A8_UNORM);
+                .format(format);
         VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
                 .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                 .baseMipLevel(0)
@@ -223,6 +242,105 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
         }
+    }
+
+    /**
+     * Copies a rectangle of the frame's framebuffer into this image, through {@code staging}.
+     *
+     * @param staging host-visible memory of at least {@code copy.width() * copy.height() * 4} bytes
+     */
+    void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy,
+                             FrameRenderTarget target, long staging) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int frameWidth = target.width();
+            int frameHeight = target.height();
+
+            // The instance has just been ended, so the source is free to leave its attachment layout.
+            transitionExternal(commandBuffer, stack, target.colorImage(),
+                    org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, frameWidth, frameHeight);
+
+            // GL's framebuffer origin is the bottom-left; Vulkan's is the top-left. Converting here keeps the caller
+            // speaking the game's coordinates, which is what the patch that calls this already does.
+            int topDownY = frameHeight - copy.y() - copy.height();
+            VkBufferImageCopy.Buffer toBuffer = VkBufferImageCopy.calloc(1, stack);
+            toBuffer.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+            toBuffer.get(0).imageOffset().x(copy.x()).y(topDownY).z(0);
+            toBuffer.get(0).imageExtent().width(copy.width()).height(copy.height()).depth(1);
+            toBuffer.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer(commandBuffer, target.colorImage(),
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, toBuffer);
+
+            transitionExternal(commandBuffer, stack, target.colorImage(),
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT, frameWidth, frameHeight);
+
+            // This image is where the copy lands. It was left sampleable, so it goes to TRANSFER_DST and back.
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+            // One copy per row, in reverse.
+            //
+            // GL's glCopyTexSubImage2D puts the framebuffer's *bottom* row into the destination's texel row 0, which
+            // is the row that v = 0 samples. The staging buffer starts at the source region's top row, because that
+            // is how a top-down image read works out, so writing it straight through would mirror the result
+            // vertically against every coordinate the game computed. Placing the last staging row at the first
+            // destination row is that flip, and it costs one copy command per row on a 256-row rectangle.
+            for (int row = 0; row < copy.height(); row++) {
+                VkBufferImageCopy.Buffer toImage = VkBufferImageCopy.calloc(1, stack);
+                toImage.get(0)
+                        .bufferOffset((long) row * copy.width() * 4)
+                        .bufferRowLength(0)
+                        .bufferImageHeight(0);
+                toImage.get(0).imageOffset().x(copy.xOffset())
+                        .y(copy.yOffset() + (copy.height() - 1 - row)).z(0);
+                toImage.get(0).imageExtent().width(copy.width()).height(1).depth(1);
+                toImage.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(copy.level()).baseArrayLayer(0).layerCount(1);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
+                        org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
+            }
+
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT);
+            initialised = true;
+        }
+    }
+
+    /** A layout transition for an image this object does not own, such as the frame's colour attachment. */
+    private static void transitionExternal(VkCommandBuffer commandBuffer, MemoryStack stack, long image,
+                                           int oldLayout, int newLayout, long sourceStage, long sourceAccess,
+                                           int width, int height) {
+        VkImageMemoryBarrier2.Buffer barrier = VkImageMemoryBarrier2.calloc(1, stack);
+        barrier.get(0)
+                .sType$Default()
+                .srcStageMask(sourceStage)
+                .srcAccessMask(sourceAccess)
+                .dstStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT
+                        | org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .dstAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT
+                        | org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT
+                        | org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                .oldLayout(oldLayout)
+                .newLayout(newLayout)
+                .image(image);
+        barrier.get(0).subresourceRange()
+                .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+        vkCmdPipelineBarrier2(commandBuffer, org.lwjgl.vulkan.VkDependencyInfo.calloc(stack)
+                .sType$Default()
+                .pImageMemoryBarriers(barrier));
     }
 
     private void transition(VkCommandBuffer commandBuffer, MemoryStack stack, int oldLayout, int newLayout,
