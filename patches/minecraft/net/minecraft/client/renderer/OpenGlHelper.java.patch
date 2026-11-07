@@ -313,7 +313,18 @@
 +        if (net.minecraftforge.client.render.state.backend.FrameStates.blendFuncSeparate(sFactorRGB, dFactorRGB, sfactorAlpha, dfactorAlpha)) { return; }
          if (openGL14)
          {
-@@ -916,59 +905,28 @@
+@@ -888,7 +877,9 @@
+     public static void renderDirections(int p_188785_0_)
+     {
+         GlStateManager.disableTexture2D();
+         GlStateManager.depthMask(false);
+         Tessellator tessellator = Tessellator.getInstance();
+         BufferBuilder bufferbuilder = tessellator.getBuffer();
+-        GL11.glLineWidth(4.0F);
++        // Through GlStateManager, not GL11: this is the F3 overlay's axis lines, and the direct call was a
++        // segfault on a backend with no GL context.
++        GlStateManager.glLineWidth(4.0F);
+@@ -916,59 +907,28 @@
  
      public static void openFile(File fileIn)
      {

@@ -5,6 +5,7 @@ import org.apache.logging.log4j.Logger;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkClearValue;
+import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
@@ -112,6 +113,10 @@ import static org.lwjgl.vulkan.VK10.vkResetCommandBuffer;
 import static org.lwjgl.vulkan.VK10.vkResetFences;
 import static org.lwjgl.vulkan.VK10.vkWaitForFences;
 import static org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+import static org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT;
+import static org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+import static org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+import static org.lwjgl.vulkan.VK13.vkCmdCopyImageToBuffer;
 import static org.lwjgl.vulkan.VK13.VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 import static org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 import static org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -160,6 +165,14 @@ final class VulkanSwapchain {
     private net.minecraftforge.client.render.target.@org.jspecify.annotations.Nullable FrameRecording recording;
     private int depthFormat;
     private int extentWidth;
+
+    /** The screenshot the game asked for, taken at the start of the frame that will satisfy it. */
+    private net.minecraftforge.client.render.screenshot.Screenshots.Request pendingScreenshot;
+    /** The screenshot the frame being recorded is copying out, until its fence has been waited on. */
+    private net.minecraftforge.client.render.screenshot.Screenshots.Request screenshotRequest;
+    private VulkanBuffer screenshotBuffer;
+    private int screenshotWidth;
+    private int screenshotHeight;
     private int extentHeight;
 
     private long[] images = new long[0];
@@ -321,6 +334,9 @@ final class VulkanSwapchain {
             record(commandBuffers[frame], imageIndex, frame, stack);
             submit(frame, imageIndex, stack);
             present(imageIndex, stack);
+            // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
+            // waiting here costs the player nothing.
+            finishScreenshot(frame);
         }
 
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
@@ -338,6 +354,74 @@ final class VulkanSwapchain {
      * contents are by definition undefined and loading them would read whatever the previous frame left in a
      * different layout. {@code LOAD} for a resume, whose whole purpose is keeping what is already there.</p>
      */
+    /**
+     * Copies the finished image into host memory, so {@link #finishScreenshot} can write it out.
+     *
+     * <p>The image is in {@code ATTACHMENT_OPTIMAL} here, which no copy may read; it moves to
+     * {@code TRANSFER_SRC_OPTIMAL} for the copy and the present barrier takes it from there. Rows are copied as they
+     * are - the window's format is BGRA on every driver measured - and the swizzle and the flip happen on the CPU,
+     * where a screenshot is not on any hot path.</p>
+     */
+    private void recordScreenshotCopy(VkCommandBuffer commandBuffer, int imageIndex,
+                                      net.minecraftforge.client.render.screenshot.Screenshots.Request request,
+                                      MemoryStack stack) {
+        int width = Math.min(request.width(), extentWidth);
+        int height = Math.min(request.height(), extentHeight);
+        long bytes = (long) width * height * 4L;
+        if (bytes <= 0 || bytes > Integer.MAX_VALUE) {
+            net.minecraftforge.client.render.screenshot.Screenshots.failed(request,
+                    "a " + width + "x" + height + " picture is not a size this backend can read back");
+            return;
+        }
+        screenshotWidth = width;
+        screenshotHeight = height;
+        screenshotRequest = request;
+        screenshotBuffer = VulkanBuffer.createReadback(device, context, (int) bytes);
+
+        VkImageMemoryBarrier2.Buffer toTransfer = VkImageMemoryBarrier2.calloc(1, stack);
+        toTransfer.get(0)
+                .sType$Default()
+                .srcStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .srcAccessMask(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                .dstStageMask(VK_PIPELINE_STAGE_2_TRANSFER_BIT)
+                .dstAccessMask(VK_ACCESS_2_TRANSFER_READ_BIT)
+                .oldLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                .image(images[imageIndex])
+                .subresourceRange(colorRange(stack));
+        vkCmdPipelineBarrier2(commandBuffer, VkDependencyInfo.calloc(stack)
+                .sType$Default().pImageMemoryBarriers(toTransfer));
+
+        VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+        region.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+        region.get(0).imageSubresource()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1);
+        region.get(0).imageOffset().set(0, 0, 0);
+        region.get(0).imageExtent().set(width, height, 1);
+        vkCmdCopyImageToBuffer(commandBuffer, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                screenshotBuffer.handle(), region);
+    }
+
+    /** Writes out the screenshot whose copy the submitted frame contains, if there is one. */
+    private void finishScreenshot(int frame) {
+        if (screenshotRequest == null || screenshotBuffer == null) {
+            return;
+        }
+        net.minecraftforge.client.render.screenshot.Screenshots.Request request = screenshotRequest;
+        screenshotRequest = null;
+        try {
+            VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
+            byte[] bgra = screenshotBuffer.read(screenshotWidth * screenshotHeight * 4);
+            byte[] rgba = net.minecraftforge.client.render.screenshot.Screenshots.swizzleBgra(
+                    java.nio.ByteBuffer.wrap(bgra), screenshotWidth, screenshotHeight);
+            net.minecraftforge.client.render.screenshot.Screenshots.deliver(request, rgba, screenshotWidth,
+                    screenshotHeight);
+        } finally {
+            screenshotBuffer.close();
+            screenshotBuffer = null;
+        }
+    }
+
     private void beginRenderingInstance(VkCommandBuffer commandBuffer, int imageIndex, int colorLoadOp) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
@@ -411,6 +495,9 @@ final class VulkanSwapchain {
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
+        // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
+        // player was looking at when they pressed the key.
+        pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
         VkCheck.check(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer");
         VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
                 .sType$Default()
@@ -484,6 +571,15 @@ final class VulkanSwapchain {
 
         vkCmdEndRendering(commandBuffer);
 
+        // A screenshot asks for the frame the player is looking at, which is this one: it is taken here, after the
+        // last draw and before the image becomes presentable. The copy has to be outside the rendering instance,
+        // which is why the request is satisfied at this point rather than where the game asked.
+        net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot = pendingScreenshot;
+        pendingScreenshot = null;
+        if (screenshot != null) {
+            recordScreenshotCopy(commandBuffer, imageIndex, screenshot, stack);
+        }
+
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
         presentBarrier.get(0)
                 .sType$Default()
@@ -491,7 +587,8 @@ final class VulkanSwapchain {
                 .srcAccessMask(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
                 .dstStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                 .dstAccessMask(0)
-                .oldLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                .oldLayout(screenshot != null ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                        : VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
                 .newLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
                 .image(images[imageIndex])
                 .subresourceRange(colorRange(stack));

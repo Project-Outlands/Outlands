@@ -490,7 +490,7 @@
          GL11.glVertex3f(x, y, z);
      }
  
-@@ -744,121 +863,189 @@
+@@ -744,121 +863,197 @@
  
      public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
      {
@@ -611,8 +611,16 @@
  
      public static void glPixelStorei(int parameterName, int param)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("pixel store state (glPixelStorei)", "nothing: this backend reads vertex and pixel data linearly, so the unpack alignment it configures does not apply"); }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Nothing to record: the alignment and row length it configures exist for GL's strided unpack and pack
++            // paths, and this backend hands its data over as tightly packed bytes and reads it back the same way.
++            // Reported rather than ignored because a screenshot failing here reads as a broken readback instead of as
++            // a setting that does not apply.
++            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("pixel store state (glPixelStorei)",
++                    "the alignment it configures does not apply: data is handed over and read back tightly packed");
++            return;
++        }
          GL11.glPixelStorei(parameterName, param);
      }
  
@@ -681,7 +689,7 @@
          return GL11.glGetInteger(parameterName);
      }
  
-@@ -956,6 +1143,12 @@
+@@ -956,6 +1151,12 @@
                  {
                      this.currentState = state;
  

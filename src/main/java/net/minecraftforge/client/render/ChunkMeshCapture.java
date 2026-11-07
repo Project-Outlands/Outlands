@@ -29,8 +29,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * the format {@code TerrainVertexFormat} describes, untouched. Nothing is converted here; conversion belongs to
  * whoever builds GPU meshes, which is the backend.</p>
  *
- * <p><b>Disabled by default.</b> With no consumer registered the patch is a single field read and the vanilla path
- * runs unchanged, so this costs nothing on a GL renderer and cannot change its behaviour.</p>
+ * <p><b>Disabled by default.</b> While disabled the patch is a single field read and the vanilla path runs
+ * unchanged, so this costs nothing on a GL renderer and cannot change its behaviour.</p>
+ *
+ * <p><b>What this class keeps, and what it does not.</b> The latest capture per chunk and layer, which is the set the
+ * backend installs each time it changes - a rebuild supersedes the previous mesh for that layer, so the map is the
+ * current world and not a work queue. The backend is told when it changed through {@link #version()}; it does not
+ * consume entries, because consuming them would mean installing only the newest chunk and dropping the rest.</p>
  */
 public final class ChunkMeshCapture {
 
@@ -40,15 +45,11 @@ public final class ChunkMeshCapture {
     public record Captured(int chunkX, int chunkY, int chunkZ, BlockRenderLayer layer, byte[] vertices,
                            int quadCount) {}
 
-    /** Receives captures on the client thread. */
-    public interface Consumer {
-        void accept(Captured captured);
-    }
-
-    private static volatile Consumer consumer;
+    /** Whether captures are being kept. */
+    private static volatile boolean enabled;
 
     /** Latest capture per (chunk, layer). A rebuild supersedes the previous mesh for the same layer. */
-    private static final Map<Key, Captured> PENDING = new ConcurrentHashMap<>();
+    private static final Map<Key, Captured> CURRENT = new ConcurrentHashMap<>();
 
     private static final AtomicLong captured = new AtomicLong();
     private static final AtomicLong dropped = new AtomicLong();
@@ -58,20 +59,37 @@ public final class ChunkMeshCapture {
     private ChunkMeshCapture() {}
 
     /**
-     * Registers the consumer, or clears it with {@code null}.
+     * Turns capture on. Called by the backend when it starts.
      *
-     * <p>Called by the backend when it starts and stops. A capture arriving with no consumer is dropped rather
-     * than queued: the meshes are only valid against the renderer that asked for them.</p>
+     * <p>Turning it off again drops what was kept: the meshes are only valid against the renderer that asked for
+     * them.</p>
      */
-    public static void setConsumer(Consumer next) {
-        consumer = next;
-        if (next == null) {
-            PENDING.clear();
-        }
+    public static void enable() {
+        enabled = true;
+    }
+
+    public static void disable() {
+        enabled = false;
+        CURRENT.clear();
     }
 
     public static boolean isEnabled() {
-        return consumer != null;
+        return enabled;
+    }
+
+    /** Every capture that is still current, one per chunk and layer. Read by the render thread. */
+    public static java.util.List<Captured> current() {
+        return java.util.List.copyOf(CURRENT.values());
+    }
+
+    /**
+     * How many captures have ever been taken.
+     *
+     * <p>The backend compares this against the value it last installed, so a frame with nothing new does not rebuild
+     * the packed terrain buffers.</p>
+     */
+    public static long version() {
+        return captured.get();
     }
 
     /**
@@ -81,8 +99,7 @@ public final class ChunkMeshCapture {
      */
     public static boolean capture(BlockRenderLayer layer, BufferBuilder buffer, RenderChunk chunk,
                                   CompiledChunk compiled) {
-        Consumer current = consumer;
-        if (current == null) {
+        if (!enabled) {
             return false;
         }
         try {
@@ -98,9 +115,8 @@ public final class ChunkMeshCapture {
 
             Captured capture = new Captured(chunk.getPosition().getX(), chunk.getPosition().getY(),
                     chunk.getPosition().getZ(), layer, vertices, quadCount);
-            PENDING.put(new Key(capture.chunkX(), capture.chunkY(), capture.chunkZ(), layer), capture);
+            CURRENT.put(new Key(capture.chunkX(), capture.chunkY(), capture.chunkZ(), layer), capture);
             captured.incrementAndGet();
-            current.accept(capture);
             return true;
         } catch (Throwable t) {
             // A capture failure must not break chunk building: fall through to the vanilla path, which will do
@@ -111,18 +127,8 @@ public final class ChunkMeshCapture {
         }
     }
 
-    /** Takes and clears the captures queued since the last call. Called from the render thread. */
-    public static Map<Key, Captured> drain() {
-        if (PENDING.isEmpty()) {
-            return Map.of();
-        }
-        Map<Key, Captured> drained = new java.util.HashMap<>(PENDING);
-        PENDING.clear();
-        return drained;
-    }
-
     /** Diagnostics: how many captures were taken, and how many failed. */
     public static String statistics() {
-        return "captured=" + captured.get() + " failed=" + dropped.get() + " pending=" + PENDING.size();
+        return "captured=" + captured.get() + " failed=" + dropped.get() + " current=" + CURRENT.size();
     }
 }

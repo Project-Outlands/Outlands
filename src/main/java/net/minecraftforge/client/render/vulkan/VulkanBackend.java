@@ -50,6 +50,9 @@ public final class VulkanBackend implements RenderBackend {
 
     private static final Logger LOGGER = LogManager.getLogger("Outlands|render");
 
+    /** How often the packed terrain may be rebuilt while chunk uploads are arriving. */
+    private static final long TERRAIN_REBUILD_INTERVAL_MS = 250L;
+
     private static final VulkanBackend INSTANCE = new VulkanBackend();
 
     private VulkanContext context;
@@ -58,7 +61,10 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanDescriptors descriptors;
     private VulkanTextures textureCache;
     /** Captures waiting for the next frame. Written by chunk workers, drained on the render thread. */
-    private final java.util.Queue<ChunkMeshCapture.Captured> pendingChunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** The capture count the terrain layer was last built from, so a frame with nothing new rebuilds nothing. */
+    private long installedCaptures = -1L;
+    /** When the terrain was last rebuilt, so a burst of chunk uploads does not rebuild it once per chunk. */
+    private long terrainRebuiltAt;
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
     /** Replays the game's own draws into the frame's rendering instance. */
@@ -160,7 +166,15 @@ public final class VulkanBackend implements RenderBackend {
             graph.freeze();
             // Only now, once the graph is frozen and the layer exists, does anything start capturing chunk meshes.
             // The consumer is the layer itself: it owns the buffers the meshes become.
-            ChunkMeshCapture.setConsumer(captured -> pendingChunks.add(captured));
+            // Chunk capture stays off for now, and that is a decision rather than an oversight.
+            //
+            // With it on, the patched uploadChunk hands the finished mesh to ChunkMeshCapture instead of uploading it,
+            // and the terrain layer is the only thing that can draw it. That path is built and its slices carry the
+            // right origins, but the layer's draws do not reach the screen while the same geometry drawn by the stream
+            // path does - so something in the layer's own draw is wrong and is not worth guessing at while the world
+            // renders without it. Turning capture on is a one-line change once that is found; leaving it off keeps
+            // vanilla's chunk upload, which the stream path already replays correctly, per-chunk matrices included.
+            // ChunkMeshCapture.enable();
         } catch (RuntimeException | LinkageError e) {
             // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
             // log it once, and present nothing rather than throwing from inside the render loop every frame.
@@ -176,7 +190,7 @@ public final class VulkanBackend implements RenderBackend {
             return;
         }
         try {
-            drainCaptures();
+            installCaptures();
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.
             swapchain.setPendingDraws(net.minecraftforge.client.render.vertex.FrameDraws.drain());
@@ -229,35 +243,50 @@ public final class VulkanBackend implements RenderBackend {
     /**
      * Hands whatever chunk workers finished to the terrain layer.
      *
-     * <p>Drained on the render thread, before recording, so a rebuild that finished mid-frame is picked up next
-     * frame rather than forcing the two threads to synchronise mid-draw.</p>
+     * <p>Called on the render thread before recording, so a rebuild that finished mid-frame is picked up next frame
+     * rather than forcing the two threads to synchronise mid-draw.</p>
+     *
+     * <p><b>The whole terrain is repacked, not the changed chunk.</b> {@code useCaptured} replaces the packed buffers,
+     * because incremental updates need per-chunk slices that survive repacking. That is why this is throttled: a world
+     * load captures a thousand chunk layers in a few seconds, and rebuilding the pack for each of them would copy the
+     * whole terrain a thousand times. Coalescing them into one rebuild every quarter second costs a slightly coarser
+     * appearance while the world loads and nothing after it.</p>
+     *
+     * <p><b>Why captures are installed at all.</b> The patched {@code uploadChunk} hands the finished mesh here instead
+     * of uploading it to a GL buffer, so there is no other copy of it: the stream path's own chunk draws have no
+     * vertices. The terrain layer is the only thing that can draw them.</p>
      */
-    /**
-     * Empties the capture queue without installing the meshes into the terrain node.
-     *
-     * <p><b>Why the node does not take them.</b> The node draws its mesh with a camera it chose itself, which was
-     * fine for a placeholder cube and is wrong for real chunks: vanilla's chunk geometry is in world coordinates, so
-     * an invented camera puts the terrain somewhere the player is not. Measured symptom: a copied chunk floating in
-     * the sky, drawn next to the same chunk the stream path already rendered from the real camera.</p>
-     *
-     * <p>Vanilla's own chunk draws reach the screen through the stream path with their own matrices, so the traffic is
-     * not lost - the node simply has nothing to add until it is handed the frame's camera. That is the next step, and
-     * it needs a per-frame matrix on {@code RenderGraphContext}, not a second fixed one here.</p>
-     *
-     * <p>Draining rather than unregistering the consumer is deliberate: registering one is what makes
-     * {@code ChunkMeshCapture.capture} report that it took the upload, and without that the patched
-     * {@code uploadChunk} falls through to the GL path, which does not exist here.</p>
-     */
-    private void drainCaptures() {
-        while (pendingChunks.poll() != null) {
-            // Discarded on purpose; see above. Polled so the queue does not grow without bound.
+    private void installCaptures() {
+        if (terrainLayer == null) {
+            return;
         }
+        long version = ChunkMeshCapture.version();
+        if (version == installedCaptures) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (installedCaptures >= 0 && now - terrainRebuiltAt < TERRAIN_REBUILD_INTERVAL_MS) {
+            return;
+        }
+        installedCaptures = version;
+        terrainRebuiltAt = now;
+        java.util.List<ChunkMeshCapture.Captured> captured = ChunkMeshCapture.current();
+        if (captured.isEmpty()) {
+            return;
+        }
+        // The buffers this replaces may still be read by a frame in flight: the swapchain has four slots and this runs
+        // before any fence is waited on. Waiting for the device here is the honest answer until the terrain buffers
+        // are retired per slot like the stream's are; the alternative is a destroyed-buffer-while-in-use error from
+        // the validation layers, which is how this was found.
+        org.lwjgl.vulkan.VK10.vkDeviceWaitIdle(context.device());
+        terrainLayer.useCaptured(captured);
+        LOGGER.info("terrain: {} chunk layers installed, {}", captured.size(), terrainLayer.source());
     }
 
     @Override
     public void close() {
         net.minecraftforge.client.render.target.FrameRecordings.install(null);
-        ChunkMeshCapture.setConsumer(null);
+        ChunkMeshCapture.disable();
         if (swapchain != null) {
             swapchain.close();
             swapchain = null;
