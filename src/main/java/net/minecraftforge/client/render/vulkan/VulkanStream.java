@@ -263,6 +263,24 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             int sinceCopy = 0;
+            if (Boolean.getBoolean("outlands.render.debug") && FRAMES_LOGGED.getAndIncrement() < 2) {
+                StringBuilder tail = new StringBuilder();
+                for (int i = 0; i < draws.size(); i++) {
+                    if (!textures.isFramebufferTarget(draws.get(i).state().texture())) {
+                        continue;
+                    }
+                    FrameDraws.Draw d = draws.get(i);
+                    tail.append("\n  #").append(i)
+                            .append(" tex=").append(d.state().texture())
+                            .append(" stride=").append(d.layout().stride())
+                            .append(" verts=").append(d.vertexCount())
+                            .append(" mode=").append(d.mode())
+                            .append(" viewport=").append(java.util.Arrays.toString(d.state().viewport()))
+                            .append(" blend=").append(d.state().blend());
+                }
+                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                        "Draws sampling the framebuffer copy, frame of {}:{}", draws.size(), tail);
+            }
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
@@ -380,6 +398,11 @@ final class VulkanStream implements AutoCloseable {
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                 "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
     }
+
+    private static final String[] TAIL = new String[6];
+    /** How many frames the tail has been reported for, so the first frames - the main menu - are the ones captured. */
+    private static final java.util.concurrent.atomic.AtomicInteger FRAMES_LOGGED =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     private static final java.util.concurrent.atomic.AtomicBoolean PERSPECTIVE_REPORTED =
             new java.util.concurrent.atomic.AtomicBoolean();

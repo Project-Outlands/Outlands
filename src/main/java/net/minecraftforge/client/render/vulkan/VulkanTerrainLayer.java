@@ -107,17 +107,33 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
         // Every mesh packed into one vertex buffer and one index buffer: the buffer object and the rebind per
         // chunk disappear, and a chunk becomes an offset into a buffer that stays bound.
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(meshes());
-        VulkanBuffer vertices;
-        VulkanBuffer indices;
+        // No placeholder geometry.
+        //
+        // The 4x1x4 grid of tinted cubes was scaffolding for the first pipeline: it proved the vertex format, the
+        // packing and the shader before there was any chunk data. It has no place in a working renderer, and while it
+        // was here it was not merely invisible - the main menu draws its panorama into a 256x256 corner of the frame,
+        // so the placeholder showed through everywhere the menu's own background did not cover, and the blur pass
+        // copied the mixture into the texture it then stretched across the screen. A renderer that draws a fake block
+        // behind the menu is worse than one that draws nothing.
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(java.util.List.of());
+        VulkanBuffer vertices = null;
+        VulkanBuffer indices = null;
         try {
-            vertices = VulkanBuffer.create(device, context, pack.vertices());
-            indices = VulkanBuffer.create(device, context, pack.indices());
+            // A zero-length buffer is not a thing Vulkan can create, and asking for one takes the driver down
+            // rather than returning an error - measured as a segfault inside libvulkan_radeon. An empty mesh
+            // therefore allocates nothing at all, which is also why the buffers are nullable from here on.
+            if (pack.vertices().length > 0) {
+                vertices = VulkanBuffer.create(device, context, pack.vertices());
+                indices = VulkanBuffer.create(device, context, pack.indices());
+            }
         } catch (RuntimeException e) {
             pipeline.close();
+            if (vertices != null) {
+                vertices.close();
+            }
             throw e;
         }
-        return new VulkanTerrainLayer(device, context, pipeline, textures, vertices, indices, pack, "placeholder");
+        return new VulkanTerrainLayer(device, context, pipeline, textures, vertices, indices, pack, "none");
     }
 
     /** The descriptor set for the atlas, resolved by the frame before the rendering instance opened. */
@@ -161,6 +177,12 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     @Override
     public void run(RenderGraphContext context) {
         if (!(context.nativeContext() instanceof VkCommandBuffer commandBuffer)) {
+            return;
+        }
+        if (slices.isEmpty()) {
+            // Nothing captured yet: draw nothing rather than scaffolding. The node stays registered because the graph
+            // requires the phase to exist, but an empty frame from it is the correct output.
+            drawCount = 0;
             return;
         }
 
@@ -234,13 +256,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         }
 
         TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(meshes);
-        VulkanBuffer nextVertices = VulkanBuffer.create(device, context, pack.vertices());
-        VulkanBuffer nextIndices;
-        try {
-            nextIndices = VulkanBuffer.create(device, context, pack.indices());
-        } catch (RuntimeException e) {
-            nextVertices.close();
-            throw e;
+        VulkanBuffer nextVertices = null;
+        VulkanBuffer nextIndices = null;
+        if (pack.vertices().length > 0) {
+            // Same rule as construction: a zero-length buffer is not creatable, and asking takes the driver down.
+            nextVertices = VulkanBuffer.create(device, context, pack.vertices());
+            try {
+                nextIndices = VulkanBuffer.create(device, context, pack.indices());
+            } catch (RuntimeException e) {
+                nextVertices.close();
+                throw e;
+            }
         }
 
         VulkanBuffer oldVertices = vertices;
@@ -251,14 +277,22 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         indexType = pack.index32() ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
         source = captured.size() + " chunk layers, " + quads + " quads";
         // The old buffers may still be in flight; the device is idle at this point in the frame, before recording.
-        oldIndices.close();
-        oldVertices.close();
+        if (oldIndices != null) {
+            oldIndices.close();
+        }
+        if (oldVertices != null) {
+            oldVertices.close();
+        }
     }
 
     @Override
     public void close() {
-        indices.close();
-        vertices.close();
+        if (indices != null) {
+            indices.close();
+        }
+        if (vertices != null) {
+            vertices.close();
+        }
         pipeline.close();
     }
 
