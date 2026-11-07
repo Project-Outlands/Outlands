@@ -303,6 +303,19 @@ final class VulkanImage implements AutoCloseable {
             org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
 
+            if (Boolean.getBoolean("outlands.render.paintCopies")) {
+                // Isolation switch: paint the destination a solid colour after the copy, in the layout it is already
+                // in. Visible magenta means the draws sampling this texture are reaching the screen, which is the
+                // question a screenshot cannot answer when the picture merely looks "wrong".
+                org.lwjgl.vulkan.VkClearColorValue colour = org.lwjgl.vulkan.VkClearColorValue.calloc(stack);
+                colour.float32(0, 1.0F).float32(1, 0.0F).float32(2, 1.0F).float32(3, 1.0F);
+                VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
+                        .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                        .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                org.lwjgl.vulkan.VK10.vkCmdClearColorImage(commandBuffer, image,
+                        org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, colour, range);
+            }
+
             transition(commandBuffer, stack,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

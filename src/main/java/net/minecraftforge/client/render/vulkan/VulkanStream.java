@@ -117,6 +117,11 @@ final class VulkanStream implements AutoCloseable {
      * @param extra additional texture handles to resolve, for paths outside the draw list (the terrain node's atlas)
      */
     void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int... extra) {
+        if (Boolean.getBoolean("outlands.render.debug")) {
+            // Before anything is resolved: resolving re-uploads an allocated-but-unwritten texture, which would
+            // overwrite the very content this is asking about.
+            textures.probeFramebufferTargets(commandBuffer, slot);
+        }
         resolved.clear();
         for (FrameDraws.Operation op : ops) {
             if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
@@ -254,6 +259,7 @@ final class VulkanStream implements AutoCloseable {
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
 
             int indexOfOp = -1;
+            int sinceCopy = 0;
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
@@ -262,10 +268,23 @@ final class VulkanStream implements AutoCloseable {
                     vkCmdEndRendering(commandBuffer);
                     textures.copyFromFramebuffer(commandBuffer, copy, target, slot);
                     target.beginRendering(commandBuffer);
+                    sinceCopy = 1;
                     continue;
                 }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
+                if (sinceCopy > 0 && sinceCopy <= 6 && Boolean.getBoolean("outlands.render.debug")) {
+                    // What the draws after a framebuffer copy actually sample. Naming a different texture than the
+                    // copy wrote into would mean the background is an unrelated image stretched over the screen -
+                    // indistinguishable from a mis-oriented copy in a screenshot, obvious here.
+                    org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                            "After copy #{}: texture {} verts {} m15 {} uv0 {} scissor {}",
+                            sinceCopy, draw.state().texture(), draw.vertexCount(), draw.state().mvp()[15],
+                            firstUv(draw), draw.state().scissorEnabled());
+                    sinceCopy++;
+                } else if (sinceCopy > 6) {
+                    sinceCopy = 0;
+                }
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
                 // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
                 // here instead would apply one matrix to every draw - which drew the whole menu with the panorama's
@@ -343,6 +362,18 @@ final class VulkanStream implements AutoCloseable {
         }
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                 "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
+    }
+
+    /** The first vertex's texture coordinate, for a diagnostic about where the sample lands. */
+    private static String firstUv(FrameDraws.Draw draw) {
+        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
+        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
+            if (attribute.usage() == VertexFormatElement.EnumUsage.UV && attribute.uvIndex() == 0) {
+                return "(" + data.getFloat(attribute.offset()) + ","
+                        + data.getFloat(attribute.offset() + 4) + ")";
+            }
+        }
+        return "none";
     }
 
     /** The first {@code count} bytes as hex, for a diagnostic that has to state the data rather than describe it. */

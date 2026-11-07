@@ -340,6 +340,12 @@ final class VulkanTextures implements AutoCloseable {
         // instead meant releasing the current slot freed the buffer another slot was still reading, which is exactly
         // what the validation layers reported as destroying a buffer in use.
         pendingStaging[slot].add(staging);
+        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() < 12) {
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Framebuffer copy rect: source ({},{}) {}x{} -> destination ({},{}) level {} of texture {}",
+                    copy.x(), copy.y(), copy.width(), copy.height(), copy.xOffset(), copy.yOffset(), copy.level(),
+                    copy.texture());
+        }
         entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
 
         if (Boolean.getBoolean("outlands.render.debug") && DIAGNOSE.compareAndSet(false, true)) {
@@ -400,6 +406,44 @@ final class VulkanTextures implements AutoCloseable {
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                 "Framebuffer copy for texture {}:{}", texture, out);
     }
+
+    /**
+     * Copies each resolved texture's image back for inspection, once.
+     *
+     * <p>Answers "what does the renderer actually display as the background" without a screenshot: the image the
+     * blur draws samples is read back after the frame that filled it has finished, and its four quadrants are
+     * reported. A background showing sky on the right has a right side that is bright, whatever the copy source
+     * looked like.</p>
+     */
+    void probeFramebufferTargets(VkCommandBuffer commandBuffer, int slot) {
+        if (PROBED.get()) {
+            return;
+        }
+        boolean any = entries.keySet().stream().anyMatch(source::isFramebufferTarget);
+        if (!any || !PROBED.compareAndSet(false, true)) {
+            // Nothing to probe yet on the first frame: the entry does not exist until it has been resolved once.
+            return;
+        }
+        for (java.util.Map.Entry<Integer, Entry> mapEntry : entries.entrySet()) {
+            if (!source.isFramebufferTarget(mapEntry.getKey())) {
+                continue;
+            }
+            VulkanImage image = mapEntry.getValue().image();
+            int bytes = image.width() * image.height() * 4;
+            VulkanBuffer readback = VulkanBuffer.createReadback(context.device(), context, bytes);
+            image.copyTo(commandBuffer, readback.handle());
+            pendingReadback[slot].add(new Readback(readback, null, mapEntry.getKey(), true));
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Probing framebuffer target {} ({}x{}) as the previous frame left it",
+                    mapEntry.getKey(), image.width(), image.height());
+        }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean PROBED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** How many copy rectangles have been reported, so the log stays bounded. */
+    private static final java.util.concurrent.atomic.AtomicInteger COPIED =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     /** How many textures are on the device. Diagnostics. */
     int resident() {

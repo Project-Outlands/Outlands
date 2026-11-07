@@ -298,6 +298,17 @@ forgedev.runs {
             mainClass = 'net.minecraftforge.boot.MainClient'
             workingDir = file('run')
             jvmArgs = ProjectConstants.JVM_ARGUMENTS + ['-Dmixin.debug.export=true', '-Dmixin.checks.interfaces=true']
+            // Passed through so a diagnostic can be turned on for one run without a source change:
+            //   ./gradlew :outlands:runOutlandsClient -Poutlands.debug=true
+            if (project.hasProperty('outlands.debug')) {
+                jvmArgs('-Doutlands.render.debug=true')
+            }
+            if (project.hasProperty('outlands.skipCopy')) {
+                jvmArgs('-Doutlands.render.skipFramebufferCopy=true')
+            }
+            if (project.hasProperty('outlands.paintCopies')) {
+                jvmArgs('-Doutlands.render.paintCopies=true')
+            }
             environment.putAll(loaderEnv('fmldevclient', 'net.minecraftforge.fml.common.launcher.FMLTweaker'))
         }
     }
