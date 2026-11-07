@@ -287,15 +287,20 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -847,5 +828,6 @@
+@@ -847,5 +828,11 @@
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.skipLightmapTextureCoords()) { return; }
++        if (target == lightmapTexUnit)
++        {
++            lastBrightnessX = x;
++            lastBrightnessY = y;
++        }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.lightmap(x, y)) { return; }
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
 
-@@ -854,6 +836,12 @@
+@@ -854,6 +841,12 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -308,12 +313,12 @@
      }
  
      public static void glBlendFunc(int sFactorRGB, int dFactorRGB, int sfactorAlpha, int dfactorAlpha)
-@@ -860,3 +848,4 @@
+@@ -860,3 +853,4 @@
      {
 +        if (net.minecraftforge.client.render.state.backend.FrameStates.blendFuncSeparate(sFactorRGB, dFactorRGB, sfactorAlpha, dfactorAlpha)) { return; }
          if (openGL14)
          {
-@@ -888,7 +877,9 @@
+@@ -888,7 +882,9 @@
      public static void renderDirections(int p_188785_0_)
      {
          GlStateManager.disableTexture2D();
@@ -324,7 +329,7 @@
 +        // Through GlStateManager, not GL11: this is the F3 overlay's axis lines, and the direct call was a
 +        // segfault on a backend with no GL context.
 +        GlStateManager.glLineWidth(4.0F);
-@@ -916,59 +907,28 @@
+@@ -916,59 +912,28 @@
  
      public static void openFile(File fileIn)
      {

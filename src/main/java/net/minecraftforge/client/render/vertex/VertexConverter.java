@@ -48,7 +48,7 @@ public final class VertexConverter {
      * @return {@code vertexCount * }{@link #STRIDE} bytes
      */
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount) {
-        return convert(source, layout, vertexCount, 0xFFFFFFFF);
+        return convert(source, layout, vertexCount, 0xFFFFFFFF, null);
     }
 
     /**
@@ -61,8 +61,11 @@ public final class VertexConverter {
      * noticed on the language screen.</p>
      *
      * @param fallbackColor {@code 0xAARRGGBB} used when the layout has no colour element
+     * @param fallbackLightmap {@code u, v} in 0..1 used when the layout has no lightmap element, or {@code null} for
+     *                         full brightness
      */
-    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor) {
+    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                                 float[] fallbackLightmap) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -74,6 +77,15 @@ public final class VertexConverter {
         ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
         ByteBuffer in = source.duplicate().order(ByteOrder.nativeOrder());
         List<VertexLayout.Attribute> attributes = layout.attributes();
+        // Vanilla's constant lightmap coordinate, in the same unsigned-short encoding the attribute uses. A format
+        // without one therefore gets the brightness the game asked for rather than a made-up full bright: that
+        // difference is a mob in a cave looking lit.
+        int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
+        if (fallbackLightmap != null) {
+            int u = Math.round(Math.max(0.0F, Math.min(1.0F, fallbackLightmap[0])) * 0xFFFF);
+            int v = Math.round(Math.max(0.0F, Math.min(1.0F, fallbackLightmap[1])) * 0xFFFF);
+            fallbackLight = u | (v << 16);
+        }
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = vertex * STRIDE;
@@ -83,7 +95,7 @@ public final class VertexConverter {
             target.putInt(base + COLOR_OFFSET, fallbackColor);
             target.putFloat(base + UV_OFFSET, 0.0F);
             target.putFloat(base + UV_OFFSET + 4, 0.0F);
-            target.putInt(base + LIGHTMAP_OFFSET, FULL_LIGHTMAP | (FULL_LIGHTMAP << 16));
+            target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
 
             for (VertexLayout.Attribute attribute : attributes) {
                 int at = sourceBase + attribute.offset();

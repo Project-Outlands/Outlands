@@ -178,7 +178,7 @@ final class VulkanStream implements AutoCloseable {
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
             converted[i] = VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
-                    draw.layout(), draw.vertexCount(), draw.state().colorArgb());
+                    draw.layout(), draw.vertexCount(), draw.state().colorArgb(), draw.state().lightmap());
             totalBytes += converted[i].length;
         }
         byte[] all = new byte[totalBytes];

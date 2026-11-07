@@ -34,12 +34,14 @@ package net.minecraftforge.client.render.vertex;
  * @param alphaComparison      the alpha test's GL comparison
  * @param viewport             the viewport as {@code x, y, width, height} in GL's bottom-up pixels
  * @param colorMask            which of red, green, blue, alpha the draw may write
+ * @param lightmap             the constant lightmap coordinate, {@code u, v} in 0..1, or {@code null} when the game
+ *                             set none; used for geometry whose format carries no lightmap attribute
  */
 public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
                         int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
                         boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport,
-                        boolean[] colorMask) {
+                        boolean[] colorMask, float[] lightmap) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -107,7 +109,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D),
                 state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
                 state.viewport(),
-                state.colorMask());
+                state.colorMask(),
+                state.lightmap());
     }
 
     /**

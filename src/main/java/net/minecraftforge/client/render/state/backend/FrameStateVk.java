@@ -73,6 +73,8 @@ final class FrameStateVk implements FrameState {
     private float fogDensity = 1.0F;
     private float fogStart = 0.0F;
     private float fogEnd = 1.0F;
+    /** The lightmap coordinate a draw gets when its format carries none. Null until the game sets one. */
+    private float[] lightmap;
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -111,6 +113,16 @@ final class FrameStateVk implements FrameState {
     @Override
     public int alphaComparison() {
         return alphaComparison;
+    }
+
+    @Override
+    public void lightmap(float u, float v) {
+        lightmap = new float[] {u, v};
+    }
+
+    @Override
+    public float[] lightmap() {
+        return lightmap == null ? null : lightmap.clone();
     }
 
     @Override

@@ -133,24 +133,21 @@ public final class FrameStates {
     }
 
     /**
-     * Answers {@code OpenGlHelper.setLightmapTextureCoords}: recorded as a skipped effect.
+     * Answers {@code OpenGlHelper.setLightmapTextureCoords}: the constant light a draw without a lightmap attribute
+     * gets.
      *
-     * <p>Vanilla gives entity and item geometry its world light by setting a constant texture coordinate on the
-     * lightmap unit, which GL's combine stage then reads. This backend has no combine stage: the lightmap is a vertex
-     * attribute, and for a format that has none {@code VertexConverter} writes full brightness. So a mob in a cave is
-     * drawn as if it stood in daylight.</p>
+     * <p>Vanilla sets it per entity and per item, so it is state that travel with the draw rather than a per-frame
+     * value - which is why it is recorded into {@link FrameState} and read when the draw is captured, exactly as the
+     * matrix is.</p>
      *
-     * <p>Reported rather than ignored because it is the difference between a dark cave and a lit one, and because the
-     * fix is a decision rather than a translation: either the draw carries a per-draw brightness (which is what this
-     * value is) or entity formats grow a lightmap attribute.</p>
+     * @return whether the backend took it, i.e. whether the vanilla GL path should be skipped
      */
-    public static boolean skipLightmapTextureCoords() {
-        if (forNonGl() == null) {
+    public static boolean lightmap(float u, float v) {
+        FrameState state = forNonGl();
+        if (state == null) {
             return false;
         }
-        reportSkippedOnce("the lightmap texture coordinate",
-                "geometry whose vertex format carries no lightmap is drawn at full brightness, so a lit cave looks"
-                        + " like daylight");
+        state.lightmap(u, v);
         return true;
     }
 

@@ -122,6 +122,23 @@ public interface FrameState {
      */
     void fog(int glPname, java.nio.FloatBuffer param);
 
+    /**
+     * {@code glMultiTexCoord2f} on the lightmap unit: the light that geometry without a lightmap attribute gets.
+     *
+     * <p>Vanilla does not give entity and item models a lightmap attribute. It sets a constant texture coordinate on
+     * the lightmap unit instead, and GL's combine stage reads that for the whole draw. So this is not decoration - it
+     * is the only thing that makes a mob in a cave darker than the same mob in daylight.</p>
+     */
+    void lightmap(float u, float v);
+
+    /**
+     * The lightmap coordinate in effect, as {@code u, v} in 0..1, or {@code null} when the game has not set one.
+     *
+     * <p>Read when a draw is recorded, for the same reason the matrix is: the draw uses the value that was set when it
+     * was issued.</p>
+     */
+    float[] lightmap();
+
     // endregion
 
     void shadeModel(int glModel);
