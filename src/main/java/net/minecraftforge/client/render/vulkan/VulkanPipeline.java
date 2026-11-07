@@ -106,11 +106,15 @@ final class VulkanPipeline implements AutoCloseable {
      * @param dstAlpha   the GL destination blend factor for alpha
      */
     record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, boolean blend,
-                         boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha) {
+                         boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask) {
+        /** Every colour channel, which is what a pipeline built without a mask writes. */
+        static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
         /** The state the terrain phase has always used. */
         static PipelineState terrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true,
-                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS);
         }
     }
 
@@ -306,8 +310,7 @@ final class VulkanPipeline implements AutoCloseable {
                 .srcAlphaBlendFactor(blendFactor(state.srcAlpha()))
                 .dstAlphaBlendFactor(blendFactor(state.dstAlpha()))
                 .alphaBlendOp(VK_BLEND_OP_ADD)
-                .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-                        | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+                .colorWriteMask(state.colorWriteMask());
 
         VkPipelineColorBlendStateCreateInfo colorBlend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
                 .sType$Default()

@@ -77,6 +77,17 @@ public interface FrameState {
 
     void colorMask(boolean red, boolean green, boolean blue, boolean alpha);
 
+    /**
+     * The channels a draw may write, in {@code red, green, blue, alpha} order.
+     *
+     * <p>Vanilla turns alpha writing off for the surfaces it composes rather than draws - the main menu panorama and
+     * its blur both do - and the framebuffer's alpha then stays at whatever the clear left. A draw that ignores the
+     * mask writes alpha it was never meant to write, and every later {@code SRC_ALPHA} blend of that region reads it.
+     * Measured on the main menu: masking alpha away left the copy's alpha at {@code ff}, ignoring the mask drove it
+     * to {@code 00} over the seven blur layers, which made the blurred backdrop fully transparent.</p>
+     */
+    boolean[] colorMask();
+
     /** {@code glDepthMask}: whether depth writes are enabled. */
     void depthMask(boolean enabled);
 

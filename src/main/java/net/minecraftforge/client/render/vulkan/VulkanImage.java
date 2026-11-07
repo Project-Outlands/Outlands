@@ -284,9 +284,33 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT, frameWidth, frameHeight);
 
-            // This image is where the copy lands. It was left sampleable, so it goes to TRANSFER_DST and back.
+            // The staging buffer has just been written by the copy above and is read by the copy below. Two transfer
+            // operations on one buffer are a write-then-read hazard, and without this barrier the second copy is
+            // free to read what the buffer held before the first one ran - which is zeros. Measured: the staging
+            // buffer held the correct panorama while the texture stayed empty, so the draws sampling it blended
+            // nothing and the background looked like it was never drawn.
+            org.lwjgl.vulkan.VkMemoryBarrier2.Buffer bufferBarrier = org.lwjgl.vulkan.VkMemoryBarrier2.calloc(1, stack);
+            bufferBarrier.get(0)
+                    .sType$Default()
+                    .srcStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT)
+                    .srcAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT)
+                    .dstStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT)
+                    .dstAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
+            org.lwjgl.vulkan.VkDependencyInfo bufferDependency = org.lwjgl.vulkan.VkDependencyInfo.calloc(stack)
+                    .sType$Default()
+                    .pMemoryBarriers(bufferBarrier);
+            vkCmdPipelineBarrier2(commandBuffer, bufferDependency);
+
+            // This image is where the copy lands, so it goes to TRANSFER_DST and back.
+            //
+            // The old layout is only SHADER_READ_ONLY once the image has been written at least once. A texture that
+            // is never uploaded and only ever filled by this copy - the main menu's backdrop is exactly that - is
+            // still in UNDEFINED on its first pass, and declaring a layout it is not in leaves the contents
+            // undefined: the copy landed in the staging buffer and the texture stayed empty, so every draw that
+            // sampled it blended nothing. upload() already had this distinction; the two copy paths did not.
             transition(commandBuffer, stack,
-                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    initialised ? org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                            : org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
@@ -349,7 +373,8 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, frameWidth, frameHeight);
             transition(commandBuffer, stack,
-                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    initialised ? org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                            : org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);

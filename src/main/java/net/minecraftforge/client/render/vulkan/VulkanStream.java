@@ -263,6 +263,22 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             int sinceCopy = 0;
+            if (Boolean.getBoolean("outlands.render.debug") && FRAMES_LOGGED.get() < 20) {
+                int perspectiveDraws = 0;
+                for (FrameDraws.Draw d : draws) {
+                    if (d.state().mvp()[11] == 0.0F) {
+                        perspectiveDraws++;
+                    }
+                }
+                StringBuilder heads = new StringBuilder();
+                for (int i = 0; i < Math.min(4, draws.size()); i++) {
+                    heads.append(" #").append(i).append('=').append(java.util.Arrays.toString(
+                            draws.get(i).state().viewport()));
+                }
+                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                        "Frame {}: {} draws, {} perspective, first viewports:{}",
+                        FRAMES_LOGGED.get(), draws.size(), perspectiveDraws, heads);
+            }
             if (Boolean.getBoolean("outlands.render.debug") && FRAMES_LOGGED.getAndIncrement() < 2) {
                 StringBuilder tail = new StringBuilder();
                 for (int i = 0; i < draws.size(); i++) {
@@ -276,7 +292,42 @@ final class VulkanStream implements AutoCloseable {
                             .append(" verts=").append(d.vertexCount())
                             .append(" mode=").append(d.mode())
                             .append(" viewport=").append(java.util.Arrays.toString(d.state().viewport()))
-                            .append(" blend=").append(d.state().blend());
+                            .append(" scissor=").append(d.state().scissorEnabled()
+                                    ? java.util.Arrays.toString(d.state().scissor()) : "off")
+                            .append(" cull=").append(d.state().cull() ? "on" : "off")
+                            .append(" depth=").append(d.state().depthTest() ? "on" : "off")
+                            .append(" write=").append(d.state().depthWrite() ? "on" : "off")
+                            .append(" blend=").append(d.state().blend()
+                                    ? d.state().blendSourceRgb() + "/" + d.state().blendDestinationRgb() : "off")
+                            .append(" colour=").append(java.util.Arrays.toString(d.state().color()))
+                            .append(" textured=").append(d.state().texture2d());
+                    if (d.vertexCount() == 4 && d.state().texture() == 9 && d.vertices().length >= 4 * d.layout().stride()) {
+                        java.nio.ByteBuffer v = java.nio.ByteBuffer.wrap(d.vertices());
+                        int stride = d.layout().stride();
+                        int positionOffset = -1;
+                        int uvOffset = -1;
+                        for (net.minecraftforge.client.render.vertex.VertexLayout.Attribute a : d.layout().attributes()) {
+                            if (a.usage() == net.minecraft.client.renderer.vertex.VertexFormatElement.EnumUsage.POSITION) {
+                                positionOffset = a.offset();
+                            } else if (a.usage() == net.minecraft.client.renderer.vertex.VertexFormatElement.EnumUsage.UV
+                                    && a.uvIndex() == 0) {
+                                uvOffset = a.offset();
+                            }
+                        }
+                        tail.append("\n     offsets pos=").append(positionOffset).append(" uv=").append(uvOffset)
+                            .append(" bytes=").append(d.vertices().length).append(" hex=");
+                        for (int k = 0; k < Math.min(48, d.vertices().length); k++) {
+                            tail.append(String.format(java.util.Locale.ROOT, "%02x", d.vertices()[k]));
+                        }
+                        for (int k = 0; k < 4 && positionOffset >= 0 && uvOffset >= 0; k++) {
+                            int base = k * stride;
+                            tail.append(String.format(java.util.Locale.ROOT,
+                                    "\n     v%d pos=(%.1f, %.1f, %.2f) uv=(%.4f, %.4f)",
+                                    k, v.getFloat(base + positionOffset), v.getFloat(base + positionOffset + 4),
+                                    v.getFloat(base + positionOffset + 8),
+                                    v.getFloat(base + uvOffset), v.getFloat(base + uvOffset + 4)));
+                        }
+                    }
                 }
                 org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                         "Draws sampling the framebuffer copy, frame of {}:{}", draws.size(), tail);
@@ -599,10 +650,18 @@ final class VulkanStream implements AutoCloseable {
      * the next entry rather than an assumption.</p>
      */
     private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape, DrawState state) {
+        // EXPERIMENT: the main menu's final backdrop draw covers the screen with the copied panorama yet produces
+        // nothing, while the twelve-vertex blur quads that put the same texture into the same corner do appear.
+        // The two differ by viewport, measured correct, so the difference lies in one of these pieces of state.
+        boolean[] mask = state.colorMask();
+        int channels = (mask[0] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT : 0)
+                | (mask[1] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT : 0)
+                | (mask[2] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT : 0)
+                | (mask[3] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT : 0);
         return new VulkanPipeline.PipelineState(VulkanPipeline.VK10Topology.of(shape.topology()),
                 state.depthTest(), state.depthWrite(), state.blend(), state.cull(),
-                state.blendSourceRgb(), state.blendDestinationRgb(),
-                state.blendSourceAlpha(), state.blendDestinationAlpha());
+                state.blendSourceRgb(), state.blendDestinationRgb(), state.blendSourceAlpha(),
+                state.blendDestinationAlpha(), channels);
     }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {

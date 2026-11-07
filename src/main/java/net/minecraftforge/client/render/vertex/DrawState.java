@@ -33,11 +33,13 @@ package net.minecraftforge.client.render.vertex;
  * @param alphaReference       the alpha test's reference value
  * @param alphaComparison      the alpha test's GL comparison
  * @param viewport             the viewport as {@code x, y, width, height} in GL's bottom-up pixels
+ * @param colorMask            which of red, green, blue, alpha the draw may write
  */
 public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
                         int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
-                        boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport) {
+                        boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport,
+                        boolean[] colorMask) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -51,6 +53,9 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         }
         if (viewport.length != 4) {
             throw new IllegalArgumentException("a viewport has 4 values, got " + viewport.length);
+        }
+        if (colorMask.length != 4) {
+            throw new IllegalArgumentException("a colour mask has 4 channels, got " + colorMask.length);
         }
     }
 
@@ -111,7 +116,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.currentColor(),
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D),
                 state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
-                state.viewport());
+                state.viewport(),
+                state.colorMask());
     }
 
     /**

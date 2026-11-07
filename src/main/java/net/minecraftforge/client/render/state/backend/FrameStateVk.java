@@ -118,6 +118,11 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public boolean[] colorMask() {
+        return colorMask.clone();
+    }
+
+    @Override
     public boolean isEnabled(Capability capability) {
         return enabled.contains(capability);
     }

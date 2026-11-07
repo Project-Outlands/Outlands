@@ -10,6 +10,7 @@ import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
 import org.lwjgl.vulkan.VkCommandBufferSubmitInfo;
 import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
+import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkExtent2D;
 import org.lwjgl.vulkan.VkExtent3D;
@@ -79,6 +80,8 @@ import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+import static org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_VIEW_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -299,6 +302,7 @@ final class VulkanSwapchain {
         if (textures != null) {
             textures.releaseSlot(frame);
         }
+        readFrameDump(frame);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer imageIndexOut = stack.mallocInt(1);
@@ -477,6 +481,7 @@ final class VulkanSwapchain {
         }
 
         vkCmdEndRendering(commandBuffer);
+        writeFrameDump(commandBuffer, imageIndex, stack, extentWidth, extentHeight);
 
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
         presentBarrier.get(0)
@@ -496,6 +501,102 @@ final class VulkanSwapchain {
 
         VkCheck.check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
     }
+
+    /**
+     * Copies the finished swapchain image out for the first few frames, so the picture that reaches the screen can be
+     * looked at directly.
+     *
+     * <p>Every other diagnostic in this renderer reads an intermediate: the copied region, the atlas, the vertex
+     * data. All of those have been correct while the screen was wrong, which is exactly the case the presented image
+     * settles and they cannot.</p>
+     */
+    private void writeFrameDump(VkCommandBuffer commandBuffer, int imageIndex, MemoryStack stack, int width,
+            int height) {
+        if (dumpedFrames.get() >= 3) {
+            return;
+        }
+        int slot = frameIndex;
+        VulkanBuffer buffer = pendingDump[slot];
+        if (buffer == null) {
+            buffer = VulkanBuffer.createReadback(device, context, width * height * 4);
+            pendingDump[slot] = buffer;
+        }
+        VkImageMemoryBarrier2.Buffer toSource = VkImageMemoryBarrier2.calloc(1, stack);
+        toSource.get(0)
+                .sType$Default()
+                .srcStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .srcAccessMask(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                .dstStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_TRANSFER_BIT)
+                .dstAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT)
+                .oldLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                .image(images[imageIndex])
+                .subresourceRange(colorRange(stack));
+        VkDependencyInfo toSourceInfo = VkDependencyInfo.calloc(stack)
+                .sType$Default()
+                .pImageMemoryBarriers(toSource);
+        vkCmdPipelineBarrier2(commandBuffer, toSourceInfo);
+
+        VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+        region.get(0)
+                .bufferOffset(0)
+                .bufferRowLength(0)
+                .bufferImageHeight(0)
+                .imageSubresource(sub -> sub.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(0).baseArrayLayer(0).layerCount(1))
+                .imageOffset(o -> o.x(0).y(0).z(0))
+                .imageExtent(e -> e.width(width).height(height).depth(1));
+        vkCmdCopyImageToBuffer(commandBuffer, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                buffer.handle(), region);
+
+        VkImageMemoryBarrier2.Buffer back = VkImageMemoryBarrier2.calloc(1, stack);
+        back.get(0)
+                .sType$Default()
+                .srcStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_TRANSFER_BIT)
+                .srcAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT)
+                .dstStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .dstAccessMask(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                .image(images[imageIndex])
+                .subresourceRange(colorRange(stack));
+        VkDependencyInfo backInfo = VkDependencyInfo.calloc(stack)
+                .sType$Default()
+                .pImageMemoryBarriers(back);
+        vkCmdPipelineBarrier2(commandBuffer, backInfo);
+        dumpedFrames.incrementAndGet();
+    }
+
+    private void readFrameDump(int slot) {
+        VulkanBuffer buffer = pendingDump[slot];
+        if (buffer == null) {
+            return;
+        }
+        pendingDump[slot] = null;
+        byte[] bgra = buffer.read((int) buffer.size());
+        int width = extentWidth;
+        int height = extentHeight;
+        java.awt.image.BufferedImage image =
+                new java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int at = (y * width + x) * 4;
+                image.setRGB(x, y, ((bgra[at + 3] & 0xFF) << 24) | ((bgra[at + 2] & 0xFF) << 16)
+                        | ((bgra[at + 1] & 0xFF) << 8) | (bgra[at] & 0xFF));
+            }
+        }
+        try {
+            java.io.File out = new java.io.File("/tmp/presented.png");
+            javax.imageio.ImageIO.write(image, "png", out);
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info("Wrote {}", out);
+        } catch (java.io.IOException e) {
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").warn("Could not write the frame", e);
+        }
+    }
+
+    private final VulkanBuffer[] pendingDump = new VulkanBuffer[FRAMES_IN_FLIGHT];
+    private final java.util.concurrent.atomic.AtomicInteger dumpedFrames =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     private void submit(int frame, int imageIndex, MemoryStack stack) {
         VkSemaphoreSubmitInfo.Buffer wait = VkSemaphoreSubmitInfo.calloc(1, stack);
