@@ -309,6 +309,12 @@ forgedev.runs {
             if (project.hasProperty('outlands.paintCopies')) {
                 jvmArgs('-Doutlands.render.paintCopies=true')
             }
+            if (project.hasProperty('outlands.fullBlur')) {
+                jvmArgs('-Doutlands.render.fullBlur=true')
+            }
+            if (project.hasProperty('outlands.uvMode')) {
+                jvmArgs("-Doutlands.render.uvMode=${project.property('outlands.uvMode')}")
+            }
             environment.putAll(loaderEnv('fmldevclient', 'net.minecraftforge.fml.common.launcher.FMLTweaker'))
         }
     }

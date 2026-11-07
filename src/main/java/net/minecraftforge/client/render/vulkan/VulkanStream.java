@@ -296,6 +296,14 @@ final class VulkanStream implements AutoCloseable {
                 push.put(16, draw.state().alphaReference());
                 // GL_GREATER is the only comparison vanilla uses; anything else is rejected rather than approximated.
                 push.put(17, draw.state().alphaTest() ? 1.0F : 0.0F);
+                // Only a texture that a framebuffer copy filled is u-reversed; everything uploaded from a file is
+                // sampled exactly as the game's coordinates say.
+                // Diagnostic: -Doutlands.render.uvMode=N selects how texture coordinates are interpreted, so the
+                // background's orientation can be tested against a transposition without changing the game's own data.
+                // Default 0: textures are sampled exactly as the game's coordinates say. The mirror (1) and the
+                // transposition (2) exist because the main menu's background came out rolled, and testing those two
+                // is how the transpose was identified as the shape of the difference.
+                push.put(18, (float) Integer.getInteger("outlands.render.uvMode", 0));
                 if (draw.state().alphaTest() && draw.state().alphaComparison() != GL_GREATER) {
                     throw new UnsupportedOperationException("alpha test comparison "
                             + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"

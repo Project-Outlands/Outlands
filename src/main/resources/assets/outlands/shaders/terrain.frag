@@ -25,12 +25,26 @@ layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
     float alphaReference;
     float alphaTest;
+    float flipU;
 } pc;
 
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec4 sample4 = texture(atlas, inUv);
+    // A texture that was filled by a framebuffer copy is sampled with u reversed: the quad that reads it back places
+    // u = 0 at the right edge of the screen, so storing the copy unmirrored puts the background's left on the screen's
+    // right. Measured against the GL renderer, whose background has its water on the left and whose Vulkan
+    // counterpart had it on the right.
+    // flipU: 0 = as given, 1 = mirror u, 2 = swap u and v (transposed sampling).
+    vec2 uv;
+    if (pc.flipU > 1.5) {
+        uv = inUv.yx;
+    } else if (pc.flipU > 0.5) {
+        uv = vec2(1.0 - inUv.x, inUv.y);
+    } else {
+        uv = inUv;
+    }
+    vec4 sample4 = texture(atlas, uv);
 
     // GL_GREATER is the only comparison vanilla sets, and the backend rejects the others rather than guessing.
     if (pc.alphaTest > 0.5 && !(sample4.a > pc.alphaReference)) {

@@ -368,6 +368,11 @@ final class VulkanTextures implements AutoCloseable {
                 : org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
     }
 
+    /** Whether a texture has been filled by a framebuffer copy, and is therefore sampled u-reversed. */
+    boolean isFramebufferTarget(int texture) {
+        return source.isFramebufferTarget(texture);
+    }
+
     /** The stand-in set a draw uses when nothing is bound. */
     long whiteDescriptorSet() {
         return whiteSet;
@@ -389,6 +394,7 @@ final class VulkanTextures implements AutoCloseable {
             long blue = 0;
             long green = 0;
             long red = 0;
+            long alpha = 0;
             int count = 0;
             for (int y = y0; y < y0 + side / 2; y += 2) {
                 for (int x = x0; x < x0 + side / 2; x += 2) {
@@ -396,12 +402,16 @@ final class VulkanTextures implements AutoCloseable {
                     blue += bgra[at] & 0xFF;
                     green += bgra[at + 1] & 0xFF;
                     red += bgra[at + 2] & 0xFF;
+                    alpha += bgra[at + 3] & 0xFF;
                     count++;
                 }
             }
-            out.append(String.format(java.util.Locale.ROOT, " %s=#%02x%02x%02x",
+            // Alpha is part of the answer: the blur layer is only visible where the copied alpha is set, and a green
+            // image with zero alpha looks identical to a green image in this report while showing the sharp panorama
+            // underneath on screen.
+            out.append(String.format(java.util.Locale.ROOT, " %s=#%02x%02x%02x/a%02x",
                     new String[] {"topLeft", "topRight", "bottomLeft", "bottomRight"}[quadrant],
-                    red / count, green / count, blue / count));
+                    red / count, green / count, blue / count, alpha / count));
         }
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                 "Framebuffer copy for texture {}:{}", texture, out);

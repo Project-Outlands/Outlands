@@ -181,6 +181,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             modelViewProjection.get(matrix);
             matrix.putFloat(16 * Float.BYTES, 0.0F);   // alpha reference, unused when the test is off
             matrix.putFloat(16 * Float.BYTES + 4, 0.0F); // alpha test off: the terrain draws every fragment
+            matrix.putFloat(16 * Float.BYTES + 8, 0.0F); // no u-flip: the block atlas is uploaded, not copied
             // Same clip-space Y flip the streamed draws apply: this node's matrix is GL-style too, and Vulkan's NDC
             // Y points the other way. Column-major, so row 1 is at 1, 5, 9 and 13.
             java.nio.FloatBuffer flipped = matrix.asFloatBuffer();

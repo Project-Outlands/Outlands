@@ -20,6 +20,7 @@ layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
     float alphaReference;   // 64
     float alphaTest;        // 68, 0 or 1
+    float flipU;            // 72, 0 or 1
 } pc;
 
 layout(location = 0) out vec4 outColor;

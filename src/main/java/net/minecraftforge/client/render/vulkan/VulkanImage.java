@@ -251,6 +251,10 @@ final class VulkanImage implements AutoCloseable {
      */
     void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy,
                              FrameRenderTarget target, long staging) {
+        if (Boolean.getBoolean("outlands.render.fullBlur")) {
+            blitWholeFramebuffer(commandBuffer, target);
+            return;
+        }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             int frameWidth = target.width();
             int frameHeight = target.height();
@@ -316,6 +320,59 @@ final class VulkanImage implements AutoCloseable {
                         org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, colour, range);
             }
 
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT);
+            initialised = true;
+        }
+    }
+
+    /**
+     * Copies the entire framebuffer into this image, scaled to fit.
+     *
+     * <p>What the menu's blur actually wants. GL's {@code glCopyTexSubImage2D} takes a 256x256 rectangle from the
+     * framebuffer's corner, which at any resolution wider than 256 pixels is a crop of one corner - stretched back
+     * over the whole screen it is a heavily zoomed smear whose "orientation" is whatever that corner happened to
+     * contain. Blitting the whole frame keeps the picture's orientation, which is the property that matters
+     * visually.</p>
+     */
+    void blitWholeFramebuffer(VkCommandBuffer commandBuffer, FrameRenderTarget target) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            int frameWidth = target.width();
+            int frameHeight = target.height();
+
+            transitionExternal(commandBuffer, stack, target.colorImage(),
+                    org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, frameWidth, frameHeight);
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+            org.lwjgl.vulkan.VkImageBlit.Buffer blit = org.lwjgl.vulkan.VkImageBlit.calloc(1, stack);
+            blit.get(0).srcSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            blit.get(0).srcOffsets(0).set(0, 0, 0);
+            blit.get(0).srcOffsets(1).set(frameWidth, frameHeight, 1);
+            blit.get(0).dstSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            blit.get(0).dstOffsets(0).set(0, 0, 0);
+            blit.get(0).dstOffsets(1).set(width, height, 1);
+            org.lwjgl.vulkan.VK10.vkCmdBlitImage(commandBuffer, target.colorImage(),
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blit,
+                    org.lwjgl.vulkan.VK10.VK_FILTER_LINEAR);
+
+            transitionExternal(commandBuffer, stack, target.colorImage(),
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT, frameWidth, frameHeight);
             transition(commandBuffer, stack,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
