@@ -10,6 +10,7 @@ import org.lwjgl.vulkan.VkBufferCreateInfo;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -78,6 +79,36 @@ final class VulkanBuffer implements AutoCloseable {
     static VulkanBuffer createStaging(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
                                       byte[] data) {
         return create(device, context, data, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    }
+
+    /**
+     * Creates host-visible memory that the GPU can write into, for reading something back.
+     *
+     * <p>Used by the upload verification: a copy of the device image lands here, and the bytes are compared against
+     * what was sent. That comparison is the only way to tell "the copy worked" from "the copy was recorded" without
+     * a screenshot, and the two look identical from the outside.</p>
+     */
+    static VulkanBuffer createReadback(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                                       int size) {
+        return create(device, context, new byte[size], VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    }
+
+    /** Reads {@code length} bytes back into a new array. Blocks on the memory being host-visible and coherent. */
+    byte[] read(int length) {
+        if (length > size) {
+            throw new IllegalArgumentException("cannot read " + length + " bytes from a " + size + " byte buffer");
+        }
+        byte[] out = new byte[length];
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.PointerBuffer mapped = stack.mallocPointer(1);
+            VkCheck.check(org.lwjgl.vulkan.VK10.vkMapMemory(device, memory, 0L, size, 0, mapped), "vkMapMemory");
+            try {
+                org.lwjgl.system.MemoryUtil.memByteBuffer(mapped.get(0), (int) size).get(out);
+            } finally {
+                org.lwjgl.vulkan.VK10.vkUnmapMemory(device, memory);
+            }
+        }
+        return out;
     }
 
     private static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,

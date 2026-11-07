@@ -115,7 +115,9 @@ final class VulkanStream implements AutoCloseable {
     void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Draw> draws, int slot, int... extra) {
         resolved.clear();
         for (FrameDraws.Draw draw : draws) {
-            resolve(draw.state().texture(), commandBuffer, slot);
+            if (draw.state().samplesTexture()) {
+                resolve(draw.state().texture(), commandBuffer, slot);
+            }
         }
         for (int texture : extra) {
             resolve(texture, commandBuffer, slot);
@@ -129,7 +131,7 @@ final class VulkanStream implements AutoCloseable {
         if (!resolved.containsKey(texture)) {
             long set = textures.descriptorSet(texture, commandBuffer, slot);
             resolved.put(texture, set);
-            if (reportedTextures.add(texture)) {
+            if (reportedTextures.add(texture) && Boolean.getBoolean("outlands.render.debug")) {
                 // Which descriptor set a texture got, and whether it is the blank stand-in. This is the fact that
                 // separates "the draw sampled the wrong image" from "the draw sampled its own image", and neither
                 // is visible from outside. One line per texture, not per frame.
@@ -209,7 +211,11 @@ final class VulkanStream implements AutoCloseable {
 
         long[] textureSets = new long[draws.size()];
         for (int i = 0; i < draws.size(); i++) {
-            textureSets[i] = descriptorSetOf(draws.get(i).state().texture());
+            DrawState state = draws.get(i).state();
+            // A draw with texturing disabled samples nothing: GL replaces the sample with white and takes the colour
+            // from the vertices alone. Binding the white stand-in is that, expressed as data.
+            textureSets[i] = state.samplesTexture() ? descriptorSetOf(state.texture())
+                    : textures.whiteDescriptorSet();
         }
 
         pending[slot] = VulkanBuffer.create(device, context, all);
@@ -275,18 +281,20 @@ final class VulkanStream implements AutoCloseable {
      * it out of a few hundred without another round of guessing.</p>
      */
     private void logProjectionSummary(List<FrameDraws.Draw> draws) {
+        if (!Boolean.getBoolean("outlands.render.debug")) {
+            // Off by default: these dumps answer questions about one frame, and a normal run has none of them.
+            return;
+        }
         StringBuilder report = new StringBuilder();
         int shown = 0;
         for (int i = 0; i < draws.size() && shown < 40; i++) {
             FrameDraws.Draw draw = draws.get(i);
-            if (draw.mode() != 7 || draw.vertexCount() != 4) {
+            // The full-screen overlays: textured quads only, plus anything drawn with no texture bound. Those are
+            // the ones whose alpha decides whether the background is visible at all.
+            if (draw.state().samplesTexture()) {
                 continue;
             }
             int colour = firstVertexColor(draw);
-            int alpha = (colour >>> 24) & 0xFF;
-            if (alpha == 0xFF) {
-                continue;
-            }
             DrawState state = draw.state();
             report.append('\n').append("  #").append(i)
                     .append(" tex=").append(state.texture())
@@ -294,11 +302,23 @@ final class VulkanStream implements AutoCloseable {
                     .append(" stride=").append(draw.layout().stride())
                     .append(" blend=").append(state.blend()
                             ? state.blendSourceRgb() + "->" + state.blendDestinationRgb() : "off")
-                    .append(" scissor=").append(state.scissorEnabled());
+                    .append(" scissor=").append(state.scissorEnabled())
+                    .append(" verts=").append(draw.vertexCount())
+                    .append(" mode=").append(draw.mode())
+                    .append(" bytes=").append(hex(draw.vertices(), draw.layout().stride()));
             shown++;
         }
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                "Translucent quads in frame ({} of {} draws):{}", shown, draws.size(), report);
+                "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
+    }
+
+    /** The first {@code count} bytes as hex, for a diagnostic that has to state the data rather than describe it. */
+    private static String hex(byte[] data, int count) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < Math.min(count, data.length); i++) {
+            out.append(String.format(java.util.Locale.ROOT, "%02x", data[i] & 0xFF));
+        }
+        return out.toString();
     }
 
     /** The first vertex's {@code 0xAARRGGBB} colour, or {@code 0} when the layout carries none. */

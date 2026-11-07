@@ -18,6 +18,7 @@ import static org.lwjgl.vulkan.VK10.VK_IMAGE_TILING_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_SAMPLED_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_VIEW_TYPE_2D;
 import static org.lwjgl.vulkan.VK10.VK_SAMPLE_COUNT_1_BIT;
 import static org.lwjgl.vulkan.VK10.VK_SHARING_MODE_EXCLUSIVE;
@@ -95,7 +96,11 @@ final class VulkanImage implements AutoCloseable {
                     .arrayLayers(1)
                     .samples(VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK_IMAGE_TILING_OPTIMAL)
-                    .usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+                    // TRANSFER_SRC as well, so the upload verification can read the image back. Without it the copy
+                    // is invalid - the validation layers named it as VUID-vkCmdCopyImageToBuffer-srcImage-00186 - and
+                    // an invalid copy that happens to work is not a verification.
+                    .usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                            | VK_IMAGE_USAGE_SAMPLED_BIT)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
                     // Left UNDEFINED so the first upload's barrier does not have to claim contents it never had.
                     .initialLayout(org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED);
@@ -184,6 +189,39 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT);
             initialised = true;
+        }
+    }
+
+    /**
+     * Records a copy of this image into {@code destination}, leaving the image sampleable again.
+     *
+     * <p>For the upload verification, and deliberately part of the same command buffer as the upload: it reads
+     * exactly what the upload wrote, with no second submission to reason about.</p>
+     *
+     * @param destination a host-visible buffer of at least {@code width * height * 4} bytes
+     */
+    void copyTo(VkCommandBuffer commandBuffer, long destination) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+            region.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+            region.get(0).imageOffset().x(0).y(0).z(0);
+            region.get(0).imageExtent().width(width).height(height).depth(1);
+            region.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer(commandBuffer, image,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination, region);
+
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
         }
     }
 

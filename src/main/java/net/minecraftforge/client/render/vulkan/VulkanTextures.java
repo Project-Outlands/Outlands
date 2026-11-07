@@ -55,6 +55,14 @@ final class VulkanTextures implements AutoCloseable {
     private final Map<Long, Long> samplers = new HashMap<>();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
+    /**
+     * Readback buffers proving the first upload arrived intact, per slot.
+     *
+     * <p>One per slot and only for the first texture, because the question is whether the transfer path works at all,
+     * not whether it works for each of forty atlases. The comparison happens after the slot's fence, when the copy
+     * has actually executed.</p>
+     */
+    private final List<Readback>[] pendingReadback;
 
     private final VulkanImage white;
     private final long whiteSampler;
@@ -70,14 +78,25 @@ final class VulkanTextures implements AutoCloseable {
      */
     private record Entry(VulkanImage image, long sampler, long descriptorSet, long uploadedVersion) {}
 
+    /**
+     * A recorded copy of an image, waiting for its frame to finish.
+     *
+     * @param buffer  host-visible memory the copy wrote into
+     * @param sent    the bytes that were uploaded, to compare against
+     * @param texture the game's handle, for the report
+     */
+    private record Readback(VulkanBuffer buffer, byte[] sent, int texture) {}
+
     @SuppressWarnings("unchecked")
     VulkanTextures(VulkanContext context, VulkanDescriptors descriptors, TextureBackend source) {
         this.context = context;
         this.descriptors = descriptors;
         this.source = source;
         this.pendingStaging = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.pendingReadback = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int slot = 0; slot < this.pendingStaging.length; slot++) {
             this.pendingStaging[slot] = new ArrayList<>();
+            this.pendingReadback[slot] = new ArrayList<>();
         }
 
         this.white = VulkanImage.create(context.device(), context, 1, 1);
@@ -156,7 +175,19 @@ final class VulkanTextures implements AutoCloseable {
         VulkanBuffer buffer = VulkanBuffer.createStaging(context.device(), context, staged);
         pendingStaging[slot].add(buffer);
         target.upload(commandBuffer, buffer.handle());
+
+        if (!verifiedTransfer && image.id() != 0) {
+            // Record a copy of what the upload just wrote, into host-visible memory, and compare it once the frame
+            // has finished. Every claim about sampling rests on this transfer being faithful; this is the only thing
+            // in the renderer that checks it instead of assuming it.
+            verifiedTransfer = true;
+            VulkanBuffer readback = VulkanBuffer.createReadback(context.device(), context, staged.length);
+            target.copyTo(commandBuffer, readback.handle());
+            pendingReadback[slot].add(new Readback(readback, staged, image.id()));
+        }
     }
+
+    private boolean verifiedTransfer;
 
     /**
      * Releases this slot's staging buffers.
@@ -165,10 +196,45 @@ final class VulkanTextures implements AutoCloseable {
      * vertex buffer. Calling it earlier would free memory a pending copy still reads.</p>
      */
     void releaseSlot(int slot) {
+        for (Readback readback : pendingReadback[slot]) {
+            try {
+                report(readback);
+            } finally {
+                readback.buffer().close();
+            }
+        }
+        pendingReadback[slot].clear();
+
         for (VulkanBuffer buffer : pendingStaging[slot]) {
             buffer.close();
         }
         pendingStaging[slot].clear();
+    }
+
+    /**
+     * Compares a readback against what was uploaded and logs the verdict.
+     *
+     * <p>A mismatch is reported with the first differing byte and the two values, because "the image is blank" and
+     * "the image is one byte off" need different fixes and look the same in a screenshot.</p>
+     */
+    private static void report(Readback readback) {
+        byte[] sent = readback.sent();
+        byte[] got = readback.buffer().read(sent.length);
+        int firstDifference = -1;
+        int differing = 0;
+        for (int i = 0; i < sent.length; i++) {
+            if (sent[i] != got[i]) {
+                differing++;
+                if (firstDifference < 0) {
+                    firstDifference = i;
+                }
+            }
+        }
+        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                "Upload verification for texture {}: {} of {} bytes differ, first at {} (sent {}, read back {})",
+                readback.texture(), differing, sent.length, firstDifference,
+                firstDifference < 0 ? "n/a" : Integer.toHexString(sent[firstDifference] & 0xFF),
+                firstDifference < 0 ? "n/a" : Integer.toHexString(got[firstDifference] & 0xFF));
     }
 
     /**

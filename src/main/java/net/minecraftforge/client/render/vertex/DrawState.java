@@ -28,10 +28,11 @@ package net.minecraftforge.client.render.vertex;
  * @param scissorEnabled       whether the scissor test was on
  * @param scissor              the scissor rectangle as {@code x, y, width, height} in GL's bottom-up pixels
  * @param color                the current vertex colour, four components in 0..1
+ * @param texture2d            whether texturing was enabled, i.e. whether this draw samples the bound texture at all
  */
 public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
-                        int texture, boolean scissorEnabled, int[] scissor, float[] color) {
+                        int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -88,7 +89,23 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 boundTexture(),
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.SCISSOR_TEST),
                 state.scissorBox(),
-                state.currentColor());
+                state.currentColor(),
+                state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D));
+    }
+
+    /**
+     * Whether this draw samples a texture at all.
+     *
+     * <p><b>Not the same thing as having one bound.</b> {@code GlStateManager.disableTexture2D()} leaves the binding
+     * untouched and makes the fragment stage ignore it - the texture environment's output becomes plain white, and
+     * the colour comes entirely from the vertices. Vanilla relies on that for every solid overlay: the menu's
+     * darkening gradients, tooltip backgrounds, the {@code drawGradientRect} panels. A backend that samples anyway
+     * reads whatever texel lands at the (absent, so zero) texture coordinate of the previously bound image, which
+     * tints those overlays with a colour and an alpha nobody asked for. Measured as the main menu never getting
+     * darker than a flat pale grey no matter what its gradient said.</p>
+     */
+    public boolean samplesTexture() {
+        return texture2d;
     }
 
     /**

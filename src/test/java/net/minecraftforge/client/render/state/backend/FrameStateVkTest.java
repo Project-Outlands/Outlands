@@ -38,7 +38,13 @@ class FrameStateVkTest {
     @Test
     void capabilitiesAreTrackedAndNotJustRecorded() {
         FrameStateVk state = new FrameStateVk();
-        assertEquals(13, Capability.values().length);
+        // 13 toggles that vanilla drives through BooleanState, plus the eight GL_LIGHTn sources that
+        // RenderHelper.enableGUIStandardItemLighting turns on when an item icon is drawn. The count is asserted so
+        // that adding a capability is a deliberate act rather than a side effect - and so that removing one, which
+        // would make some draw silently unrepresented, fails here.
+        assertEquals(21, Capability.values().length);
+        assertEquals(Capability.LIGHT_0, Capability.ofGlEnum(16384));
+        assertEquals(Capability.LIGHT_7, Capability.ofGlEnum(16391));
 
         state.capability(Capability.DEPTH_TEST, true);
         state.capability(Capability.DEPTH_TEST, false);
