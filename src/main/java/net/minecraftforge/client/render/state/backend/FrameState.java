@@ -47,6 +47,24 @@ public interface FrameState {
     /** The modelview matrix currently in effect. */
     org.joml.Matrix4fc modelView();
 
+    /**
+     * Copies the matrix currently in effect for a GL matrix target into {@code out}, column-major, 16 floats.
+     *
+     * <p><b>Why this is a matrix method and not a state query.</b> {@code glGetFloatv} is the only state readback
+     * vanilla performs at all - four call sites, {@code RenderChunk.initModelviewMatrix}, {@code ActiveRenderInfo},
+     * {@code ClippingHelperImpl} and {@code TileEntityEndPortalRenderer} - and every one of them asks for
+     * {@code GL_MODELVIEW_MATRIX} or {@code GL_PROJECTION_MATRIX}. So the readback is a matrix readback: the stack
+     * this interface already keeps is the whole answer, with no GL query and no invented value. Anything else is a
+     * gap this method names rather than a number this method guesses.</p>
+     *
+     * <p>Written from position 0 of {@code out} without moving its position, because {@code glGetFloatv} writes where
+     * the buffer points rather than advancing it, and vanilla reuses these buffers across draws.</p>
+     *
+     * @param glMatrixTarget {@code GL_MODELVIEW_MATRIX} (2982), {@code GL_PROJECTION_MATRIX} (2983) or
+     *                       {@code GL_TEXTURE_MATRIX} (2984)
+     */
+    void readMatrix(int glMatrixTarget, java.nio.FloatBuffer out);
+
     void depthFunc(int glComparison);
 
     void alphaFunc(int glComparison, float reference);
@@ -70,6 +88,41 @@ public interface FrameState {
      * quietly testing something else.</p>
      */
     int alphaComparison();
+
+    // region fog
+    //
+    // GL's fog is a fragment-stage term computed from the eye-space distance and five pieces of state. The five setters
+    // below are that state, kept here because vanilla sets them through GlStateManager's named setters - setFog,
+    // setFogDensity, setFogStart, setFogEnd, and the raw glFog/glFogi pair EntityRenderer and the default profile call.
+    //
+    // They are recorded but not yet read: nothing in this backend computes the term, so the world currently renders
+    // with distances unmodulated. That is a visible difference (the chunk edge is sharp where vanilla fades it into
+    // the sky) and it is listed as such rather than being allowed to throw, because it changes what the picture looks
+    // like and not whether the frame renders. The term is one `mix` in the fragment stage once these values travel
+    // with the draw; the reason they are not already there is that it means growing the push-constant block, which is
+    // a separate, checkable change.
+
+    /** {@code glFogi(GL_FOG_MODE)}: {@code GL_EXP} (2048), {@code GL_EXP2} (2049) or {@code GL_LINEAR} (9729). */
+    void fogMode(int glMode);
+
+    /**
+     * {@code glFogf}: one scalar fog value, named by {@code glPname}.
+     *
+     * <p>{@code GL_FOG_DENSITY} (2914), {@code GL_FOG_START} (2915) and {@code GL_FOG_END} (2916). The pname is carried
+     * because that is the parameter vanilla's own setters pass, and because it keeps the case analysis in one place
+     * instead of spread over three methods that differ only in which field they write.</p>
+     */
+    void fog(int glPname, float value);
+
+    /**
+     * {@code glFog}: the same values from a buffer, which is how {@code GL_FOG_COLOR} (2918) is set.
+     *
+     * <p>Vanilla fills a four-float buffer with the sky colour and hands it over once per frame, so this is the call
+     * that decides what the world fades into.</p>
+     */
+    void fog(int glPname, java.nio.FloatBuffer param);
+
+    // endregion
 
     void shadeModel(int glModel);
 

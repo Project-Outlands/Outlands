@@ -149,6 +149,7 @@ public final class VulkanBackend implements RenderBackend {
                     descriptors, textureCache);
             stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat(),
                     descriptors, textureCache);
+            stream.setTerrain(terrainLayer);
             swapchain.setStream(stream);
             swapchain.setTextures(textureCache);
             swapchain.setFrameRecording(frameRecording);

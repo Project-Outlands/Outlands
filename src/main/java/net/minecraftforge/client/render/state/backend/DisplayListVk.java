@@ -1,5 +1,7 @@
 package net.minecraftforge.client.render.state.backend;
 
+import net.minecraftforge.client.render.vertex.DrawState;
+import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.VertexLayout;
 
 import java.nio.ByteBuffer;
@@ -87,14 +89,25 @@ final class DisplayListVk implements DisplayListBackend {
     public void call(int id) {
         List<Draw> draws = lists.get(id);
         if (draws == null) {
-            throw new IllegalStateException("callList on list " + id + " which was never generated");
+            // GL's own rule: calling a name that is not a display list does nothing. Vanilla depends on it - the tail
+            // of RenderGlobal.renderSky calls this.glSkyList2 unconditionally, but that field is only assigned on the
+            // path that compiles lists, so with VBOs enabled it is still the -1 it was declared with. Throwing here
+            // turned a harmless call the game has always made into a crash on the frame the sky first rendered.
+            return;
         }
-        int vertices = draws.stream().mapToInt(Draw::vertexCount).sum();
-        throw new UnsupportedOperationException(
-                "cannot replay display list " + id + " on the Vulkan backend yet: it holds " + draws.size()
-                        + " draws / " + vertices + " vertices, and replaying means drawing, which needs a frame"
-                        + " recording context. Recording itself worked - that is why the list has contents."
-                        + " Needed: a recording context on the render graph node.");
+        // Replaying a list is recording its draws again: GL bakes the vertex data into the list and takes matrix and
+        // enable state at call time, which is exactly what DrawState.current() is here.
+        for (Draw draw : draws) {
+            if (FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), ByteBuffer.wrap(draw.vertices()),
+                    DrawState.current())) {
+                continue;
+            }
+            throw new UnsupportedOperationException(
+                    "cannot replay display list " + id + " on the Vulkan backend yet: it holds " + draws.size()
+                            + " draws, and replaying means drawing, which needs a frame that is collecting. Recording"
+                            + " itself worked - that is why the list has contents. Needed: the backend to have begun"
+                            + " collecting the frame, which happens once the device exists.");
+        }
     }
 
     @Override

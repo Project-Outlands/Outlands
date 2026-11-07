@@ -27,7 +27,7 @@ import java.util.List;
 public final class FrameDraws {
 
     /** One thing the frame asked a backend to do, in the order it asked. */
-    public sealed interface Operation permits Draw, FramebufferCopy {}
+    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer {}
 
     /**
      * One recorded draw: its vertices plus the state it was issued with.
@@ -52,6 +52,24 @@ public final class FrameDraws {
      */
     public record FramebufferCopy(int texture, int level, int xOffset, int yOffset, int x, int y, int width,
                                   int height) implements Operation {}
+
+    /**
+     * One render layer of the captured terrain, at its place in the sequence.
+     *
+     * <p>The chunks themselves are not in here: they are the backend's packed mesh, which outlives the frame. What the
+     * frame carries is the decision to draw one layer and the camera it was asked for with - the matrix is the game's
+     * at that moment, and the layer's chunks are relative to their origins.</p>
+     *
+     * @param layer the {@code BlockRenderLayer} ordinal
+     * @param mvp   projection times modelview, column-major, GL convention
+     */
+    public record TerrainLayer(int layer, float[] mvp) implements Operation {
+        public TerrainLayer {
+            if (mvp.length != 16) {
+                throw new IllegalArgumentException("an mvp matrix has 16 values, got " + mvp.length);
+            }
+        }
+    }
 
     private static final List<Operation> DRAWS = new ArrayList<>();
     private static volatile boolean collecting;
@@ -117,6 +135,21 @@ public final class FrameDraws {
         }
         synchronized (DRAWS) {
             DRAWS.add(new FramebufferCopy(texture, level, xOffset, yOffset, x, y, width, height));
+        }
+        return true;
+    }
+
+    /**
+     * Adds one terrain layer draw at this point in the sequence.
+     *
+     * @return {@code false} when nothing is collecting, which means there is no frame to draw inside
+     */
+    public static boolean recordTerrainLayer(int layer, float[] mvp) {
+        if (!collecting) {
+            return false;
+        }
+        synchronized (DRAWS) {
+            DRAWS.add(new TerrainLayer(layer, mvp));
         }
         return true;
     }

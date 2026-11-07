@@ -58,11 +58,13 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     /** Where the current buffers came from: null while the placeholder is showing. */
     private String source;
 
-    /** Draws per frame, so the cost of the packing choice is observable rather than assumed. */
+    /** Draws the last frame issued, so the cost of the packing choice is observable rather than assumed. */
     private int drawCount;
-    private final Matrix4f projection = new Matrix4f();
-    private final Matrix4f view = new Matrix4f();
-    private final Matrix4f modelViewProjection = new Matrix4f();
+    /** Scratch for the per-chunk matrix: the camera it is multiplied into arrives per layer, per frame. */
+    private final Matrix4f chunkMatrix = new Matrix4f();
+    /** Scratch for the camera the frame hands over, so a layer draw allocates nothing. */
+    private final java.nio.FloatBuffer cameraScratch = java.nio.ByteBuffer.allocateDirect(64)
+            .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
 
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
                                VulkanTextures textures, VulkanBuffer vertices, VulkanBuffer indices,
@@ -176,62 +178,96 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
     @Override
     public void run(RenderGraphContext context) {
-        if (!(context.nativeContext() instanceof VkCommandBuffer commandBuffer)) {
+        // This node draws nothing, on purpose.
+        //
+        // Terrain is not a phase that runs at a fixed point in the frame: vanilla issues each render layer between the
+        // sky and the entities, with the camera matrix of that moment, and the translucent layer sorted back to front.
+        // A node that runs before every recorded draw puts terrain underneath the sky, and one that runs after puts it
+        // on top of the entities. So the frame's own sequence is where the layers belong, and this node is what that
+        // sequence calls - see recordLayer. The phase stays registered because it is the answer to "who draws terrain",
+        // and because a graph takeover will eventually move the draw here once phases own passes instead of draws.
+        drawCount = 0;
+    }
+
+    /**
+     * Records one render layer's chunks, at the point in the frame where the game asked for that layer.
+     *
+     * @param commandBuffer the frame's command buffer, with a rendering instance already open
+     * @param cameraMatrix  the projection times modelview the game had in effect, column-major, GL convention
+     * @param layer         the {@code BlockRenderLayer} ordinal whose chunks to draw
+     */
+    void recordLayer(VkCommandBuffer commandBuffer, float[] cameraMatrix, int layer) {
+        if (vertices == null || indices == null || slices.isEmpty()) {
             return;
         }
-        if (slices.isEmpty()) {
-            // Nothing captured yet: draw nothing rather than scaffolding. The node stays registered because the graph
-            // requires the phase to exist, but an empty frame from it is the correct output.
-            drawCount = 0;
-            return;
-        }
-
-        // A fixed camera looking at the block from slightly above and to the side, so three faces are visible and
-        // the depth test has something to order.
-        projection.identity()
-                .perspective((float) Math.toRadians(60.0), (float) context.width() / context.height(), 0.1f, 200.0f);
-        view.identity()
-                .lookAt(6.0f, 5.0f, 6.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f);
-        projection.mul(view, modelViewProjection);
-
+        int drawn = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // The full push constant block, not just the matrix: the block now also carries the alpha test's two
-            // numbers, and pushing a shorter range leaves them undefined for the fragment stage. Undefined there
-            // means an arbitrary threshold, which discards arbitrary fragments.
-            ByteBuffer matrix = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
-            matrix.order(ByteOrder.nativeOrder());
-            modelViewProjection.get(matrix);
-            matrix.putFloat(16 * Float.BYTES, 0.0F);   // alpha reference, unused when the test is off
-            matrix.putFloat(16 * Float.BYTES + 4, 0.0F); // alpha test off: the terrain draws every fragment
-            matrix.putFloat(16 * Float.BYTES + 8, 0.0F); // no u-flip: the block atlas is uploaded, not copied
-            // Same clip-space Y flip the streamed draws apply: this node's matrix is GL-style too, and Vulkan's NDC
-            // Y points the other way. Column-major, so row 1 is at 1, 5, 9 and 13.
-            java.nio.FloatBuffer flipped = matrix.asFloatBuffer();
-            for (int index = 1; index < 16; index += 4) {
-                flipped.put(index, -flipped.get(index));
-            }
-
-            vkCmdPushConstants(commandBuffer, pipeline.layout(),
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, matrix);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-
-            // The atlas set, resolved before the rendering instance opened. Resolving it here would record a copy
+            // The atlas set, resolved by the frame before this instance opened: resolving it here would record a copy
             // inside a render pass, which Vulkan does not allow - the validation layers named that one exactly.
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
                     stack.longs(resolvedTexture), null);
-
-            // Bound once for the whole terrain: this is what packing buys.
-            LongBuffer buffer = stack.longs(vertices.handle());
-            vkCmdBindVertexBuffers(commandBuffer, 0, buffer, stack.mallocLong(1).put(0, 0L));
+            // Bound once for the whole layer: this is what packing buys.
+            vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertices.handle()), stack.mallocLong(1).put(0, 0L));
             vkCmdBindIndexBuffer(commandBuffer, indices.handle(), 0L, indexType);
 
-            // One draw per chunk. The draw count is unchanged by packing - reducing it needs indirect draws, which
-            // should wait until there is real terrain to measure.
+            cameraScratch.clear();
+            cameraScratch.put(cameraMatrix);
+            cameraScratch.position(0);
+
+            ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
+            constants.order(java.nio.ByteOrder.nativeOrder());
+
+            // Vanilla's cutout layers discard fragments below an alpha threshold and the others do not; that is the
+            // only difference between the two pipeline states here, and it goes in the push constant block.
+            boolean alphaTest = layer == net.minecraft.util.BlockRenderLayer.CUTOUT_MIPPED.ordinal()
+                    || layer == net.minecraft.util.BlockRenderLayer.CUTOUT.ordinal();
+
+            boolean firstLayerReported = false;
             for (TerrainMeshPacker.Slice slice : slices) {
+                if (slice.layer() != layer) {
+                    continue;
+                }
+                if (!firstLayerReported && Boolean.getBoolean("outlands.render.debug")) {
+                    firstLayerReported = true;
+                    org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                            "terrain layer {}: {} of {} slices, first origin {},{} {}", layer, drawn, slices.size(),
+                            slice.originX(), slice.originY(), slice.originZ());
+                }
+                // The chunk's vertices are relative to its origin, because vanilla built them that way and put the
+                // translation on the matrix - the same thing it did per chunk in preRenderChunk.
+                chunkMatrix.set(cameraScratch).translate(slice.originX(), slice.originY(), slice.originZ());
+                writeConstants(constants, chunkMatrix, alphaTest);
+                vkCmdPushConstants(commandBuffer, pipeline.layout(),
+                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
                 vkCmdDrawIndexed(commandBuffer, slice.indexCount(), 1, slice.firstIndex(), slice.vertexOffset(), 0);
+                drawn++;
             }
-            drawCount = slices.size();
         }
+        drawCount = drawn;
+    }
+
+    /**
+     * Fills the push constant block from a chunk's matrix.
+     *
+     * <p>Same block as the streamed draws, including the clip-space Y flip: GL's projection has +Y up and Vulkan's NDC
+     * has it down, and the flip is applied to the matrix rather than by negating the viewport so both paths agree.</p>
+     */
+    private static void writeConstants(ByteBuffer constants, Matrix4f matrix, boolean alphaTest) {
+        constants.clear();
+        matrix.get(constants);
+        // Column-major, so row 1 is at 1, 5, 9 and 13.
+        java.nio.FloatBuffer floats = constants.asFloatBuffer();
+        for (int index = 1; index < 16; index += 4) {
+            floats.put(index, -floats.get(index));
+        }
+        floats.put(16, 0.1F);                          // alpha reference: vanilla's cutout threshold
+        floats.put(17, alphaTest ? 1.0F : 0.0F);       // the test itself
+        floats.put(18, 0.0F);                          // no u-flip: the atlas is uploaded, not copied
+        // Back to the start: Matrix4f.get left the ByteBuffer's position at its end, and every vkCmd* takes its
+        // address as base + position. Leaving it there submits the block from 64 bytes past the matrix, which reads
+        // stack garbage into the shader's matrix - measured as terrain drawn in the wrong place rather than an error.
+        constants.position(0);
     }
 
     /**
@@ -245,17 +281,18 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         if (captured.isEmpty()) {
             return;
         }
-        java.util.List<TerrainMeshBuilder.Mesh> meshes = new java.util.ArrayList<>(captured.size());
+        java.util.List<TerrainMeshPacker.Entry> entries = new java.util.ArrayList<>(captured.size());
         int quads = 0;
         for (ChunkMeshCapture.Captured chunk : captured) {
             // The capture is vanilla's own BLOCK bytes; the builder only splits quads into triangles and adds
             // indices, so this is where the two halves meet.
             TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(chunk.vertices(), chunk.quadCount());
-            meshes.add(mesh);
+            entries.add(new TerrainMeshPacker.Entry(mesh, chunk.chunkX(), chunk.chunkY(), chunk.chunkZ(),
+                    chunk.layer().ordinal()));
             quads += chunk.quadCount();
         }
 
-        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(meshes);
+        TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(entries);
         VulkanBuffer nextVertices = null;
         VulkanBuffer nextIndices = null;
         if (pack.vertices().length > 0) {

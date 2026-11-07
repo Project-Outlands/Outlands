@@ -231,7 +231,7 @@
          }
      }
  
-@@ -584,43 +584,22 @@
+@@ -584,43 +584,23 @@
  
      public static int glGenBuffers()
      {
@@ -249,6 +249,7 @@
 -        {
 -            GL15.glBindBuffer(target, buffer);
 -        }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
 +        GL15.glBindBuffer(target, buffer);
      }
  
@@ -279,7 +280,22 @@
      }
  
      public static boolean useVbo()
-@@ -854,6 +833,12 @@
+@@ -835,5 +815,6 @@
+     public static void setClientActiveTexture(int texture)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
+         if (arbMultitexture)
+         {
+             ARBMultitexture.glClientActiveTextureARB(texture);
+@@ -847,5 +828,6 @@
+     public static void setLightmapTextureCoords(int target, float x, float y)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.skipLightmapTextureCoords()) { return; }
+         if (arbMultitexture)
+         {
+             ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
+
+@@ -854,6 +836,12 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -292,7 +308,12 @@
      }
  
      public static void glBlendFunc(int sFactorRGB, int dFactorRGB, int sfactorAlpha, int dfactorAlpha)
-@@ -916,59 +901,28 @@
+@@ -860,3 +848,4 @@
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.blendFuncSeparate(sFactorRGB, dFactorRGB, sfactorAlpha, dfactorAlpha)) { return; }
+         if (openGL14)
+         {
+@@ -916,59 +905,28 @@
  
      public static void openFile(File fileIn)
      {

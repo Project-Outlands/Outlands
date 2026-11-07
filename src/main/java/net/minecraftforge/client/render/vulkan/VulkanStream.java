@@ -74,6 +74,15 @@ final class VulkanStream implements AutoCloseable {
     private final VulkanDescriptors descriptors;
     private final VulkanTextures textures;
     /**
+     * Where the captured terrain lives, or {@code null} before the backend has built it.
+     *
+     * <p>A terrain layer draw arrives as part of the frame's own sequence - vanilla issues each layer between the sky
+     * and the entities - so the replay hands those operations to this object rather than drawing them itself. It owns
+     * the packed buffers, the pipeline and the atlas binding; what the frame carries is only the camera and the layer.
+     * </p>
+     */
+    private VulkanTerrainLayer terrain;
+    /**
      * Descriptor sets resolved for the frame being recorded, by texture handle.
      *
      * <p>Filled by {@link #prepareTextures} <i>before</i> the rendering instance opens, because resolving a texture
@@ -159,7 +168,7 @@ final class VulkanStream implements AutoCloseable {
         drawsThisFrame = draws.size();
         // This slot's fence has been waited on, so whatever it used last time is finished.
         releaseSlot(slot);
-        if (draws.isEmpty()) {
+        if (ops.isEmpty()) {
             return;
         }
 
@@ -202,21 +211,30 @@ final class VulkanStream implements AutoCloseable {
                     : textures.whiteDescriptorSet();
         }
 
-        pending[slot] = VulkanBuffer.create(device, context, all);
-        if (!allIndices.isEmpty()) {
-            ByteBuffer indexBytes = ByteBuffer.allocate(allIndices.size() * Integer.BYTES)
-                    .order(java.nio.ByteOrder.nativeOrder());
-            for (int index : allIndices) {
-                indexBytes.putInt(index);
+        // A frame can have terrain and no streamed draws, and a zero-length buffer is not creatable - asking for one
+        // takes the driver down rather than returning an error.
+        if (!draws.isEmpty()) {
+            pending[slot] = VulkanBuffer.create(device, context, all);
+            if (!allIndices.isEmpty()) {
+                ByteBuffer indexBytes = ByteBuffer.allocate(allIndices.size() * Integer.BYTES)
+                        .order(java.nio.ByteOrder.nativeOrder());
+                for (int index : allIndices) {
+                    indexBytes.putInt(index);
+                }
+                pendingIndices[slot] = VulkanBuffer.create(device, context, indexBytes.array());
             }
-            pendingIndices[slot] = VulkanBuffer.create(device, context, indexBytes.array());
+        } else {
+            pending[slot] = null;
+            pendingIndices[slot] = null;
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // longs(), not mallocLong().put(index, value).flip(): put(int, long) does not advance the position,
             // so flip() leaves the limit at zero and bindingCount becomes zero - which the validation layers caught
             // as "no buffer bound" on every draw rather than as an obvious error.
-            vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
+            if (pending[slot] != null) {
+                vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
+            }
 
             ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
             long boundSet = 0L;
@@ -243,6 +261,18 @@ final class VulkanStream implements AutoCloseable {
                     // assuming the hardware state is still what it was before the copy.
                     appliedViewport[0] = Integer.MIN_VALUE;
                     appliedScissor[0] = Integer.MIN_VALUE;
+                    continue;
+                }
+                if (op instanceof FrameDraws.TerrainLayer terrainOp) {
+                    if (terrain != null) {
+                        terrain.recordLayer(commandBuffer, terrainOp.mvp(), terrainOp.layer());
+                    }
+                    // The terrain draw binds its own vertex buffer and descriptor set, so neither can be assumed by
+                    // the next streamed draw: rebind the stream's buffer and forget the bound set.
+                    if (pending[slot] != null) {
+                        vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
+                    }
+                    boundSet = 0L;
                     continue;
                 }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
@@ -427,6 +457,11 @@ final class VulkanStream implements AutoCloseable {
             pendingIndices[slot].close();
             pendingIndices[slot] = null;
         }
+    }
+
+    /** Wired by the backend once the terrain layer exists. */
+    void setTerrain(VulkanTerrainLayer terrain) {
+        this.terrain = terrain;
     }
 
     @Override

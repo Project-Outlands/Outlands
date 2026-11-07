@@ -7,20 +7,21 @@ import net.minecraft.client.renderer.vertex.VertexFormat;
 /**
  * The buffer on a Vulkan backend.
  *
- * <p><b>Why this is not implemented yet, and why that is a throw rather than a no-op.</b> A draw has to be
- * recorded into the command buffer of the frame that is currently being recorded, and that concept does not exist
- * yet: {@code RenderGraphContext} carries a size and an untyped native handle, and no node has begun recording when
- * vanilla's {@code Tessellator.draw()} runs. Implementing {@link #draw} against a guessed shape would mean
- * inventing the recording context here, in the wrong class, from a caller that cannot supply it.</p>
+ * <p><b>What a draw of a stored buffer is here.</b> Nothing special: the bytes are already the shape vanilla wrote
+ * them in, so a draw joins the frame's list like any client-memory draw does - the same {@link FrameDraws.Draw}, the
+ * same layout translation, the same replay inside the frame. That is deliberate rather than convenient. GL's only
+ * difference between the two paths is where the bytes live at draw time (a buffer object versus a heap array), and
+ * this backend copies both into the frame's own storage, so a second mechanism would buy nothing and cost another
+ * path to keep correct.</p>
  *
- * <p><b>Why the throw names the missing piece.</b> The alternative - drawing nothing - is the failure mode this
- * project keeps rejecting: it looks like a rendering bug rather than like a missing feature. A message that says
- * "there is no frame recording context" is a work item; a black rectangle is an investigation.</p>
+ * <p><b>Why it is worth saying that.</b> The bytes are copied per draw per frame, which for a world of a thousand
+ * chunks is a real cost - one the terrain layer avoids by keeping meshes resident and drawing them from the capture
+ * queue ({@code VulkanTerrainLayer}). So this path is what makes every VBO vanilla owns work (the sky, the stars, the
+ * cloud plane, one-off vertex buffers), and the chunk path is expected to go through the layer instead. Recording it
+ * here as "the general answer" would hide that difference.</p>
  *
- * <p><b>What is already decided.</b> {@link #upload} can be implemented the moment a device is reachable: it copies
- * bytes and needs nothing else. {@link #draw} is the only part that needs the recorder, and it needs exactly two
- * things from it - the command buffer, and the pipeline for ({@code VertexFormat}, {@link PrimitiveShape},
- * current state). Both are the render graph's job, not this class's.</p>
+ * <p><b>What is owed to a caller that draws before the backend is up.</b> A draw outside a frame gets the same answer
+ * as the client-memory path: a throw that names the missing recorder, rather than nothing on screen.</p>
  */
 final class VertexBufferVk implements VertexBufferBackend {
 
@@ -54,11 +55,28 @@ final class VertexBufferVk implements VertexBufferBackend {
 
     @Override
     public void draw(int mode, int first, int count) {
+        if (count == 0) {
+            // GL issues nothing for an empty range, and a chunk layer that compiled to nothing reaches here.
+            return;
+        }
+        VertexLayout layout = VertexLayout.of(format);
+        int from = first * layout.stride();
+        int to = from + count * layout.stride();
+        if (to > vertices.length) {
+            throw new IllegalArgumentException("a draw of " + count + " vertices from " + first + " needs bytes up to "
+                    + to + ", the buffer holds " + vertices.length);
+        }
+        // Byte order is not settled here: VertexConverter reads the copy as native order, the same way it reads a
+        // client-memory draw. Wrapping is therefore enough, and a slice keeps the vertex range the game asked for.
+        ByteBuffer view = ByteBuffer.wrap(vertices, from, to - from).slice();
+        if (FrameDraws.record(layout, mode, count, view, DrawState.current())) {
+            return;
+        }
         throw new UnsupportedOperationException(
-                "cannot draw on the Vulkan backend yet: there is no frame recording context, so there is no command"
-                        + " buffer to record into and no pipeline for this vertex layout. Needed: a recording"
-                        + " context on the render graph node, and a pipeline cache keyed by (VertexFormat,"
-                        + " PrimitiveShape, current state). Mode " + mode + ", " + count + " vertices.");
+                "cannot draw a vertex buffer on the Vulkan backend yet: there is no frame recording context, so there"
+                        + " is no frame to replay this draw inside. Needed: the backend to have begun collecting the"
+                        + " frame, which happens once the device exists. Layout stride " + layout.stride() + ", mode "
+                        + mode + ", " + count + " vertices.");
     }
 
     @Override

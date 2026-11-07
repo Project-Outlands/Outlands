@@ -56,10 +56,27 @@ final class FrameStateVk implements FrameState {
     private int clearMask;
 
     private int matrixMode = 5888;          // GL_MODELVIEW
+    private static final int MODELVIEW_MATRIX = 2982;      // GL_MODELVIEW_MATRIX, a readback target
+    private static final int PROJECTION_MATRIX = 2983;     // GL_PROJECTION_MATRIX, a readback target
+    private static final int TEXTURE_MATRIX = 2984;        // GL_TEXTURE_MATRIX, a readback target
+    private static final int MODELVIEW = 5888;             // the matrix mode each target reads
+    private static final int PROJECTION = 5889;
+    private static final int TEXTURE = 5890;
     /** One stack per GL matrix mode constant. */
     private final Map<Integer, Deque<Matrix4f>> matrixStacks = new HashMap<>();
     private final Map<Integer, Matrix4f> currentMatrix = new HashMap<>();
     private int attributeDepth;
+
+    /** Fog state, at the defaults GL documents: GL_EXP at density 1, no colour, the linear range 0..1. */
+    private int fogMode = 2048;
+    private float[] fogColor = {0.0F, 0.0F, 0.0F, 0.0F};
+    private float fogDensity = 1.0F;
+    private float fogStart = 0.0F;
+    private float fogEnd = 1.0F;
+    private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
+    private static final int FOG_START = 2915;     // GL_FOG_START
+    private static final int FOG_END = 2916;       // GL_FOG_END
+    private static final int FOG_COLOR = 2918;     // GL_FOG_COLOR
 
     @Override
     public void capability(Capability capability, boolean enable) {
@@ -94,6 +111,41 @@ final class FrameStateVk implements FrameState {
     @Override
     public int alphaComparison() {
         return alphaComparison;
+    }
+
+    @Override
+    public void fogMode(int glMode) {
+        fogMode = switch (glMode) {
+            case 2048, 2049, 9729 -> glMode;   // GL_EXP, GL_EXP2, GL_LINEAR
+            default -> throw unsupported("fog mode", glMode);
+        };
+    }
+
+    @Override
+    public void fog(int glPname, float value) {
+        switch (glPname) {
+            case FOG_DENSITY -> fogDensity = value;
+            case FOG_START -> fogStart = value;
+            case FOG_END -> fogEnd = value;
+            default -> throw FrameStates.unimplemented("fog (glFogf " + glPname + ")",
+                    "GL_FOG_DENSITY, GL_FOG_START or GL_FOG_END, the scalar fog values vanilla sets");
+        }
+    }
+
+    @Override
+    public void fog(int glPname, FloatBuffer param) {
+        if (glPname != FOG_COLOR) {
+            throw FrameStates.unimplemented("fog (glFog " + glPname + ")",
+                    "GL_FOG_COLOR, the only buffer-valued fog setting vanilla uses");
+        }
+        FloatBuffer view = param.duplicate();
+        view.rewind();
+        if (view.remaining() < 4) {
+            throw new IllegalArgumentException("a fog colour needs 4 floats, the buffer has " + view.remaining());
+        }
+        fogColor = new float[] {view.get(), view.get(), view.get(), view.get()};
+        // The term itself is not computed yet - see the note on these methods in FrameState.
+        FrameStates.reportSkippedOnce("fog", "world geometry is not faded towards the sky colour with distance");
     }
 
     @Override
@@ -352,6 +404,37 @@ final class FrameStateVk implements FrameState {
         // into a float matrix too. Matching that here keeps the result identical to the GL path rather than
         // accidentally more precise.
         current().scale((float) x, (float) y, (float) z);
+    }
+
+    @Override
+    public void readMatrix(int glMatrixTarget, FloatBuffer out) {
+        Matrix4fc source = switch (glMatrixTarget) {
+            case MODELVIEW_MATRIX -> matrix(MODELVIEW);
+            case PROJECTION_MATRIX -> matrix(PROJECTION);
+            case TEXTURE_MATRIX -> matrix(TEXTURE);
+            default -> throw FrameStates.unimplemented("state readback (getFloat " + glMatrixTarget + ")",
+                    "a matrix target: GL_MODELVIEW_MATRIX, GL_PROJECTION_MATRIX or GL_TEXTURE_MATRIX, which is"
+                            + " everything vanilla reads back");
+        };
+        // Read through get(column, row) rather than Matrix4fc.get(FloatBuffer) for the reason spelled out on
+        // multiply(): that overload's Unsafe path trusts the buffer's native address field and dereferences it even
+        // for a heap buffer, so it would kill the process on exactly the buffers vanilla and mods build with wrap().
+        float[] values = new float[16];
+        for (int i = 0; i < 16; i++) {
+            values[i] = source.get(i >> 2, i & 3);   // column-major, the layout glGetFloatv writes
+        }
+        FloatBuffer view = out.duplicate();
+        int at = view.position();
+        if (view.limit() - at < 16) {
+            throw new IllegalArgumentException("a 4x4 matrix needs 16 floats from position " + at
+                    + ", the buffer has " + (view.limit() - at));
+        }
+        // Written at the caller's position without moving it, which is glGetFloatv's contract: it fills the storage
+        // the caller points at. Rewinding instead would write over data a caller deliberately offset past, and
+        // advancing would consume a buffer vanilla reuses every frame.
+        for (int i = 0; i < 16; i++) {
+            view.put(at + i, values[i]);
+        }
     }
 
     @Override
