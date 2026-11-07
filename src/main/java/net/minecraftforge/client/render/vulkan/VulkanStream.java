@@ -263,6 +263,25 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             int sinceCopy = 0;
+            if (Boolean.getBoolean("outlands.render.debug")) {
+                int perspective = 0;
+                int copies = 0;
+                int copyTarget = -1;
+                for (FrameDraws.Operation op : ops) {
+                    if (op instanceof FrameDraws.Draw d && d.state().mvp()[15] == 0.0F) {
+                        perspective++;
+                    } else if (op instanceof FrameDraws.FramebufferCopy c) {
+                        copies++;
+                        copyTarget = c.texture();
+                    }
+                }
+                // One line per frame: what the frame contains, and which texture the copy feeds. The main menu's
+                // background is a dynamic texture whose id changes when the game re-creates it, so seeing the id here
+                // and the one the draws resolve is how a stale binding is told from a wrong copy rectangle.
+                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                        "frame: {} draws, {} perspective, {} copies -> texture {} = resolved set {}",
+                        draws.size(), perspective, copies, copyTarget, resolved.get(copyTarget));
+            }
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it

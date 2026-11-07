@@ -176,6 +176,9 @@ final class VulkanTextures implements AutoCloseable {
             entry.image().close();
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long set = descriptors.allocate(created.view(), entry.sampler());
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Texture {} resized to {}x{} (a new image means every draw must resolve it again)", textureId,
+                    image.width(), image.height());
             entry = new Entry(created, entry.sampler(), set, -1L);
             entries.put(textureId, entry);
         }
@@ -349,9 +352,18 @@ final class VulkanTextures implements AutoCloseable {
                     copy.x(), copy.y(), copy.width(), copy.height(), copy.xOffset(), copy.yOffset(), copy.level(),
                     copy.texture());
         }
+        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() % 30 == 1) {
+            // The copy and the draws that sample it must name the same image. The background is a dynamic texture, and
+            // a new GuiMainMenu - which is what quitting a world builds - makes the game re-create it, so the id can
+            // outlive the image it used to mean. Comparing these two lines is how that is told apart from a copy that
+            // grabbed the wrong region.
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Copy target: texture {} -> view {} ({}x{}) uploaded version {}", copy.texture(),
+                    entry.image().view(), entry.image().width(), entry.image().height(), entry.uploadedVersion());
+        }
         entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
 
-        if (Boolean.getBoolean("outlands.render.debug") && COPIED.get() % 20 == 1) {
+        if (Boolean.getBoolean("outlands.render.debug")) {
             // Borrowed, not owned: the same buffer is already in pendingStaging and is closed there. Adding it to the
             // readback list as an owner freed it twice, which the validation layers reported as destroying an
             // invalid buffer handle.
