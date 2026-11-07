@@ -8,6 +8,8 @@ import net.minecraftforge.client.render.vertex.DrawState;
 import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.PrimitiveShape;
 import net.minecraftforge.client.render.vertex.VertexConverter;
+import net.minecraftforge.client.render.vertex.VertexLayout;
+import net.minecraft.client.renderer.vertex.VertexFormatElement;
 
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -120,9 +122,21 @@ final class VulkanStream implements AutoCloseable {
         }
     }
 
+    /** Texture handles already reported, so the resolve log says one line per texture rather than one per frame. */
+    private final java.util.Set<Integer> reportedTextures = new java.util.HashSet<>();
+
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
         if (!resolved.containsKey(texture)) {
-            resolved.put(texture, textures.descriptorSet(texture, commandBuffer, slot));
+            long set = textures.descriptorSet(texture, commandBuffer, slot);
+            resolved.put(texture, set);
+            if (reportedTextures.add(texture)) {
+                // Which descriptor set a texture got, and whether it is the blank stand-in. This is the fact that
+                // separates "the draw sampled the wrong image" from "the draw sampled its own image", and neither
+                // is visible from outside. One line per texture, not per frame.
+                org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                        "Resolved texture {} -> set {} ({})", texture, set,
+                        set == textures.whiteDescriptorSet() ? "WHITE STAND-IN" : "its own image");
+            }
         }
     }
 
@@ -252,38 +266,62 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /**
-     * Says, once, how the frame's draws are distributed over projections and textures.
+     * Dumps the translucent full-screen quads in a frame, once.
      *
-     * <p>Answered as a histogram because the question it exists for - "is the main menu's panorama in the draw list"
-     * - cannot be read off a total: the panorama is 64 x 6 = 384 draws of one 24-byte vertex format, and a count of
-     * similar-looking quads proves nothing. The matrix signature does. {@code gluPerspective} puts {@code -1} in
-     * {@code m[11]} and a cotangent-derived value in {@code m[5]}; {@code glOrtho} leaves {@code m[15] == 1} and
-     * {@code m[11] == sign(2/(top-bottom))}. A draw that should be perspective and reports orthogonal is not the
-     * panorama, whatever else it is.</p>
+     * <p>"A grey film covers the buttons and the background" is a translucent quadrilateral painted over everything,
+     * and the only way to name it is to read the colour the vertices actually carry - the global
+     * {@code GlStateManager.color} is white for most GUI draws, so the interesting value is in the vertex data. This
+     * prints each quad-sized draw's first vertex colour, its texture and its blend factors, which is enough to pick
+     * it out of a few hundred without another round of guessing.</p>
      */
     private void logProjectionSummary(List<FrameDraws.Draw> draws) {
-        // Where each texture's draws sit in the frame's order. The question this answers cannot be answered by a
-        // count: whether the panorama is the background (drawn before the GUI) or lands on top of it depends only on
-        // position in this list, and "the menu is a flat grey" reads the same either way.
-        Map<Integer, int[]> byTexture = new java.util.TreeMap<>();
-        for (int i = 0; i < draws.size(); i++) {
-            int texture = draws.get(i).state().texture();
-            int[] range = byTexture.get(texture);
-            if (range == null) {
-                range = new int[] {i, i, 0};
-                byTexture.put(texture, range);
+        StringBuilder report = new StringBuilder();
+        int shown = 0;
+        for (int i = 0; i < draws.size() && shown < 40; i++) {
+            FrameDraws.Draw draw = draws.get(i);
+            if (draw.mode() != 7 || draw.vertexCount() != 4) {
+                continue;
             }
-            range[1] = i;
-            range[2]++;
+            int colour = firstVertexColor(draw);
+            int alpha = (colour >>> 24) & 0xFF;
+            if (alpha == 0xFF) {
+                continue;
+            }
+            DrawState state = draw.state();
+            report.append('\n').append("  #").append(i)
+                    .append(" tex=").append(state.texture())
+                    .append(" argb=").append(Integer.toHexString(colour))
+                    .append(" stride=").append(draw.layout().stride())
+                    .append(" blend=").append(state.blend()
+                            ? state.blendSourceRgb() + "->" + state.blendDestinationRgb() : "off")
+                    .append(" scissor=").append(state.scissorEnabled());
+            shown++;
         }
-        Map<Integer, String> order = new java.util.TreeMap<>();
-        byTexture.forEach((id, range) -> order.put(id, range[2] + " draws at " + range[0] + ".." + range[1]));
         org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
-                "Frame texture order: {}", order);
+                "Translucent quads in frame ({} of {} draws):{}", shown, draws.size(), report);
     }
 
-    private static String round(float value) {
-        return String.format(java.util.Locale.ROOT, "%.3f", value);
+    /** The first vertex's {@code 0xAARRGGBB} colour, or {@code 0} when the layout carries none. */
+    private static int firstVertexColor(FrameDraws.Draw draw) {
+        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
+        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
+            if (attribute.usage() != VertexFormatElement.EnumUsage.COLOR) {
+                continue;
+            }
+            int at = attribute.offset();
+            if (attribute.type() == VertexFormatElement.EnumType.UBYTE && attribute.count() == 4) {
+                return ((data.get(at + 3) & 0xFF) << 24) | ((data.get(at) & 0xFF) << 16)
+                        | ((data.get(at + 1) & 0xFF) << 8) | (data.get(at + 2) & 0xFF);
+            }
+            if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
+                int r = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at))) * 255.0F);
+                int g = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 4))) * 255.0F);
+                int b = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 8))) * 255.0F);
+                int a = Math.round(Math.max(0.0F, Math.min(1.0F, data.getFloat(at + 12))) * 255.0F);
+                return (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+        return 0;
     }
 
     /**
