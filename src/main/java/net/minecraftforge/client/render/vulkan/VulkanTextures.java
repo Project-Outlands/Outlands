@@ -155,6 +155,9 @@ final class VulkanTextures implements AutoCloseable {
         // and copies because they come from an sRGB attachment. One format answers both.
         int format = textureFormat();
         if (entry == null) {
+            if (Boolean.getBoolean("outlands.render.dumpTextures")) {
+                dump(image);
+            }
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
             long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
             long set = descriptors.allocate(created.view(), sampler);
@@ -340,7 +343,7 @@ final class VulkanTextures implements AutoCloseable {
         // instead meant releasing the current slot freed the buffer another slot was still reading, which is exactly
         // what the validation layers reported as destroying a buffer in use.
         pendingStaging[slot].add(staging);
-        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() < 12) {
+        if (Boolean.getBoolean("outlands.render.debug") && COPIED.getAndIncrement() % 20 == 0) {
             org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
                     "Framebuffer copy rect: source ({},{}) {}x{} -> destination ({},{}) level {} of texture {}",
                     copy.x(), copy.y(), copy.width(), copy.height(), copy.xOffset(), copy.yOffset(), copy.level(),
@@ -348,7 +351,7 @@ final class VulkanTextures implements AutoCloseable {
         }
         entry.image().copyFromFramebuffer(commandBuffer, copy, target, staging.handle());
 
-        if (Boolean.getBoolean("outlands.render.debug") && DIAGNOSE.compareAndSet(false, true)) {
+        if (Boolean.getBoolean("outlands.render.debug") && COPIED.get() % 20 == 1) {
             // Borrowed, not owned: the same buffer is already in pendingStaging and is closed there. Adding it to the
             // readback list as an owner freed it twice, which the validation layers reported as destroying an
             // invalid buffer handle.
@@ -366,6 +369,31 @@ final class VulkanTextures implements AutoCloseable {
         return srgbTextures
                 ? org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_SRGB
                 : org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
+    }
+
+    /**
+     * Writes a texture's ints to a file so they can be compared with the source image.
+     *
+     * <p>The one thing never checked: the bytes reaching this backend are compared against the bytes on the device,
+     * but never against what the image file actually contains. A transposed or channel-rotated decode would pass every
+     * other check in this renderer and show up only as a picture that is subtly the wrong way round.</p>
+     */
+    private static void dump(TextureImage image) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of("/tmp/outlands-tex");
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(image.argb().length * 4)
+                    .order(java.nio.ByteOrder.nativeOrder());
+            for (int pixel : image.argb()) {
+                buffer.putInt(pixel);
+            }
+            java.nio.file.Files.write(dir.resolve("tex-" + image.id() + "-" + image.width() + "x" + image.height()
+                    + ".argb"), buffer.array());
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "Dumped texture {} ({}x{}) to /tmp/outlands-tex", image.id(), image.width(), image.height());
+        } catch (java.io.IOException e) {
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").warn("Could not dump a texture", e);
+        }
     }
 
     /** Whether a texture has been filled by a framebuffer copy, and is therefore sampled u-reversed. */

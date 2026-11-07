@@ -254,6 +254,9 @@ final class VulkanStream implements AutoCloseable {
             long boundSet = 0L;
             // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
             // value is the whole viewport, which is what an unclipped frame uses.
+            org.lwjgl.vulkan.VkViewport.Buffer viewport = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
+            // Sentinel that cannot match a real viewport, so the first draw always sets one.
+            int[] appliedViewport = {Integer.MIN_VALUE, 0, 0, 0};
             org.lwjgl.vulkan.VkRect2D.Buffer scissor = org.lwjgl.vulkan.VkRect2D.calloc(1, stack);
             // Sentinel that cannot match a real rectangle, so the first draw always sets one.
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
@@ -273,6 +276,11 @@ final class VulkanStream implements AutoCloseable {
                 }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
+                if (Boolean.getBoolean("outlands.render.debug") && !PERSPECTIVE_REPORTED.get()
+                        && draw.state().mvp()[15] == 0.0F) {
+                    PERSPECTIVE_REPORTED.set(true);
+                    reportPerspectiveDraw(draw);
+                }
                 if (sinceCopy > 0 && sinceCopy <= 6 && Boolean.getBoolean("outlands.render.debug")) {
                     // What the draws after a framebuffer copy actually sample. Naming a different texture than the
                     // copy wrote into would mean the background is an unrelated image stretched over the screen -
@@ -313,6 +321,7 @@ final class VulkanStream implements AutoCloseable {
                         org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
                                 | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
                         0, constants);
+                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), viewportWidth, viewportHeight);
                 applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
                 if (textureSets[indexOfOp] != boundSet) {
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
@@ -372,6 +381,58 @@ final class VulkanStream implements AutoCloseable {
                 "Non-sampling draws in frame ({} of {} draws):{}", shown, draws.size(), report);
     }
 
+    private static final java.util.concurrent.atomic.AtomicBoolean PERSPECTIVE_REPORTED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * Reports one perspective draw completely: its matrix, its vertices, and where each vertex lands.
+     *
+     * <p>The last column is the point. Position and texture coordinate together say which part of the image the
+     * screen position shows, which is the only statement about orientation that does not depend on any of this
+     * renderer's conventions: if the vertex that lands at the top of the screen carries the texture coordinate the
+     * game author intended for the top, the picture is upright, whatever the matrices look like.</p>
+     */
+    private static void reportPerspectiveDraw(FrameDraws.Draw draw) {
+        StringBuilder out = new StringBuilder();
+        float[] m = draw.state().mvp();
+        out.append("\n  matrix (column-major):");
+        for (int i = 0; i < 16; i++) {
+            out.append(i % 4 == 0 ? "\n   " : " ");
+            out.append(String.format(java.util.Locale.ROOT, "%9.5f", m[i]));
+        }
+        java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
+        int positionOffset = -1;
+        int uvOffset = -1;
+        for (VertexLayout.Attribute attribute : draw.layout().attributes()) {
+            if (attribute.usage() == VertexFormatElement.EnumUsage.POSITION) {
+                positionOffset = attribute.offset();
+            } else if (attribute.usage() == VertexFormatElement.EnumUsage.UV && attribute.uvIndex() == 0) {
+                uvOffset = attribute.offset();
+            }
+        }
+        int stride = draw.layout().stride();
+        out.append("\n  vertices (position -> uv -> ndc after the clip-space flip):");
+        for (int v = 0; v < Math.min(4, draw.vertexCount()); v++) {
+            int at = v * stride;
+            float x = data.getFloat(at + positionOffset);
+            float y = data.getFloat(at + positionOffset + 4);
+            float z = data.getFloat(at + positionOffset + 8);
+            float u = uvOffset < 0 ? 0.0F : data.getFloat(at + uvOffset);
+            float w = uvOffset < 0 ? 0.0F : data.getFloat(at + uvOffset + 4);
+            // Column-major multiply, then the same Y negation the push constant applies.
+            float cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+            float cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+            float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+            float ndcX = cw == 0.0F ? Float.NaN : cx / cw;
+            float ndcY = cw == 0.0F ? Float.NaN : -cy / cw;
+            out.append(String.format(java.util.Locale.ROOT,
+                    "\n   v%d pos(%5.2f,%5.2f,%5.2f) uv(%5.3f,%5.3f) -> ndc(%6.3f,%6.3f) w=%5.3f",
+                    v, x, y, z, u, w, ndcX, ndcY, cw));
+        }
+        out.append("\n  (ndc y = +1 is the TOP of the screen in Vulkan; the flip is already applied above)");
+        org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info("Perspective draw:{}", out);
+    }
+
     /** The first vertex's texture coordinate, for a diagnostic about where the sample lands. */
     private static String firstUv(FrameDraws.Draw draw) {
         java.nio.ByteBuffer data = ByteBuffer.wrap(draw.vertices()).order(java.nio.ByteOrder.nativeOrder());
@@ -414,6 +475,39 @@ final class VulkanStream implements AutoCloseable {
             }
         }
         return 0;
+    }
+
+    /**
+     * Sets the viewport for a draw, if it differs from the last one applied.
+     *
+     * <p>The Y is converted: {@code glViewport} counts from the bottom, Vulkan from the top. That conversion is what
+     * makes the main menu's {@code viewport(0, 0, 256, 256)} land in the bottom-left corner where the blur expects to
+     * find it, rather than in the top-left where a straight copy of the numbers would put it.</p>
+     */
+    private static void applyViewport(VkCommandBuffer commandBuffer, org.lwjgl.vulkan.VkViewport.Buffer viewport,
+                                      int[] applied, DrawState state, int frameWidth, int frameHeight) {
+        int x = 0;
+        int y = 0;
+        int width = frameWidth;
+        int height = frameHeight;
+        if (state != null && state.hasViewport()) {
+            int[] box = state.viewport();
+            x = box[0];
+            y = frameHeight - box[1] - box[3];
+            width = box[2];
+            height = box[3];
+        }
+        if (applied[0] == x && applied[1] == y && applied[2] == width && applied[3] == height) {
+            return;
+        }
+        applied[0] = x;
+        applied[1] = y;
+        applied[2] = width;
+        applied[3] = height;
+
+        viewport.get(0).x((float) x).y((float) y).width((float) width).height((float) height)
+                .minDepth(0.0f).maxDepth(1.0f);
+        org.lwjgl.vulkan.VK10.vkCmdSetViewport(commandBuffer, 0, viewport);
     }
 
     /**

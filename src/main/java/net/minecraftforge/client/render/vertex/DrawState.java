@@ -32,11 +32,12 @@ package net.minecraftforge.client.render.vertex;
  * @param alphaTest            whether the alpha test was enabled, which decides whether a fragment exists at all
  * @param alphaReference       the alpha test's reference value
  * @param alphaComparison      the alpha test's GL comparison
+ * @param viewport             the viewport as {@code x, y, width, height} in GL's bottom-up pixels
  */
 public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
                         int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
-                        boolean alphaTest, float alphaReference, int alphaComparison) {
+                        boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -47,6 +48,9 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         }
         if (color.length != 4) {
             throw new IllegalArgumentException("a colour has 4 components, got " + color.length);
+        }
+        if (viewport.length != 4) {
+            throw new IllegalArgumentException("a viewport has 4 values, got " + viewport.length);
         }
     }
 
@@ -62,6 +66,17 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         }
         org.joml.Matrix4f mvp = new org.joml.Matrix4f();
         mvp.set(state.projection()).mul(state.modelView());
+
+        if (Boolean.getBoolean("outlands.render.debug") && !PROJECTION_REPORTED.get()
+                && state.projection().m33() == 0.0F) {
+            // A perspective draw: print the two matrices separately. The composed matrix cannot say whether a
+            // rotation went into the projection by mistake, and that mistake would turn the picture by an angle no
+            // amount of yaw can reach - exactly the symptom being chased.
+            PROJECTION_REPORTED.set(true);
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    "First perspective draw - projection:{}\n  modelview:{}",
+                    describe(state.projection()), describe(state.modelView()));
+        }
         float[] values = new float[16];
         mvp.get(values);
 
@@ -95,7 +110,22 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.scissorBox(),
                 state.currentColor(),
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D),
-                state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison());
+                state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
+                state.viewport());
+    }
+
+    /**
+     * The viewport this draw was issued with.
+     *
+     * <p><b>Not a detail.</b> The main menu renders its panorama into a 256x256 viewport at the bottom-left corner of
+     * the framebuffer, blurs that corner in place, and then draws the result across the whole screen from a centred
+     * crop. A renderer that always uses the full window instead draws the panorama over the entire frame, so the
+     * 256x256 the blur copies is a corner of that, and the centred crop at the end samples a small piece of it: the
+     * background comes out at an angle vanilla never shows and the blur has nothing coherent to accumulate. Measured,
+     * not assumed.</p>
+     */
+    public boolean hasViewport() {
+        return viewport[2] > 0 && viewport[3] > 0;
     }
 
     /**
@@ -111,6 +141,21 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
      */
     public boolean samplesTexture() {
         return texture2d;
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean PROJECTION_REPORTED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** A matrix as four rows of four numbers, read the way the picture is: first row on top. */
+    private static String describe(org.joml.Matrix4fc m) {
+        StringBuilder out = new StringBuilder();
+        for (int row = 0; row < 4; row++) {
+            out.append("\n   ");
+            for (int column = 0; column < 4; column++) {
+                out.append(String.format(java.util.Locale.ROOT, " %9.5f", m.get(column, row)));
+            }
+        }
+        return out.toString();
     }
 
     /**

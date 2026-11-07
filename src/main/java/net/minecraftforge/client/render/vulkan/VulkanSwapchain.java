@@ -346,8 +346,18 @@ final class VulkanSwapchain {
             float[] requested = recording != null
                     ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
             VkClearValue clearColor = VkClearValue.calloc(stack);
+            // Alpha is forced to 1, whatever the game asked for.
+            //
+            // The window is opaque, so the framebuffer's alpha is composited nowhere - except by the one thing that
+            // reads it back: the main menu's blur copies a region of the framebuffer into a texture and draws it with
+            // SRC_ALPHA blending. With a destination alpha of 0 every blurred layer is fully transparent and the
+            // sharp panorama underneath shows instead, which is exactly what this renderer was doing while the GL
+            // client showed a blurred background. Measured: the copied region's alpha was 0 in every frame.
+            //
+            // GL reaches alpha 1 by a different route - its default framebuffer reports opaque - so writing 1 here
+            // reproduces that, which is what makes the blur visible.
             clearColor.color().float32(0, requested[0]).float32(1, requested[1]).float32(2, requested[2])
-                    .float32(3, requested[3]);
+                    .float32(3, 1.0F);
             VkRenderingAttachmentInfo.Buffer colorAttachment = VkRenderingAttachmentInfo.calloc(1, stack);
             colorAttachment.get(0)
                     .sType$Default()
