@@ -109,4 +109,23 @@ class PrimitiveShapeTest {
         assertEquals(0x10000 / 4 * 6 * Integer.BYTES, shape.indices(0x10000).length,
                 "the index buffer widens as a whole, not per primitive");
     }
+
+    @Test
+    void writeIndicesMatchesIndexArray() {
+        for (int mode : new int[] {2, 6, 7, 8}) {
+            PrimitiveShape shape = PrimitiveShape.ofGlMode(mode);
+            int vertexCount = switch (mode) {
+                case 7 -> 8;
+                case 8 -> 6;
+                case 6 -> 5;
+                case 2 -> 4;
+                default -> throw new IllegalStateException();
+            };
+            int[] expected = shape.indexArray(vertexCount);
+            java.nio.IntBuffer buffer = java.nio.IntBuffer.allocate(expected.length);
+            int written = shape.writeIndices(vertexCount, buffer);
+            assertEquals(expected.length, written);
+            assertArrayEquals(expected, buffer.array());
+        }
+    }
 }

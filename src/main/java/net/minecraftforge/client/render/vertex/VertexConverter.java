@@ -64,8 +64,11 @@ public final class VertexConverter {
      * @param fallbackLightmap {@code u, v} in 0..1 used when the layout has no lightmap element, or {@code null} for
      *                         full brightness
      */
-    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
-                                 float[] fallbackLightmap) {
+    /**
+     * Converts vertices in-place into an existing {@code target} buffer at {@code targetOffset}.
+     */
+    public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                               float[] fallbackLightmap, ByteBuffer target, int targetOffset) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -73,22 +76,20 @@ public final class VertexConverter {
                     + " vertices at stride " + inStride + ", the buffer has " + source.limit());
         }
 
-        byte[] out = new byte[vertexCount * STRIDE];
-        ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
         ByteBuffer in = source.duplicate().order(ByteOrder.nativeOrder());
         List<VertexLayout.Attribute> attributes = layout.attributes();
-        // Vanilla's constant lightmap coordinate, in the same unsigned-short encoding the attribute uses. A format
-        // without one therefore gets the brightness the game asked for rather than a made-up full bright: that
-        // difference is a mob in a cave looking lit.
+        // Vanilla's constant lightmap coordinate, in the same unsigned-short encoding the attribute uses (0..240
+        // for block light in low 16 bits, sky light in high 16 bits). A format without one therefore gets the
+        // brightness the game asked for rather than a made-up full bright: that difference is a mob in a cave looking lit.
         int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
         if (fallbackLightmap != null) {
-            int u = Math.round(Math.max(0.0F, Math.min(1.0F, fallbackLightmap[0])) * 0xFFFF);
-            int v = Math.round(Math.max(0.0F, Math.min(1.0F, fallbackLightmap[1])) * 0xFFFF);
-            fallbackLight = u | (v << 16);
+            int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
+            int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
+            fallbackLight = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
         }
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
-            int base = vertex * STRIDE;
+            int base = targetOffset + vertex * STRIDE;
             int sourceBase = vertex * inStride;
 
             // Neutrals first, so a format that lacks an attribute still produces a sane vertex.
@@ -109,6 +110,20 @@ public final class VertexConverter {
                 }
             }
         }
+    }
+
+    /**
+     * Converts vertices, supplying a fallback colour and lightmap for formats that do not carry them.
+     *
+     * @param fallbackColor {@code 0xAARRGGBB} used when the layout has no colour element
+     * @param fallbackLightmap {@code u, v} in 0..1 used when the layout has no lightmap element, or {@code null} for
+     *                         full brightness
+     */
+    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                                 float[] fallbackLightmap) {
+        byte[] out = new byte[vertexCount * STRIDE];
+        ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, target, 0);
         return out;
     }
 

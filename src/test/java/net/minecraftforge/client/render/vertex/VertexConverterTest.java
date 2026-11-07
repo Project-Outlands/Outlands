@@ -115,4 +115,31 @@ class VertexConverterTest {
         assertThrows(IllegalArgumentException.class,
                 () -> VertexConverter.convert(tooSmall, VertexLayout.of(format), 2));
     }
+
+    @Test
+    void convertInPlaceMatchesConvert() {
+        VertexFormat format = DefaultVertexFormats.POSITION_TEX_COLOR;
+        ByteBuffer source = direct(format.getSize());
+        source.putFloat(0, 1.5F);
+        source.putFloat(4, 2.5F);
+        source.putFloat(8, 3.5F);
+        source.putFloat(12, 0.25F);
+        source.putFloat(16, 0.5F);
+        source.put(20, (byte) 10);
+        source.put(21, (byte) 20);
+        source.put(22, (byte) 30);
+        source.put(23, (byte) 40);
+
+        byte[] regular = VertexConverter.convert(source, VertexLayout.of(format), 1, 0x11223344, new float[] {100.0F, 200.0F});
+
+        int offset = 64;
+        ByteBuffer directTarget = ByteBuffer.allocateDirect(offset + regular.length).order(ByteOrder.nativeOrder());
+        VertexConverter.convert(source, VertexLayout.of(format), 1, 0x11223344, new float[] {100.0F, 200.0F}, directTarget, offset);
+
+        byte[] inPlace = new byte[regular.length];
+        directTarget.position(offset);
+        directTarget.get(inPlace);
+
+        org.junit.jupiter.api.Assertions.assertArrayEquals(regular, inPlace);
+    }
 }

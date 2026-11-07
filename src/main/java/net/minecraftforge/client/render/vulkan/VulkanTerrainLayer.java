@@ -49,6 +49,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final VkDevice device;
     private final VulkanContext context;
     private final VulkanPipeline pipeline;
+    private final VulkanDescriptors descriptors;
     private final VulkanTextures textures;
     private VulkanBuffer vertices;
     private VulkanBuffer indices;
@@ -67,11 +68,12 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
 
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
-                               VulkanTextures textures, VulkanBuffer vertices, VulkanBuffer indices,
-                               TerrainMeshPacker.Pack pack, String source) {
+                               VulkanDescriptors descriptors, VulkanTextures textures, VulkanBuffer vertices,
+                               VulkanBuffer indices, TerrainMeshPacker.Pack pack, String source) {
         this.device = device;
         this.context = context;
         this.pipeline = pipeline;
+        this.descriptors = descriptors;
         this.textures = textures;
         this.vertices = vertices;
         this.indices = indices;
@@ -135,7 +137,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             }
             throw e;
         }
-        return new VulkanTerrainLayer(device, context, pipeline, textures, vertices, indices, pack, "none");
+        return new VulkanTerrainLayer(device, context, pipeline, descriptors, textures, vertices, indices, pack, "none");
     }
 
     /** The descriptor set for the atlas, resolved by the frame before the rendering instance opened. */
@@ -193,10 +195,11 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      * Records one render layer's chunks, at the point in the frame where the game asked for that layer.
      *
      * @param commandBuffer the frame's command buffer, with a rendering instance already open
+     * @param slot          the frame-in-flight slot index
      * @param cameraMatrix  the projection times modelview the game had in effect, column-major, GL convention
      * @param layer         the {@code BlockRenderLayer} ordinal whose chunks to draw
      */
-    void recordLayer(VkCommandBuffer commandBuffer, float[] cameraMatrix, int layer) {
+    void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer) {
         if (vertices == null || indices == null || slices.isEmpty()) {
             return;
         }
@@ -206,7 +209,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             // The atlas set, resolved by the frame before this instance opened: resolving it here would record a copy
             // inside a render pass, which Vulkan does not allow - the validation layers named that one exactly.
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
-                    stack.longs(resolvedTexture), null);
+                    stack.longs(resolvedTexture, descriptors.lightmapSet(slot)), null);
             // Bound once for the whole layer: this is what packing buys.
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertices.handle()), stack.mallocLong(1).put(0, 0L));
             vkCmdBindIndexBuffer(commandBuffer, indices.handle(), 0L, indexType);
@@ -256,10 +259,11 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private static void writeConstants(ByteBuffer constants, Matrix4f matrix, boolean alphaTest) {
         constants.clear();
         matrix.get(constants);
-        // Column-major, so row 1 is at 1, 5, 9 and 13.
+        // Column-major: row 1 is Y (negated for Vulkan NDC) and row 2 is Z (remapped to [0, w]).
         java.nio.FloatBuffer floats = constants.asFloatBuffer();
-        for (int index = 1; index < 16; index += 4) {
-            floats.put(index, -floats.get(index));
+        for (int col = 0; col < 16; col += 4) {
+            floats.put(col + 1, -floats.get(col + 1));
+            floats.put(col + 2, 0.5F * (floats.get(col + 2) + floats.get(col + 3)));
         }
         floats.put(16, 0.1F);                          // alpha reference: vanilla's cutout threshold
         floats.put(17, alphaTest ? 1.0F : 0.0F);       // the test itself

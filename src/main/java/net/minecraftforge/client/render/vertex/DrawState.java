@@ -106,7 +106,7 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.SCISSOR_TEST),
                 state.scissorBox(),
                 state.currentColor(),
-                state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D),
+                texture2dEnabled(state),
                 state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
                 state.viewport(),
                 state.colorMask(),
@@ -143,17 +143,17 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
     }
 
     /**
-     * The colour as an {@code 0xAARRGGBB} int, for a draw whose vertex format carries no colour of its own.
+     * The colour packed for a 32-bit write into a little-endian R8G8B8A8 buffer.
      *
-     * <p>Vanilla sets text and tint colours with {@code GlStateManager.color(...)} and then draws vertices that have
-     * no colour attribute at all - {@code FontRenderer} is the obvious one. In GL the current colour applies per
-     * vertex; a pipeline needs it in the vertex data, so this is the value that fills the gap.</p>
+     * <p>In little-endian native order, the lowest byte lands at offset 0, so R is placed in bits 0..7,
+     * G in bits 8..15, B in bits 16..23, and A in bits 24..31.</p>
      */
     public int colorArgb() {
-        return (Math.round(color[3] * 255.0F) << 24)
-                | (Math.round(color[0] * 255.0F) << 16)
-                | (Math.round(color[1] * 255.0F) << 8)
-                | Math.round(color[2] * 255.0F);
+        int r = Math.round(Math.max(0.0F, Math.min(1.0F, color[0])) * 255.0F);
+        int g = Math.round(Math.max(0.0F, Math.min(1.0F, color[1])) * 255.0F);
+        int b = Math.round(Math.max(0.0F, Math.min(1.0F, color[2])) * 255.0F);
+        int a = Math.round(Math.max(0.0F, Math.min(1.0F, color[3])) * 255.0F);
+        return (a << 24) | (b << 16) | (g << 8) | r;
     }
 
     /**
@@ -168,5 +168,12 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         net.minecraftforge.client.render.texture.TextureBackend textures =
                 net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
         return textures == null ? 0 : textures.boundTexture();
+    }
+
+    private static boolean texture2dEnabled(net.minecraftforge.client.render.state.backend.FrameState state) {
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        return textures != null ? textures.isTexture2DEnabled()
+                : state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.TEXTURE_2D);
     }
 }

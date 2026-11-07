@@ -191,6 +191,13 @@ public final class VulkanBackend implements RenderBackend {
         }
         try {
             installCaptures();
+            // The game reports which texture its lightmap lives in when it replaces it; the stream samples that image
+            // through descriptor set 1, which is bound once per frame.
+            net.minecraftforge.client.render.state.backend.FrameState frameState =
+                    net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+            if (stream != null && frameState != null) {
+                stream.setLightmapTexture(frameState.lightmapTexture());
+            }
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.
             swapchain.setPendingDraws(net.minecraftforge.client.render.vertex.FrameDraws.drain());

@@ -15,17 +15,17 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.vkAllocateDescriptorSets;
+import static org.lwjgl.vulkan.VK10.vkUpdateDescriptorSets;
 import static org.lwjgl.vulkan.VK10.vkCreateDescriptorPool;
 import static org.lwjgl.vulkan.VK10.vkCreateDescriptorSetLayout;
 import static org.lwjgl.vulkan.VK10.vkCreatePipelineLayout;
 import static org.lwjgl.vulkan.VK10.vkDestroyDescriptorPool;
 import static org.lwjgl.vulkan.VK10.vkDestroyDescriptorSetLayout;
 import static org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout;
-import static org.lwjgl.vulkan.VK10.vkUpdateDescriptorSets;
 
 /**
  * The one descriptor set layout the renderer uses, and the pool its sets come from.
@@ -60,8 +60,10 @@ final class VulkanDescriptors implements AutoCloseable {
 
     private final VkDevice device;
     private final long setLayout;
+    private final long lightmapSetLayout;
     private final long pipelineLayout;
     private final long pool;
+    private final long[] lightmapSets = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
     private int allocated;
 
     VulkanDescriptors(VkDevice device) {
@@ -82,6 +84,22 @@ final class VulkanDescriptors implements AutoCloseable {
                     "vkCreateDescriptorSetLayout");
             this.setLayout = layoutOut.get(0);
 
+            // Set 1 is the lightmap: one sampler that every draw reads and the game replaces a handful of times per
+            // second, so it is bound once per frame instead of travelling in every draw's set.
+            VkDescriptorSetLayoutBinding.Buffer lightmapBinding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+            lightmapBinding.get(0)
+                    .binding(0)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1)
+                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            VkDescriptorSetLayoutCreateInfo lightmapLayoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pBindings(lightmapBinding);
+            LongBuffer lightmapLayoutOut = stack.mallocLong(1);
+            VkCheck.check(vkCreateDescriptorSetLayout(device, lightmapLayoutInfo, null, lightmapLayoutOut),
+                    "vkCreateDescriptorSetLayout");
+            this.lightmapSetLayout = lightmapLayoutOut.get(0);
+
             VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
             // Must match VulkanPipeline's own copy of this range exactly, and it must cover the fragment stage:
             // the alpha test's reference value lives in these bytes and the fragment shader reads it. A range that
@@ -93,13 +111,14 @@ final class VulkanDescriptors implements AutoCloseable {
                     .size(VulkanPipeline.PUSH_CONSTANT_BYTES);
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                     .sType$Default()
-                    .pSetLayouts(stack.longs(setLayout))
+                    .pSetLayouts(stack.longs(setLayout, lightmapSetLayout))
                     .pPushConstantRanges(pushConstants);
             LongBuffer pipelineLayoutOut = stack.mallocLong(1);
             try {
                 VkCheck.check(vkCreatePipelineLayout(device, pipelineLayoutInfo, null, pipelineLayoutOut),
                         "vkCreatePipelineLayout");
             } catch (RuntimeException e) {
+                vkDestroyDescriptorSetLayout(device, lightmapSetLayout, null);
                 vkDestroyDescriptorSetLayout(device, setLayout, null);
                 throw e;
             }
@@ -108,21 +127,57 @@ final class VulkanDescriptors implements AutoCloseable {
             VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(1, stack);
             sizes.get(0)
                     .type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(MAX_SETS);
+                    .descriptorCount(MAX_SETS + VulkanSwapchain.FRAMES_IN_FLIGHT);
             VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                     .sType$Default()
-                    .maxSets(MAX_SETS)
+                    .maxSets(MAX_SETS + VulkanSwapchain.FRAMES_IN_FLIGHT)
                     .pPoolSizes(sizes);
             LongBuffer poolOut = stack.mallocLong(1);
             try {
                 VkCheck.check(vkCreateDescriptorPool(device, poolInfo, null, poolOut), "vkCreateDescriptorPool");
             } catch (RuntimeException e) {
                 vkDestroyPipelineLayout(device, pipelineLayout, null);
+                vkDestroyDescriptorSetLayout(device, lightmapSetLayout, null);
                 vkDestroyDescriptorSetLayout(device, setLayout, null);
                 throw e;
             }
             this.pool = poolOut.get(0);
+
+            for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
+                VkDescriptorSetAllocateInfo lightmapAllocate = VkDescriptorSetAllocateInfo.calloc(stack)
+                        .sType$Default()
+                        .descriptorPool(pool)
+                        .pSetLayouts(stack.longs(lightmapSetLayout));
+                LongBuffer lightmapSetOut = stack.mallocLong(1);
+                VkCheck.check(vkAllocateDescriptorSets(device, lightmapAllocate, lightmapSetOut),
+                        "vkAllocateDescriptorSets");
+                this.lightmapSets[slot] = lightmapSetOut.get(0);
+            }
         }
+    }
+
+    /**
+     * Points set 1 at the given image for the given frame slot.
+     */
+    void writeLightmap(int slot, long view, long sampler) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorImageInfo.Buffer image = VkDescriptorImageInfo.calloc(1, stack);
+            image.get(0).imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).imageView(view).sampler(sampler);
+            VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+            write.get(0)
+                    .sType$Default()
+                    .dstSet(lightmapSets[slot])
+                    .dstBinding(0)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .pImageInfo(image);
+            vkUpdateDescriptorSets(device, write, null);
+        }
+    }
+
+    /** The lightmap set for a frame slot, for binding once per frame. */
+    long lightmapSet(int slot) {
+        return lightmapSets[slot];
     }
 
     long layout() {
@@ -149,6 +204,9 @@ final class VulkanDescriptors implements AutoCloseable {
             VkDescriptorSetAllocateInfo allocateInfo = VkDescriptorSetAllocateInfo.calloc(stack)
                     .sType$Default()
                     .descriptorPool(pool)
+                    // One layout, one set: the pipeline layout names both sets, but a set is allocated from exactly
+                    // the layout it will be bound against. Naming two here asked for one set out of two layouts, which
+                    // LWJGL rejected with "Number of remaining elements is 1, must be at least 2".
                     .pSetLayouts(stack.longs(setLayout));
             LongBuffer setOut = stack.mallocLong(1);
             VkCheck.check(vkAllocateDescriptorSets(device, allocateInfo, setOut), "vkAllocateDescriptorSets");
@@ -181,6 +239,7 @@ final class VulkanDescriptors implements AutoCloseable {
         // The pool owns its sets, so destroying it releases every one of them.
         vkDestroyDescriptorPool(device, pool, null);
         vkDestroyPipelineLayout(device, pipelineLayout, null);
+        vkDestroyDescriptorSetLayout(device, lightmapSetLayout, null);
         vkDestroyDescriptorSetLayout(device, setLayout, null);
     }
 }

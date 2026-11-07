@@ -19,6 +19,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
 import static org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets;
 import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
@@ -63,14 +65,14 @@ final class VulkanStream implements AutoCloseable {
     private static final int GL_GREATER = 516;
 
     /**
-     * One buffer per frame in flight.
+     * Resizable dynamic buffers per frame in flight.
      *
-     * <p>Freeing a single shared buffer when the current slot's fence is waited on is not enough: the other slot may
-     * still be reading it, which the validation layers report as destroying a buffer that is in use. Indexing by
-     * slot means a buffer is released only when the frame that used it has actually finished.</p>
+     * <p>Allocated once and persistently mapped, growing dynamically if a frame needs more space.
+     * Indexing by slot means a buffer is written only after the frame that previously used that slot
+     * has signaled its fence.</p>
      */
-    private final VulkanBuffer[] pending;
-    private final VulkanBuffer[] pendingIndices;
+    private final VulkanBuffer[] vertexBuffers;
+    private final VulkanBuffer[] indexBuffers;
     private final VulkanDescriptors descriptors;
     private final VulkanTextures textures;
     /**
@@ -82,6 +84,9 @@ final class VulkanStream implements AutoCloseable {
      * </p>
      */
     private VulkanTerrainLayer terrain;
+
+    /** The game's lightmap texture, or zero while it has not been created. */
+    private int lightmapTexture;
     /**
      * Descriptor sets resolved for the frame being recorded, by texture handle.
      *
@@ -98,8 +103,14 @@ final class VulkanStream implements AutoCloseable {
         this.context = context;
         this.colorFormat = colorFormat;
         this.depthFormat = depthFormat;
-        this.pending = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
-        this.pendingIndices = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.vertexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.indexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
+            this.vertexBuffers[i] = VulkanBuffer.createDynamic(device, context,
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 1024 * 1024);
+            this.indexBuffers[i] = VulkanBuffer.createDynamic(device, context,
+                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 512 * 1024);
+        }
         this.vertex = VulkanShader.load(device, "/assets/outlands/shaders/terrain.vert.spv");
         this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
         this.descriptors = descriptors;
@@ -123,6 +134,10 @@ final class VulkanStream implements AutoCloseable {
      */
     void prepareTextures(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int... extra) {
         resolved.clear();
+        textures.ensureWhiteUploaded(commandBuffer, slot);
+        if (lightmapTexture != 0) {
+            resolve(lightmapTexture, commandBuffer, slot);
+        }
         for (FrameDraws.Operation op : ops) {
             if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
                 resolve(draw.state().texture(), commandBuffer, slot);
@@ -136,6 +151,7 @@ final class VulkanStream implements AutoCloseable {
         for (int texture : extra) {
             resolve(texture, commandBuffer, slot);
         }
+        updateLightmapDescriptor(commandBuffer, slot);
     }
 
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
@@ -166,39 +182,55 @@ final class VulkanStream implements AutoCloseable {
         List<FrameDraws.Draw> draws = ops.stream()
                 .filter(FrameDraws.Draw.class::isInstance).map(FrameDraws.Draw.class::cast).toList();
         drawsThisFrame = draws.size();
-        // This slot's fence has been waited on, so whatever it used last time is finished.
-        releaseSlot(slot);
         if (ops.isEmpty()) {
             return;
         }
 
-        // Convert everything first: the buffer's size is the total, and one allocation beats one per draw.
-        byte[][] converted = new byte[draws.size()][];
-        int totalBytes = 0;
+        int totalVertices = 0;
+        int totalIndices = 0;
+        for (FrameDraws.Draw draw : draws) {
+            totalVertices += draw.vertexCount();
+            PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
+            if (shape.needsIndexing()) {
+                totalIndices += shape.indexCount(draw.vertexCount());
+            }
+        }
+
+        int totalVertexBytes = totalVertices * VertexConverter.STRIDE;
+        int totalIndexBytes = totalIndices * Integer.BYTES;
+
+        if (totalVertexBytes > 0) {
+            vertexBuffers[slot].ensureCapacity(totalVertexBytes);
+        }
+        if (totalIndexBytes > 0) {
+            indexBuffers[slot].ensureCapacity(totalIndexBytes);
+        }
+
+        ByteBuffer targetVbo = totalVertexBytes > 0
+                ? org.lwjgl.system.MemoryUtil.memByteBuffer(vertexBuffers[slot].mappedAddress(), totalVertexBytes)
+                : null;
+        java.nio.IntBuffer targetIbo = totalIndexBytes > 0
+                ? org.lwjgl.system.MemoryUtil.memIntBuffer(indexBuffers[slot].mappedAddress(), totalIndices)
+                : null;
+
+        int currentVertexOffset = 0;
+        int currentIndexOffset = 0;
+        int[] offsets = new int[draws.size()];
+        int[] indexOffsets = new int[draws.size()];
+
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
-            converted[i] = VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
-                    draw.layout(), draw.vertexCount(), draw.state().colorArgb(), draw.state().lightmap());
-            totalBytes += converted[i].length;
-        }
-        byte[] all = new byte[totalBytes];
-        int[] offsets = new int[draws.size()];
-        // Indices are collected for the whole frame and always 32-bit: switching width per draw would mean
-        // rebinding the index buffer mid-frame for no benefit.
-        int[] indexOffsets = new int[draws.size()];
-        List<Integer> allIndices = new ArrayList<>();
-        int at = 0;
-        for (int i = 0; i < draws.size(); i++) {
-            offsets[i] = at;
-            System.arraycopy(converted[i], 0, all, at, converted[i].length);
-            at += converted[i].length;
+            offsets[i] = currentVertexOffset;
+            VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
+                    draw.layout(), draw.vertexCount(), draw.state().colorArgb(), draw.state().lightmap(),
+                    targetVbo, currentVertexOffset);
+            currentVertexOffset += draw.vertexCount() * VertexConverter.STRIDE;
 
-            PrimitiveShape shape = PrimitiveShape.ofGlMode(draws.get(i).mode());
+            PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
             if (shape.needsIndexing()) {
-                indexOffsets[i] = allIndices.size();
-                for (int index : shape.indexArray(draws.get(i).vertexCount())) {
-                    allIndices.add(index);
-                }
+                indexOffsets[i] = currentIndexOffset;
+                shape.writeIndices(draw.vertexCount(), targetIbo);
+                currentIndexOffset += shape.indexCount(draw.vertexCount());
             }
         }
 
@@ -211,29 +243,9 @@ final class VulkanStream implements AutoCloseable {
                     : textures.whiteDescriptorSet();
         }
 
-        // A frame can have terrain and no streamed draws, and a zero-length buffer is not creatable - asking for one
-        // takes the driver down rather than returning an error.
-        if (!draws.isEmpty()) {
-            pending[slot] = VulkanBuffer.create(device, context, all);
-            if (!allIndices.isEmpty()) {
-                ByteBuffer indexBytes = ByteBuffer.allocate(allIndices.size() * Integer.BYTES)
-                        .order(java.nio.ByteOrder.nativeOrder());
-                for (int index : allIndices) {
-                    indexBytes.putInt(index);
-                }
-                pendingIndices[slot] = VulkanBuffer.create(device, context, indexBytes.array());
-            }
-        } else {
-            pending[slot] = null;
-            pendingIndices[slot] = null;
-        }
-
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // longs(), not mallocLong().put(index, value).flip(): put(int, long) does not advance the position,
-            // so flip() leaves the limit at zero and bindingCount becomes zero - which the validation layers caught
-            // as "no buffer bound" on every draw rather than as an obvious error.
-            if (pending[slot] != null) {
-                vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
+            if (totalVertexBytes > 0) {
+                vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffers[slot].handle()), stack.longs(0L));
             }
 
             ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
@@ -265,12 +277,12 @@ final class VulkanStream implements AutoCloseable {
                 }
                 if (op instanceof FrameDraws.TerrainLayer terrainOp) {
                     if (terrain != null) {
-                        terrain.recordLayer(commandBuffer, terrainOp.mvp(), terrainOp.layer());
+                        terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer());
                     }
                     // The terrain draw binds its own vertex buffer and descriptor set, so neither can be assumed by
                     // the next streamed draw: rebind the stream's buffer and forget the bound set.
-                    if (pending[slot] != null) {
-                        vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(pending[slot].handle()), stack.longs(0L));
+                    if (totalVertexBytes > 0) {
+                        vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffers[slot].handle()), stack.longs(0L));
                     }
                     boundSet = 0L;
                     continue;
@@ -318,7 +330,7 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = textureSets[indexOfOp];
                 }
                 if (shape.needsIndexing()) {
-                    vkCmdBindIndexBuffer(commandBuffer, pendingIndices[slot].handle(), 0L,
+                    vkCmdBindIndexBuffer(commandBuffer, indexBuffers[slot].handle(), 0L,
                             org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
                     vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[indexOfOp],
                             offsets[indexOfOp] / VertexConverter.STRIDE, 0);
@@ -412,9 +424,10 @@ final class VulkanStream implements AutoCloseable {
     private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {
         target.position(0);
         target.put(mvp);
-        // Column-major, so row 1 is at 1, 5, 9 and 13.
-        for (int index = 1; index < 16; index += 4) {
-            target.put(index, -target.get(index));
+        // Column-major: row 1 is Y (negated for Vulkan NDC) and row 2 is Z (remapped to [0, w]).
+        for (int col = 0; col < 16; col += 4) {
+            target.put(col + 1, -target.get(col + 1));
+            target.put(col + 2, 0.5F * (target.get(col + 2) + target.get(col + 3)));
         }
         target.position(0);
     }
@@ -448,15 +461,53 @@ final class VulkanStream implements AutoCloseable {
                         descriptors.pipelineLayout(), descriptors.layout(), key));
     }
 
-    private void releaseSlot(int slot) {
-        if (pending[slot] != null) {
-            pending[slot].close();
-            pending[slot] = null;
+    /** The lightmap image the shared set 1 currently points at per slot. */
+    private final long[] lightmapImage = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
+    private final long[] lightmapSampler = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
+
+    /**
+     * Updates descriptor set 1 to point at the game's lightmap for this slot.
+     *
+     * <p>Called before the rendering instance opens so any staging upload and layout transition happens outside
+     * the render pass.</p>
+     */
+    private void updateLightmapDescriptor(VkCommandBuffer commandBuffer, int slot) {
+        long[] lightmap = resolveLightmap(commandBuffer, slot);
+        long view = lightmap != null ? lightmap[0] : textures.whiteImageView();
+        long sampler = lightmap != null ? lightmap[1] : textures.whiteSampler();
+        if (view != lightmapImage[slot] || sampler != lightmapSampler[slot]) {
+            descriptors.writeLightmap(slot, view, sampler);
+            lightmapImage[slot] = view;
+            lightmapSampler[slot] = sampler;
         }
-        if (pendingIndices[slot] != null) {
-            pendingIndices[slot].close();
-            pendingIndices[slot] = null;
+    }
+
+    /**
+     * Points descriptor set 1 at the game's lightmap and binds it.
+     */
+    void bindLightmap(VkCommandBuffer commandBuffer, int slot) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, descriptors.pipelineLayout(), 1,
+                    stack.longs(descriptors.lightmapSet(slot)), null);
         }
+    }
+
+    /** Called by the backend when the game reports which texture its lightmap lives in. */
+    void setLightmapTextureId(int texture) {
+        setLightmapTexture(texture);
+    }
+
+    /** Told by the backend each frame which texture the game's lightmap lives in. */
+    void setLightmapTexture(int texture) {
+        this.lightmapTexture = texture;
+    }
+
+    /** The image view and sampler behind the lightmap, or {@code null} when it is not resolvable yet. */
+    long[] resolveLightmap(VkCommandBuffer commandBuffer, int slot) {
+        if (lightmapTexture == 0) {
+            return null;
+        }
+        return textures.resolveForSharedSet(lightmapTexture, commandBuffer, slot);
     }
 
     /** Wired by the backend once the terrain layer exists. */
@@ -466,8 +517,13 @@ final class VulkanStream implements AutoCloseable {
 
     @Override
     public void close() {
-        for (int slot = 0; slot < pending.length; slot++) {
-            releaseSlot(slot);
+        for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
+            if (vertexBuffers[slot] != null) {
+                vertexBuffers[slot].close();
+            }
+            if (indexBuffers[slot] != null) {
+                indexBuffers[slot].close();
+            }
         }
         for (VulkanPipeline pipeline : pipelines.values()) {
             pipeline.close();

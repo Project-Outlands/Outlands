@@ -128,6 +128,60 @@ public final class PrimitiveShape {
      *         indexing
      */
     /**
+     * Writes 32-bit indices directly into {@code dest} for {@code vertexCount} vertices.
+     *
+     * <p>Indices are relative to 0 (the draw's first vertex), suitable for {@code vkCmdDrawIndexed}
+     * with {@code vertexOffset}.</p>
+     *
+     * @return the number of indices written
+     */
+    public int writeIndices(int vertexCount, java.nio.IntBuffer dest) {
+        if (!needsIndexing()) {
+            throw new IllegalArgumentException("GL mode " + glMode + " needs no index buffer");
+        }
+        int count = indexCount(vertexCount);
+        switch (glMode) {
+            case GL_QUADS -> {
+                for (int quad = 0; quad < vertexCount / 4; quad++) {
+                    int base = quad * 4;
+                    dest.put(base);
+                    dest.put(base + 1);
+                    dest.put(base + 2);
+                    dest.put(base);
+                    dest.put(base + 2);
+                    dest.put(base + 3);
+                }
+            }
+            case GL_QUAD_STRIP -> {
+                for (int quad = 0; quad < (vertexCount - 2) / 2; quad++) {
+                    int base = quad * 2;
+                    dest.put(base);
+                    dest.put(base + 1);
+                    dest.put(base + 2);
+                    dest.put(base);
+                    dest.put(base + 2);
+                    dest.put(base + 3);
+                }
+            }
+            case GL_TRIANGLE_FAN -> {
+                for (int triangle = 0; triangle < vertexCount - 2; triangle++) {
+                    dest.put(0);
+                    dest.put(triangle + 1);
+                    dest.put(triangle + 2);
+                }
+            }
+            case GL_LINE_LOOP -> {
+                for (int segment = 0; segment < vertexCount; segment++) {
+                    dest.put(segment);
+                    dest.put((segment + 1) % vertexCount);
+                }
+            }
+            default -> throw new IllegalStateException("unreachable: " + glMode);
+        }
+        return count;
+    }
+
+    /**
      * The indices as plain integers.
      *
      * <p>The renderer wants them as one type: choosing 16 or 32 bits per draw would mean rebinding the index buffer

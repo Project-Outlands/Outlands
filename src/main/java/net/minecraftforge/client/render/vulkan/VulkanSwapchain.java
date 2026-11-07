@@ -173,6 +173,7 @@ final class VulkanSwapchain {
     private VulkanBuffer screenshotBuffer;
     private int screenshotWidth;
     private int screenshotHeight;
+
     private int extentHeight;
 
     private long[] images = new long[0];
@@ -354,6 +355,17 @@ final class VulkanSwapchain {
      * contents are by definition undefined and loading them would read whatever the previous frame left in a
      * different layout. {@code LOAD} for a resume, whose whole purpose is keeping what is already there.</p>
      */
+    /**
+     * Points descriptor set 1 at the game's lightmap and binds it for the frame.
+     *
+     * <p>Bound once rather than carried by every draw: the lightmap is one image the whole frame reads, and it changes
+     * when the sun moves or a torch flickers nearby, not per draw. The descriptor set is rewritten only when the image
+     * it points at actually changes, because {@code vkUpdateDescriptorSets} is not free.</p>
+     */
+    private void bindLightmap(VkCommandBuffer commandBuffer, int slot) {
+        stream.bindLightmap(commandBuffer, slot);
+    }
+
     /**
      * Copies the finished image into host memory, so {@link #finishScreenshot} can write it out.
      *
@@ -565,6 +577,7 @@ final class VulkanSwapchain {
         // world: the world itself, then the GUI on top. They were collected while the frame was being built -
         // vanilla issues them before Display.update() hands the frame over - so this is where they become commands.
         if (stream != null && !pendingDraws.isEmpty()) {
+            bindLightmap(commandBuffer, slot);
             stream.replay(commandBuffer, pendingDraws, slot, extentWidth, extentHeight, frameContext);
             pendingDraws = java.util.List.of();
         }
@@ -583,8 +596,10 @@ final class VulkanSwapchain {
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
         presentBarrier.get(0)
                 .sType$Default()
-                .srcStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-                .srcAccessMask(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                .srcStageMask(screenshot != null ? VK_PIPELINE_STAGE_2_TRANSFER_BIT
+                        : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .srcAccessMask(screenshot != null ? VK_ACCESS_2_TRANSFER_READ_BIT
+                        : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
                 .dstStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                 .dstAccessMask(0)
                 .oldLayout(screenshot != null ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL

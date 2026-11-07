@@ -39,15 +39,18 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties;
 final class VulkanBuffer implements AutoCloseable {
 
     private final VkDevice device;
-    private final long buffer;
-    private final long memory;
-    private final long size;
+    private final VulkanContext context;
+    private final int usage;
+    private long buffer;
+    private long memory;
+    private long size;
+    private long allocationSize;
+    private long mappedAddress;
 
-    private VulkanBuffer(VkDevice device, long buffer, long memory, long size) {
+    private VulkanBuffer(VkDevice device, VulkanContext context, int usage) {
         this.device = device;
-        this.buffer = buffer;
-        this.memory = memory;
-        this.size = size;
+        this.context = context;
+        this.usage = usage;
     }
 
     long handle() {
@@ -56,6 +59,10 @@ final class VulkanBuffer implements AutoCloseable {
 
     long size() {
         return size;
+    }
+
+    long mappedAddress() {
+        return mappedAddress;
     }
 
     /**
@@ -70,11 +77,16 @@ final class VulkanBuffer implements AutoCloseable {
     }
 
     /**
+     * Creates a dynamically resizable buffer usable as vertex or index storage, persistently mapped.
+     */
+    static VulkanBuffer createDynamic(VkDevice device, VulkanContext context, int usage, long initialCapacity) {
+        VulkanBuffer buf = new VulkanBuffer(device, context, usage);
+        buf.allocate(initialCapacity);
+        return buf;
+    }
+
+    /**
      * Creates host-visible memory holding {@code data}, for use as a copy source.
-     *
-     * <p>The upload path's half of a staged transfer: the bytes go here, and a {@code vkCmdCopyBufferToImage} reads
-     * them. Device-local is not requested - this memory is written by the host and read once by the copy engine, so
-     * the preference for ReBAR that the vertex buffers use would be wrong here.</p>
      */
     static VulkanBuffer createStaging(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
                                       byte[] data) {
@@ -83,10 +95,6 @@ final class VulkanBuffer implements AutoCloseable {
 
     /**
      * Creates host-visible memory that the GPU can write into, for reading something back.
-     *
-     * <p>Used by the upload verification: a copy of the device image lands here, and the bytes are compared against
-     * what was sent. That comparison is the only way to tell "the copy worked" from "the copy was recorded" without
-     * a screenshot, and the two look identical from the outside.</p>
      */
     static VulkanBuffer createReadback(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
                                        int size) {
@@ -100,74 +108,97 @@ final class VulkanBuffer implements AutoCloseable {
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     }
 
+    /** Ensures the buffer has at least {@code requiredSize} bytes capacity, growing exponentially if needed. */
+    void ensureCapacity(long requiredSize) {
+        if (requiredSize <= this.size) {
+            return;
+        }
+        long newCapacity = Math.max(requiredSize, Math.max(256L, this.size * 2));
+        free();
+        allocate(newCapacity);
+    }
+
     /** Reads {@code length} bytes back into a new array. Blocks on the memory being host-visible and coherent. */
     byte[] read(int length) {
         if (length > size) {
             throw new IllegalArgumentException("cannot read " + length + " bytes from a " + size + " byte buffer");
         }
         byte[] out = new byte[length];
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            org.lwjgl.PointerBuffer mapped = stack.mallocPointer(1);
-            VkCheck.check(org.lwjgl.vulkan.VK10.vkMapMemory(device, memory, 0L, size, 0, mapped), "vkMapMemory");
-            try {
-                org.lwjgl.system.MemoryUtil.memByteBuffer(mapped.get(0), (int) size).get(out);
-            } finally {
-                org.lwjgl.vulkan.VK10.vkUnmapMemory(device, memory);
-            }
-        }
+        org.lwjgl.system.MemoryUtil.memByteBuffer(mappedAddress, (int) size).position(0);
+        org.lwjgl.system.MemoryUtil.memByteBuffer(mappedAddress, (int) size).get(out, 0, length);
         return out;
     }
 
     private static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
                                        byte[] data, int usage) {
+        VulkanBuffer buf = new VulkanBuffer(device, context, usage);
+        buf.allocate(data.length);
+        if (data.length > 0) {
+            org.lwjgl.system.MemoryUtil.memByteBuffer(buf.mappedAddress, data.length).put(data);
+        }
+        return buf;
+    }
+
+    private void allocate(long capacity) {
+        long effectiveSize = Math.max(capacity, 256L);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkBufferCreateInfo createInfo = VkBufferCreateInfo.calloc(stack)
                     .sType$Default()
-                    .size(data.length)
+                    .size(effectiveSize)
                     .usage(usage)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer bufferOut = stack.mallocLong(1);
             VkCheck.check(vkCreateBuffer(device, createInfo, null, bufferOut), "vkCreateBuffer");
-            long buffer = bufferOut.get(0);
+            this.buffer = bufferOut.get(0);
 
-            long memory = 0L;
+            long allocatedMem = 0L;
             try {
                 VkMemoryRequirements requirements = VkMemoryRequirements.malloc(stack);
                 vkGetBufferMemoryRequirements(device, buffer, requirements);
+                this.allocationSize = requirements.size();
 
                 VkMemoryAllocateInfo allocateInfo = VkMemoryAllocateInfo.calloc(stack)
                         .sType$Default()
-                        .allocationSize(requirements.size())
+                        .allocationSize(allocationSize)
                         .memoryTypeIndex(memoryType(context, requirements.memoryTypeBits(), stack));
                 LongBuffer memoryOut = stack.mallocLong(1);
                 VkCheck.check(vkAllocateMemory(device, allocateInfo, null, memoryOut), "vkAllocateMemory");
-                memory = memoryOut.get(0);
+                allocatedMem = memoryOut.get(0);
+                this.memory = allocatedMem;
                 VkCheck.check(vkBindBufferMemory(device, buffer, memory, 0L), "vkBindBufferMemory");
 
-                write(device, memory, requirements.size(), data);
-                return new VulkanBuffer(device, buffer, memory, data.length);
+                org.lwjgl.PointerBuffer mapped = stack.mallocPointer(1);
+                VkCheck.check(org.lwjgl.vulkan.VK10.vkMapMemory(device, memory, 0L, allocationSize, 0, mapped),
+                        "vkMapMemory");
+                this.mappedAddress = mapped.get(0);
+                this.size = effectiveSize;
             } catch (RuntimeException e) {
-                if (memory != 0L) {
-                    vkFreeMemory(device, memory, null);
+                if (allocatedMem != 0L) {
+                    vkFreeMemory(device, allocatedMem, null);
+                    this.memory = 0L;
                 }
                 vkDestroyBuffer(device, buffer, null);
+                this.buffer = 0L;
                 throw e;
             }
         }
     }
 
-    private static void write(VkDevice device, long memory, long allocationSize, byte[] data) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            org.lwjgl.PointerBuffer mapped = stack.mallocPointer(1);
-            VkCheck.check(org.lwjgl.vulkan.VK10.vkMapMemory(device, memory, 0L, allocationSize, 0, mapped),
-                    "vkMapMemory");
-            try {
-                org.lwjgl.system.MemoryUtil.memByteBuffer(mapped.get(0), data.length).put(data);
-            } finally {
-                // COHERENT memory, so unmapping is enough to make the write visible; no explicit flush.
-                org.lwjgl.vulkan.VK10.vkUnmapMemory(device, memory);
-            }
+    private void free() {
+        if (mappedAddress != 0L) {
+            org.lwjgl.vulkan.VK10.vkUnmapMemory(device, memory);
+            mappedAddress = 0L;
         }
+        if (buffer != 0L) {
+            vkDestroyBuffer(device, buffer, null);
+            buffer = 0L;
+        }
+        if (memory != 0L) {
+            vkFreeMemory(device, memory, null);
+            memory = 0L;
+        }
+        size = 0L;
+        allocationSize = 0L;
     }
 
     private static int memoryType(VulkanContext context, int allowedBits, MemoryStack stack) {
@@ -201,7 +232,6 @@ final class VulkanBuffer implements AutoCloseable {
 
     @Override
     public void close() {
-        vkDestroyBuffer(device, buffer, null);
-        vkFreeMemory(device, memory, null);
+        free();
     }
 }

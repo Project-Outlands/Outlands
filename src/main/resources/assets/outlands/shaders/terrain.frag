@@ -15,6 +15,12 @@ layout(location = 2) in vec2 inLightmap;   // block light, sky light, both 0..1
 // solid-colour quads vanilla draws without a texture.
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 
+// The game's own 16x16 lightmap, in set 1 so every draw of the frame shares one binding: it changes when the sun moves
+// or a torch flickers, not per draw. Its u axis is block light and its v axis sky light, which is exactly what the
+// lightmap attribute carries, so the sample is the whole of vanilla's brightness curve - the sun's height, night
+// vision, the boss-colour modifier and the dimension's own overrides all arrive as texels.
+layout(set = 1, binding = 0) uniform sampler2D lightmap;
+
 // The fixed-function alpha test, as a discard.
 //
 // GL removed fragments whose alpha failed a comparison, and vanilla's GUI depends on it: a fully transparent texel
@@ -53,12 +59,19 @@ void main() {
 
     // Component order is block light then sky light: BufferBuilder.lightmap writes blockLight to the element's first
     // short and skyLight to the second, which is the opposite of the argument order of that method.
-    float blockLight = clamp(inLightmap.x, 0.0, 1.0);
-    float skyLight = clamp(inLightmap.y, 0.0, 1.0);
+    //
+    // Vanilla's lightmap coordinates are in 0..240 (blockLight * 16, skyLight * 16).
+    // The vertex attribute format is R16G16_UNORM, so the raw 16-bit value is scaled to 0..1 by dividing by 65535.
+    // In GL, the lightmap matrix mapped coord -> (coord + 8.0) / 256.0 to land in the center of 16x16 texels.
+    // Geometry without lightmap (e.g. GUI, text) arrives with 0xFFFF (UNORM 1.0), which gets full brightness.
+    vec3 light;
+    if (inLightmap.x > 0.5 || inLightmap.y > 0.5) {
+        light = vec3(1.0);
+    } else {
+        vec2 rawCoord = inLightmap * 65535.0;
+        vec2 lightUv = (rawCoord + 8.0) / 256.0;
+        light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
+    }
 
-    // A GUI quad arrives with the lightmap at its full value, so this factor is 1 there and only darkens world
-    // geometry. Vanilla's own minimum brightness for an unlit block is brighter than zero, hence the floor.
-    float brightness = mix(0.15, 1.0, max(blockLight, skyLight));
-
-    outColor = vec4(sample4.rgb * inColor.rgb * brightness, sample4.a * inColor.a);
+    outColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
 }

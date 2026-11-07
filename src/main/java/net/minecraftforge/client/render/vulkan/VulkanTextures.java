@@ -98,6 +98,31 @@ final class VulkanTextures implements AutoCloseable {
         this.white = VulkanImage.create(context.device(), context, 1, 1, textureFormat());
         this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET);
         this.whiteSet = descriptors.allocate(white.view(), whiteSampler);
+        for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
+            this.descriptors.writeLightmap(i, white.view(), whiteSampler);
+        }
+    }
+
+    /**
+     * Ensures the white stand-in image has been filled with opaque white data.
+     */
+    void ensureWhiteUploaded(VkCommandBuffer commandBuffer, int slot) {
+        if (!whiteUploaded) {
+            // Opaque white, in the image's own byte order. Done here rather than in the constructor because filling
+            // an image needs a recording command buffer, and this is the first moment one exists.
+            staging(commandBuffer, slot, white,
+                    new TextureImage(0, 1, 1, new int[] {0xFFFFFFFF},
+                            TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 1L));
+            whiteUploaded = true;
+        }
+    }
+
+    long whiteImageView() {
+        return white.view();
+    }
+
+    long whiteSampler() {
+        return whiteSampler;
     }
 
     /**
@@ -109,14 +134,7 @@ final class VulkanTextures implements AutoCloseable {
      * @return the set to bind, or the white set when the handle holds no data yet
      */
     long descriptorSet(int textureId, VkCommandBuffer commandBuffer, int slot) {
-        if (!whiteUploaded) {
-            // Opaque white, in the image's own byte order. Done here rather than in the constructor because filling
-            // an image needs a recording command buffer, and this is the first moment one exists.
-            staging(commandBuffer, slot, white,
-                    new TextureImage(0, 1, 1, new int[] {0xFFFFFFFF},
-                            TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 1L));
-            whiteUploaded = true;
-        }
+        ensureWhiteUploaded(commandBuffer, slot);
         if (textureId == 0) {
             return whiteSet;
         }
@@ -256,6 +274,21 @@ final class VulkanTextures implements AutoCloseable {
     /** Whether a texture has been filled by a framebuffer copy, and is therefore sampled u-reversed. */
     boolean isFramebufferTarget(int texture) {
         return source.isFramebufferTarget(texture);
+    }
+
+    /**
+     * Resolves a texture and reports the image and sampler behind it, for a descriptor set that is not the draw's own.
+     *
+     * <p>Used for the lightmap, which is one image every draw reads: it goes in set 1 rather than travelling with each
+     * draw, so what is wanted is the image view and sampler rather than a ready set.</p>
+     */
+    long[] resolveForSharedSet(int textureId, VkCommandBuffer commandBuffer, int slot) {
+        long set = descriptorSet(textureId, commandBuffer, slot);
+        Entry entry = entries.get(textureId);
+        if (entry == null) {
+            return null;
+        }
+        return new long[] {entry.image().view(), entry.sampler(), set};
     }
 
     /** The stand-in set a draw uses when nothing is bound. */
