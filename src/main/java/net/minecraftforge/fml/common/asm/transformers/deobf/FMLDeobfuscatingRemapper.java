@@ -21,7 +21,6 @@ package net.minecraftforge.fml.common.asm.transformers.deobf;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -43,7 +42,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableBiMap.Builder;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -57,6 +55,7 @@ import javax.annotation.Nullable;
 
 public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
     public static final FMLDeobfuscatingRemapper INSTANCE = new FMLDeobfuscatingRemapper();
+    private static final String[] NO_INTERFACES = new String[0];
 
     private BiMap<String, String> classNameBiMap;
 
@@ -410,13 +409,21 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
         try
         {
             String superName = null;
-            String[] interfaces = new String[0];
+            String[] interfaces = NO_INTERFACES;
             byte[] classBytes = ClassPatchManager.INSTANCE.getPatchedResource(name, map(name), classLoader);
             if (classBytes != null)
             {
                 ClassReader cr = new ClassReader(classBytes);
                 superName = cr.getSuperName();
                 interfaces = cr.getInterfaces();
+                if (superName == null)
+                {
+                    // A successfully read root (normally Object) has no inherited maps. Missing resources
+                    // are deliberately not cached here: they may become available later in the launch.
+                    methodNameMaps.put(name, ImmutableMap.of());
+                    fieldNameMaps.put(name, ImmutableMap.of());
+                    return;
+                }
             }
             mergeSuperMaps(name, superName, interfaces);
         }
@@ -438,39 +445,40 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
             return;
         }
 
-        List<String> allParents = ImmutableList.<String>builder().add(superName).addAll(Arrays.asList(interfaces)).build();
         // generate maps for all parent objects
-        for (String parentThing : allParents)
+        for (int index = -1; index < interfaces.length; index++)
         {
+            String parentThing = index < 0 ? superName : interfaces[index];
             if (!fieldNameMaps.containsKey(parentThing))
             {
                 findAndMergeSuperMaps(parentThing);
             }
         }
-        Map<String, String> methodMap = Maps.newHashMap();
-        Map<String, String> fieldMap = Maps.newHashMap();
-        for (String parentThing : allParents)
+        Map<String, String> methodMap = ImmutableMap.of();
+        Map<String, String> fieldMap = ImmutableMap.of();
+        for (int index = -1; index < interfaces.length; index++)
         {
-            if (methodNameMaps.containsKey(parentThing))
-            {
-                methodMap.putAll(methodNameMaps.get(parentThing));
-            }
-            if (fieldNameMaps.containsKey(parentThing))
-            {
-                fieldMap.putAll(fieldNameMaps.get(parentThing));
-            }
+            String parentThing = index < 0 ? superName : interfaces[index];
+            methodMap = mergeMappings(methodMap, methodNameMaps.get(parentThing));
+            fieldMap = mergeMappings(fieldMap, fieldNameMaps.get(parentThing));
         }
-        if (rawMethodMaps.containsKey(name))
-        {
-            methodMap.putAll(rawMethodMaps.get(name));
-        }
-        if (rawFieldMaps.containsKey(name))
-        {
-            fieldMap.putAll(rawFieldMaps.get(name));
-        }
+        methodMap = mergeMappings(methodMap, rawMethodMaps.get(name));
+        fieldMap = mergeMappings(fieldMap, rawFieldMaps.get(name));
         methodNameMaps.put(name, ImmutableMap.copyOf(methodMap));
         fieldNameMaps.put(name, ImmutableMap.copyOf(fieldMap));
 //        System.out.printf("Maps: %s %s\n", name, methodMap);
+    }
+
+    private static Map<String, String> mergeMappings(Map<String, String> result, Map<String, String> addition)
+    {
+        if (addition == null || addition.isEmpty() || addition == result)
+            return result;
+        if (result.isEmpty())
+            return ImmutableMap.copyOf(addition);
+        if (result instanceof ImmutableMap)
+            result = Maps.newHashMap(result);
+        result.putAll(addition);
+        return result;
     }
 
     public Set<String> getObfedClasses()
