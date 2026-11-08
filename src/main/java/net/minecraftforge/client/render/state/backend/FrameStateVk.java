@@ -362,6 +362,11 @@ final class FrameStateVk implements FrameState {
         if (recording != null) {
             recording.requestClear(glMask);
         }
+        if (net.minecraftforge.client.render.vertex.FrameDraws.isCollecting()) {
+            net.minecraftforge.client.render.vertex.FrameDraws.recordClear(
+                    glMask, clearColor.clone(), clearDepth,
+                    isEnabled(Capability.SCISSOR_TEST), scissor.clone());
+        }
     }
 
     @Override

@@ -287,6 +287,54 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = 0L;
                     continue;
                 }
+                if (op instanceof FrameDraws.Clear clearOp) {
+                    int mask = clearOp.mask();
+                    boolean clearColor = (mask & 0x4000) != 0;
+                    boolean clearDepth = (mask & 0x100) != 0;
+                    int count = (clearColor ? 1 : 0) + (clearDepth ? 1 : 0);
+                    if (count > 0) {
+                        org.lwjgl.vulkan.VkClearAttachment.Buffer clearAttachments =
+                                org.lwjgl.vulkan.VkClearAttachment.calloc(count, stack);
+                        int atIdx = 0;
+                        if (clearColor) {
+                            float[] c = clearOp.color();
+                            clearAttachments.get(atIdx)
+                                    .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                                    .colorAttachment(0);
+                            clearAttachments.get(atIdx).clearValue().color()
+                                    .float32(0, c[0]).float32(1, c[1]).float32(2, c[2]).float32(3, 1.0F);
+                            atIdx++;
+                        }
+                        if (clearDepth) {
+                            clearAttachments.get(atIdx)
+                                    .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT);
+                            clearAttachments.get(atIdx).clearValue().depthStencil()
+                                    .depth((float) clearOp.depth()).stencil(0);
+                            atIdx++;
+                        }
+                        int x = 0;
+                        int y = 0;
+                        int width = viewportWidth;
+                        int height = viewportHeight;
+                        if (clearOp.scissorEnabled()) {
+                            int[] box = clearOp.scissorBox();
+                            x = Math.max(0, box[0]);
+                            y = Math.max(0, viewportHeight - box[1] - box[3]);
+                            width = Math.min(box[2], viewportWidth - x);
+                            height = Math.min(box[3], viewportHeight - y);
+                        }
+                        if (width > 0 && height > 0) {
+                            org.lwjgl.vulkan.VkClearRect.Buffer clearRects =
+                                    org.lwjgl.vulkan.VkClearRect.calloc(1, stack);
+                            clearRects.get(0).rect().offset().set(x, y);
+                            clearRects.get(0).rect().extent().set(width, height);
+                            clearRects.get(0).baseArrayLayer(0);
+                            clearRects.get(0).layerCount(1);
+                            org.lwjgl.vulkan.VK10.vkCmdClearAttachments(commandBuffer, clearAttachments, clearRects);
+                        }
+                    }
+                    continue;
+                }
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
                 if (textures.isFramebufferTarget(draw.state().texture()) && draw.vertexCount() == 12) {

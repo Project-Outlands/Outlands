@@ -27,7 +27,7 @@ import java.util.List;
 public final class FrameDraws {
 
     /** One thing the frame asked a backend to do, in the order it asked. */
-    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer {}
+    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer, Clear {}
 
     /**
      * One recorded draw: its vertices plus the state it was issued with.
@@ -67,6 +67,27 @@ public final class FrameDraws {
         public TerrainLayer {
             if (mvp.length != 16) {
                 throw new IllegalArgumentException("an mvp matrix has 16 values, got " + mvp.length);
+            }
+        }
+    }
+
+    /**
+     * An attachment clear requested mid-frame.
+     *
+     * @param mask            GL clear mask (GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT)
+     * @param color           clear color (RGBA)
+     * @param depth           clear depth
+     * @param scissorEnabled  whether scissor test was enabled for the clear
+     * @param scissorBox      scissor rectangle (GL convention: x, y, width, height)
+     */
+    public record Clear(int mask, float[] color, double depth, boolean scissorEnabled, int[] scissorBox)
+            implements Operation {
+        public Clear {
+            if (color == null || color.length != 4) {
+                throw new IllegalArgumentException("clear color must have 4 components");
+            }
+            if (scissorBox == null || scissorBox.length != 4) {
+                throw new IllegalArgumentException("scissor box must have 4 values");
             }
         }
     }
@@ -150,6 +171,22 @@ public final class FrameDraws {
         }
         synchronized (DRAWS) {
             DRAWS.add(new TerrainLayer(layer, mvp));
+        }
+        return true;
+    }
+
+    /**
+     * Adds an attachment clear at this point in the sequence.
+     *
+     * @return {@code false} when nothing is collecting, which means there is no frame to clear inside
+     */
+    public static boolean recordClear(int mask, float[] color, double depth, boolean scissorEnabled,
+                                      int[] scissorBox) {
+        if (!collecting) {
+            return false;
+        }
+        synchronized (DRAWS) {
+            DRAWS.add(new Clear(mask, color, depth, scissorEnabled, scissorBox));
         }
         return true;
     }
