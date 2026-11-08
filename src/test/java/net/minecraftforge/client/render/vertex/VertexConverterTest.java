@@ -142,4 +142,117 @@ class VertexConverterTest {
 
         org.junit.jupiter.api.Assertions.assertArrayEquals(regular, inPlace);
     }
+
+    @Test
+    void fallbackColorComponentsAreInRgbaOrder() {
+        VertexFormat format = DefaultVertexFormats.POSITION_TEX;
+        ByteBuffer source = direct(format.getSize());
+        source.putFloat(0, 1.0F);
+        source.putFloat(4, 2.0F);
+        source.putFloat(8, 3.0F);
+        source.putFloat(12, 0.5F);
+        source.putFloat(16, 0.5F);
+
+        int fallbackColor = (0xAA << 24) | (0x11 << 16) | (0x22 << 8) | 0x33;
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 1, fallbackColor, null))
+                .order(ByteOrder.nativeOrder());
+
+        assertEquals(0x11, out.get(12) & 0xFF, "red matches fallback color");
+        assertEquals(0x22, out.get(13) & 0xFF, "green matches fallback color");
+        assertEquals(0x33, out.get(14) & 0xFF, "blue matches fallback color");
+        assertEquals(0xAA, out.get(15) & 0xFF, "alpha matches fallback color");
+    }
+
+    @Test
+    void normalAttributeAppliesDiffuseLightingOnItemFormat() {
+        VertexFormat format = DefaultVertexFormats.ITEM;
+        int stride = format.getSize();
+        ByteBuffer source = direct(stride * 4);
+
+        // ITEM layout: POSITION(12), COLOR(4), TEX(8), NORMAL(3), PADDING(1) -> total 28 bytes.
+        // Vertex 0: Y+ (top face), normal (0, 127, 0) -> diffuse factor 1.0
+        source.put(12, (byte) 200); // R
+        source.put(13, (byte) 200); // G
+        source.put(14, (byte) 200); // B
+        source.put(15, (byte) 255); // A
+        source.put(24, (byte) 0);
+        source.put(25, (byte) 127);
+        source.put(26, (byte) 0);
+
+        // Vertex 1: Y- (bottom face), normal (0, -127, 0) -> diffuse factor 0.5
+        int b1 = stride;
+        source.put(b1 + 12, (byte) 200);
+        source.put(b1 + 13, (byte) 200);
+        source.put(b1 + 14, (byte) 200);
+        source.put(b1 + 15, (byte) 255);
+        source.put(b1 + 24, (byte) 0);
+        source.put(b1 + 25, (byte) -127);
+        source.put(b1 + 26, (byte) 0);
+
+        // Vertex 2: Z+ (north/south), normal (0, 0, 127) -> diffuse factor 0.8
+        int b2 = stride * 2;
+        source.put(b2 + 12, (byte) 200);
+        source.put(b2 + 13, (byte) 200);
+        source.put(b2 + 14, (byte) 200);
+        source.put(b2 + 15, (byte) 255);
+        source.put(b2 + 24, (byte) 0);
+        source.put(b2 + 25, (byte) 0);
+        source.put(b2 + 26, (byte) 127);
+
+        // Vertex 3: X+ (east/west), normal (127, 0, 0) -> diffuse factor 0.6
+        int b3 = stride * 3;
+        source.put(b3 + 12, (byte) 200);
+        source.put(b3 + 13, (byte) 200);
+        source.put(b3 + 14, (byte) 200);
+        source.put(b3 + 15, (byte) 255);
+        source.put(b3 + 24, (byte) 127);
+        source.put(b3 + 25, (byte) 0);
+        source.put(b3 + 26, (byte) 0);
+
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 4))
+                .order(ByteOrder.nativeOrder());
+
+        int outStride = VertexConverter.STRIDE;
+        // Vertex 0: top face factor 1.0 -> 200
+        assertEquals(200, out.get(12) & 0xFF, "top face stays unattenuated");
+        assertEquals(255, out.get(15) & 0xFF, "alpha is preserved");
+
+        // Vertex 1: bottom face factor 0.5 -> 100
+        assertEquals(100, out.get(outStride + 12) & 0xFF, "bottom face factor 0.5");
+        assertEquals(255, out.get(outStride + 15) & 0xFF, "alpha is preserved");
+
+        // Vertex 2: Z face factor 0.8 -> 160
+        assertEquals(160, out.get(outStride * 2 + 12) & 0xFF, "Z face factor 0.8");
+
+        // Vertex 3: X face factor 0.6 -> 120
+        assertEquals(120, out.get(outStride * 3 + 12) & 0xFF, "X face factor 0.6");
+    }
+
+    @Test
+    void normalAttributeAppliesDiffuseLightingToFallbackColorOnOldModelFormat() {
+        VertexFormat format = DefaultVertexFormats.OLDMODEL_POSITION_TEX_NORMAL;
+        int stride = format.getSize();
+        ByteBuffer source = direct(stride * 2);
+
+        // OLDMODEL layout: POSITION(12), TEX(8), NORMAL(3), PADDING(1) -> total 24 bytes (no colour element).
+        // Vertex 0: top face (0, 127, 0)
+        source.put(20, (byte) 0);
+        source.put(21, (byte) 127);
+        source.put(22, (byte) 0);
+
+        // Vertex 1: bottom face (0, -127, 0)
+        source.put(stride + 20, (byte) 0);
+        source.put(stride + 21, (byte) -127);
+        source.put(stride + 22, (byte) 0);
+
+        int fallbackColor = (0xFF << 24) | (200 << 16) | (200 << 8) | 200;
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2, fallbackColor, null))
+                .order(ByteOrder.nativeOrder());
+
+        int outStride = VertexConverter.STRIDE;
+        assertEquals(200, out.get(12) & 0xFF, "top face factor 1.0 on fallback colour");
+        assertEquals(100, out.get(outStride + 12) & 0xFF, "bottom face factor 0.5 on fallback colour");
+        assertEquals(255, out.get(15) & 0xFF);
+        assertEquals(255, out.get(outStride + 15) & 0xFF);
+    }
 }

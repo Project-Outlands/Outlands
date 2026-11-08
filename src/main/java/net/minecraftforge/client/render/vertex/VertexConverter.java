@@ -78,6 +78,13 @@ public final class VertexConverter {
 
         ByteBuffer in = source.duplicate().order(ByteOrder.nativeOrder());
         List<VertexLayout.Attribute> attributes = layout.attributes();
+        VertexLayout.Attribute normalAttr = null;
+        for (VertexLayout.Attribute attr : attributes) {
+            if (attr.usage() == VertexFormatElement.EnumUsage.NORMAL) {
+                normalAttr = attr;
+                break;
+            }
+        }
         // Vanilla's constant lightmap coordinate, in the same unsigned-short encoding the attribute uses (0..240
         // for block light in low 16 bits, sky light in high 16 bits). A format without one therefore gets the
         // brightness the game asked for rather than a made-up full bright: that difference is a mob in a cave looking lit.
@@ -88,12 +95,20 @@ public final class VertexConverter {
             fallbackLight = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
         }
 
+        // Fallback colour packed into native byte order (R8G8B8A8).
+        // fallbackColor arrives as 0xAARRGGBB.
+        int fbR = (fallbackColor >>> 16) & 0xFF;
+        int fbG = (fallbackColor >>> 8) & 0xFF;
+        int fbB = fallbackColor & 0xFF;
+        int fbA = (fallbackColor >>> 24) & 0xFF;
+        int packedFallbackColor = (fbA << 24) | (fbB << 16) | (fbG << 8) | fbR;
+
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
             int sourceBase = vertex * inStride;
 
             // Neutrals first, so a format that lacks an attribute still produces a sane vertex.
-            target.putInt(base + COLOR_OFFSET, fallbackColor);
+            target.putInt(base + COLOR_OFFSET, packedFallbackColor);
             target.putFloat(base + UV_OFFSET, 0.0F);
             target.putFloat(base + UV_OFFSET + 4, 0.0F);
             target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
@@ -105,9 +120,13 @@ public final class VertexConverter {
                     case COLOR -> copyColor(in, at, target, base, attribute);
                     case UV -> copyUv(in, at, target, base, attribute);
                     default -> {
-                        // NORMAL and GENERIC have no place in the target layout; PADDING is skipped.
+                        // NORMAL is handled below after colour is populated; GENERIC/PADDING skipped.
                     }
                 }
+            }
+
+            if (normalAttr != null) {
+                applyNormalLighting(in, sourceBase + normalAttr.offset(), target, base, normalAttr);
             }
         }
     }
@@ -183,5 +202,34 @@ public final class VertexConverter {
     private static byte toByte(float value) {
         int scaled = (int) (value * 255.0F);
         return (byte) Math.max(0, Math.min(255, scaled));
+    }
+
+    private static void applyNormalLighting(ByteBuffer in, int at, ByteBuffer out, int base,
+                                            VertexLayout.Attribute attribute) {
+        float nx, ny, nz;
+        if (attribute.type() == VertexFormatElement.EnumType.BYTE
+                || attribute.type() == VertexFormatElement.EnumType.UBYTE) {
+            nx = in.get(at) / 127.0F;
+            ny = in.get(at + 1) / 127.0F;
+            nz = in.get(at + 2) / 127.0F;
+        } else if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
+            nx = in.getFloat(at);
+            ny = in.getFloat(at + 4);
+            nz = in.getFloat(at + 8);
+        } else {
+            return;
+        }
+        float lenSq = nx * nx + ny * ny + nz * nz;
+        if (lenSq > 0.01F) {
+            // Directional diffuse light factor matching Forge LightUtil.diffuseLight:
+            // Y+ (top) = 1.0, Z (north/south) = 0.8, X (east/west) = 0.6, Y- (bottom) = 0.5.
+            float factor = Math.min(1.0F, nx * nx * 0.6F + ny * ny * ((3.0F + ny) / 4.0F) + nz * nz * 0.8F);
+            int r = out.get(base + COLOR_OFFSET) & 0xFF;
+            int g = out.get(base + COLOR_OFFSET + 1) & 0xFF;
+            int b = out.get(base + COLOR_OFFSET + 2) & 0xFF;
+            out.put(base + COLOR_OFFSET, (byte) Math.round(r * factor));
+            out.put(base + COLOR_OFFSET + 1, (byte) Math.round(g * factor));
+            out.put(base + COLOR_OFFSET + 2, (byte) Math.round(b * factor));
+        }
     }
 }
