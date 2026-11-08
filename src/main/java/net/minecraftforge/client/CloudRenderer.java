@@ -44,6 +44,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraftforge.client.render.RenderBackendSelection;
 import net.minecraftforge.common.ForgeModContainer;
 import net.minecraftforge.client.resource.ISelectiveResourceReloadListener;
 
@@ -354,19 +355,22 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             b = tempB;
         }
 
-        if (COLOR_TEX == null)
-            COLOR_TEX = new DynamicTexture(1, 1);
+        if (RenderBackendSelection.glPath())
+        {
+            if (COLOR_TEX == null)
+                COLOR_TEX = new DynamicTexture(1, 1);
 
-        // Apply a color multiplier through a texture upload if shaders aren't supported.
-        COLOR_TEX.getTextureData()[0] = 255 << 24
-                | ((int) (r * 255)) << 16
-                | ((int) (g * 255)) << 8
-                | (int) (b * 255);
-        COLOR_TEX.updateDynamicTexture();
+            // Apply a color multiplier through a texture upload if shaders aren't supported.
+            COLOR_TEX.getTextureData()[0] = 255 << 24
+                    | ((int) (r * 255)) << 16
+                    | ((int) (g * 255)) << 8
+                    | (int) (b * 255);
+            COLOR_TEX.updateDynamicTexture();
 
-        GlStateManager.setActiveTexture(OpenGlHelper.lightmapTexUnit);
-        GlStateManager.bindTexture(COLOR_TEX.getGlTextureId());
-        GlStateManager.enableTexture2D();
+            GlStateManager.setActiveTexture(OpenGlHelper.lightmapTexUnit);
+            GlStateManager.bindTexture(COLOR_TEX.getGlTextureId());
+            GlStateManager.enableTexture2D();
+        }
 
         // Bind the clouds texture last so the shader's sampler2D is correct.
         GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
@@ -395,12 +399,15 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             buffer.position(0);
         }
 
-        // Depth pass to prevent insides rendering from the outside.
-        GlStateManager.colorMask(false, false, false, false);
-        if (OpenGlHelper.useVbo())
-            vbo.drawArrays(GL11.GL_QUADS);
-        else
-            GlStateManager.callList(displayList);
+        if (RenderBackendSelection.glPath())
+        {
+            // Depth pass to prevent insides rendering from the outside.
+            GlStateManager.colorMask(false, false, false, false);
+            if (OpenGlHelper.useVbo())
+                vbo.drawArrays(GL11.GL_QUADS);
+            else
+                GlStateManager.callList(displayList);
+        }
 
         // Full render.
         if (!mc.gameSettings.anaglyph)
@@ -453,10 +460,13 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             FORMAT.getElements().get(i).getUsage().postDraw(FORMAT, i, FORMAT.getSize(), buffer);
         buffer.position(0);
 
-        // Disable our coloring.
-        GlStateManager.setActiveTexture(OpenGlHelper.lightmapTexUnit);
-        GlStateManager.disableTexture2D();
-        GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
+        if (RenderBackendSelection.glPath())
+        {
+            // Disable our coloring.
+            GlStateManager.setActiveTexture(OpenGlHelper.lightmapTexUnit);
+            GlStateManager.disableTexture2D();
+            GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
+        }
 
         // Reset texture matrix.
         GlStateManager.matrixMode(GL11.GL_TEXTURE);

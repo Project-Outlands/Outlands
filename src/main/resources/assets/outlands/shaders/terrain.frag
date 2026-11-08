@@ -53,7 +53,8 @@ void main() {
     vec4 sample4 = texture(atlas, uv);
 
     // GL_GREATER is the only comparison vanilla sets, and the backend rejects the others rather than guessing.
-    if (pc.alphaTest > 0.5 && !(sample4.a > pc.alphaReference)) {
+    // In addition, discard fully transparent texels so they never write depth or trigger redundant work.
+    if ((pc.alphaTest > 0.5 && !(sample4.a > pc.alphaReference)) || sample4.a == 0.0) {
         discard;
     }
 

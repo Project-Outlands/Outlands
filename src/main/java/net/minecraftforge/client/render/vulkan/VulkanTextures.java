@@ -56,6 +56,7 @@ final class VulkanTextures implements AutoCloseable {
     private final Map<Long, Long> samplers = new HashMap<>();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
+    private final List<VulkanBuffer> stagingPool = new ArrayList<>();
 
     private final VulkanImage white;
     private final long whiteSampler;
@@ -175,28 +176,38 @@ final class VulkanTextures implements AutoCloseable {
     }
 
     /**
-     * Copies {@code image}'s pixels into a fresh staging buffer and records the upload.
+     * Copies {@code image}'s pixels into a staging buffer and records the upload.
      *
-     * <p>A buffer per upload rather than one packed buffer: packing would mean knowing every texture's size before
-     * recording any of them, and textures are uploaded a handful of times per session, not per frame.</p>
+     * <p>Staging buffers are pooled and reused across frames once fences retire, eliminating host allocation churn
+     * and driver-side {@code vkAllocateMemory} stalls during per-frame dynamic texture updates.</p>
      */
     private void staging(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image) {
         byte[] staged = toStagingBytes(image);
-        VulkanBuffer buffer = VulkanBuffer.createStaging(context.device(), context, staged);
+        VulkanBuffer buffer = null;
+        for (int i = 0; i < stagingPool.size(); i++) {
+            VulkanBuffer candidate = stagingPool.get(i);
+            if (candidate.size() >= staged.length) {
+                buffer = stagingPool.remove(i);
+                break;
+            }
+        }
+        if (buffer == null) {
+            buffer = VulkanBuffer.createStaging(context.device(), context, staged);
+        } else {
+            org.lwjgl.system.MemoryUtil.memByteBuffer(buffer.mappedAddress(), staged.length).put(staged);
+        }
         pendingStaging[slot].add(buffer);
         target.upload(commandBuffer, buffer.handle());
     }
 
     /**
-     * Releases this slot's staging buffers.
+     * Releases this slot's staging buffers back into the pool.
      *
      * <p>Called once the fence for {@code slot} has been waited on, which is the same point the stream frees its
      * vertex buffer. Calling it earlier would free memory a pending copy still reads.</p>
      */
     void releaseSlot(int slot) {
-        for (VulkanBuffer buffer : pendingStaging[slot]) {
-            buffer.close();
-        }
+        stagingPool.addAll(pendingStaging[slot]);
         pendingStaging[slot].clear();
     }
 
@@ -346,6 +357,10 @@ final class VulkanTextures implements AutoCloseable {
         for (int slot = 0; slot < pendingStaging.length; slot++) {
             releaseSlot(slot);
         }
+        for (VulkanBuffer buffer : stagingPool) {
+            buffer.close();
+        }
+        stagingPool.clear();
         for (Entry entry : entries.values()) {
             entry.image().close();
         }
