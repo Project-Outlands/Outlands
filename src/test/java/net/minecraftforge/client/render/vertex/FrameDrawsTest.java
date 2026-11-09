@@ -60,4 +60,27 @@ class FrameDrawsTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new FrameDraws.Clear(0x100, goodColor, 1.0, false, badScissor));
     }
+
+    @Test
+    void pooledDrawInstancesAreReusedAcrossFrames() {
+        VertexLayout layout = VertexLayout.of(net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_TEX_COLOR);
+        byte[] dummyData = new byte[layout.stride() * 4];
+        DrawState state = new DrawState();
+
+        // Frame 1
+        FrameDraws.beginCollecting();
+        FrameDraws.record(layout, 7, 4, dummyData, state);
+        List<FrameDraws.Operation> ops1 = FrameDraws.drain();
+        assertEquals(1, ops1.size());
+        FrameDraws.Draw draw1 = (FrameDraws.Draw) ops1.get(0);
+
+        // Frame 2
+        FrameDraws.beginCollecting();
+        FrameDraws.record(layout, 7, 4, dummyData, state);
+        List<FrameDraws.Operation> ops2 = FrameDraws.drain();
+        assertEquals(1, ops2.size());
+        FrameDraws.Draw draw2 = (FrameDraws.Draw) ops2.get(0);
+
+        org.junit.jupiter.api.Assertions.assertSame(draw1, draw2, "Draw instance should be reused from pool across frames");
+    }
 }

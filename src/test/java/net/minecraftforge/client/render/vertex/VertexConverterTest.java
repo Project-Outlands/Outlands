@@ -141,6 +141,20 @@ class VertexConverterTest {
         directTarget.get(inPlace);
 
         org.junit.jupiter.api.Assertions.assertArrayEquals(regular, inPlace);
+
+        byte[] arraySource = new byte[format.getSize()];
+        source.position(0);
+        source.get(arraySource);
+
+        ByteBuffer arrayDirectTarget = ByteBuffer.allocateDirect(offset + regular.length).order(ByteOrder.nativeOrder());
+        VertexConverter.convert(arraySource, VertexLayout.of(format), 1, 0x11223344, new float[] {100.0F, 200.0F},
+                false, null, null, null, null, arrayDirectTarget, offset);
+
+        byte[] fromArray = new byte[regular.length];
+        arrayDirectTarget.position(offset);
+        arrayDirectTarget.get(fromArray);
+
+        org.junit.jupiter.api.Assertions.assertArrayEquals(regular, fromArray, "ByteArray convert must match ByteBuffer convert");
     }
 
     @Test

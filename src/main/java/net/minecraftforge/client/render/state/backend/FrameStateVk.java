@@ -1,17 +1,11 @@
 package net.minecraftforge.client.render.state.backend;
 
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-
+import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 
 import java.nio.FloatBuffer;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,6 +26,42 @@ import java.util.Set;
  */
 final class FrameStateVk implements FrameState {
 
+    static final class MatrixStack {
+        private final Matrix4f[] stack;
+        private int top;
+
+        MatrixStack(int depth) {
+            this.stack = new Matrix4f[depth];
+            for (int i = 0; i < depth; i++) {
+                this.stack[i] = new Matrix4f();
+            }
+            this.top = 0;
+        }
+
+        Matrix4f current() {
+            return stack[top];
+        }
+
+        void push() {
+            if (top >= stack.length - 1) {
+                throw new StackOverflowError("Matrix stack overflow (depth limit " + stack.length + ")");
+            }
+            stack[top + 1].set(stack[top]);
+            top++;
+        }
+
+        void pop() {
+            if (top <= 0) {
+                throw new IllegalStateException("popMatrix without a matching pushMatrix");
+            }
+            top--;
+        }
+
+        void loadIdentity() {
+            stack[top].identity();
+        }
+    }
+
     private final Set<Capability> enabled = EnumSet.noneOf(Capability.class);
 
     private int depthComparison = 513;      // GL_LESS, the GL default
@@ -39,12 +69,13 @@ final class FrameStateVk implements FrameState {
     private float alphaReference = 0.0F;
     private int shadeModel = 7425;          // GL_SMOOTH
     private int cullFace = 1029;            // GL_BACK
-    private boolean[] colorMask = {true, true, true, true};
+    private final boolean[] colorMask = {true, true, true, true};
     private boolean depthMask = true;
-    private float[] vertexColor = {1.0F, 1.0F, 1.0F, 1.0F};
+    private final float[] vertexColor = {1.0F, 1.0F, 1.0F, 1.0F};
     private int blendSource = 1;            // GL_ONE
     private int blendDestination = 0;       // GL_ZERO
-    private int[] blendSeparate;
+    private final int[] blendSeparate = new int[4];
+    private boolean hasBlendSeparate;
     private int blendEquation = 32774;      // GL_FUNC_ADD
     private int logicOp = 5379;             // GL_COPY
     private float lineWidth = 1.0F;
@@ -52,9 +83,9 @@ final class FrameStateVk implements FrameState {
     private int polygonModeMode = 6914;     // GL_FILL
     private float polygonOffsetFactor;
     private float polygonOffsetUnits;
-    private int[] viewport = {0, 0, 0, 0};
-    private int[] scissor = {0, 0, 0, 0};
-    private float[] clearColor = {0.0F, 0.0F, 0.0F, 0.0F};
+    private final int[] viewport = {0, 0, 0, 0};
+    private final int[] scissor = {0, 0, 0, 0};
+    private final float[] clearColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private double clearDepth = 1.0;
     private int clearMask;
 
@@ -65,30 +96,44 @@ final class FrameStateVk implements FrameState {
     private static final int MODELVIEW = 5888;             // the matrix mode each target reads
     private static final int PROJECTION = 5889;
     private static final int TEXTURE = 5890;
-    /** One stack per GL matrix mode constant. */
-    private final Int2ObjectMap<Deque<Matrix4f>> matrixStacks = new Int2ObjectOpenHashMap<>();
-    private final Int2ObjectMap<Matrix4f> currentMatrix = new Int2ObjectOpenHashMap<>();
+
+    private final MatrixStack modelViewStack = new MatrixStack(64);
+    private final MatrixStack projectionStack = new MatrixStack(16);
+    private final MatrixStack[] textureStacks = new MatrixStack[8];
+
     private final float[] multiplyScratchValues = new float[16];
     private final Matrix4f multiplyScratchMatrix = new Matrix4f();
     private final float[] readMatrixScratch = new float[16];
+    private final Matrix4f mvpScratch = new Matrix4f();
+    private final Matrix3f normalScratch = new Matrix3f();
+    private final float[] normalMatrixValues = new float[9];
+    private boolean normalMatrixDirty = true;
+    private final float[] textureMatrixScratch = new float[16];
     private int attributeDepth;
 
     /** Fog state, at the defaults GL documents: GL_EXP at density 1, no colour, the linear range 0..1. */
     private int fogMode = 2048;
-    private float[] fogColor = {0.0F, 0.0F, 0.0F, 0.0F};
+    private final float[] fogColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private float fogDensity = 1.0F;
     private float fogStart = 0.0F;
     private float fogEnd = 1.0F;
     /** The lightmap coordinate a draw gets when its format carries none. Null until the game sets one. */
-    private float[] lightmap;
+    private final float[] lightmap = new float[2];
+    private boolean hasLightmap;
     /** The texture the game's lightmap lives in, or {@code 0}. */
     private int lightmapTexture;
-    private float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
-    private float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
+    private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
+    private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
     private static final int FOG_COLOR = 2918;     // GL_FOG_COLOR
+
+    FrameStateVk() {
+        for (int i = 0; i < textureStacks.length; i++) {
+            textureStacks[i] = new MatrixStack(16);
+        }
+    }
 
     @Override
     public void capability(Capability capability, boolean enable) {
@@ -116,8 +161,6 @@ final class FrameStateVk implements FrameState {
         return depthComparison;
     }
 
-    private final org.joml.Matrix3f normalScratch = new org.joml.Matrix3f();
-
     private static boolean isIdentity(Matrix4f m) {
         if ((m.properties() & org.joml.Matrix4fc.PROPERTY_IDENTITY) != 0) {
             return true;
@@ -130,13 +173,12 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public float[] textureMatrix() {
-        Matrix4f m = currentMatrix.get(TEXTURE << 8);
-        if (m == null || isIdentity(m)) {
+        Matrix4f m = textureStacks[activeTextureUnit & 7].current();
+        if (isIdentity(m)) {
             return null;
         }
-        float[] values = new float[16];
-        m.get(values);
-        return values;
+        m.get(textureMatrixScratch);
+        return textureMatrixScratch;
     }
 
     private int activeTextureUnit;
@@ -153,14 +195,17 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public float[] normalMatrix() {
-        Matrix4f mv = currentMatrix.get(MODELVIEW);
-        if (mv == null) {
-            return null;
+        if (normalMatrixDirty) {
+            modelViewStack.current().normal(normalScratch);
+            normalScratch.get(normalMatrixValues);
+            normalMatrixDirty = false;
         }
-        float[] out = new float[9];
-        mv.normal(normalScratch);
-        normalScratch.get(out);
-        return out;
+        return normalMatrixValues;
+    }
+
+    @Override
+    public void computeMvp(float[] target) {
+        mvpScratch.set(projectionStack.current()).mul(modelViewStack.current()).get(target);
     }
 
     @Override
@@ -186,12 +231,14 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void lightmap(float u, float v) {
-        lightmap = new float[] {u, v};
+        lightmap[0] = u;
+        lightmap[1] = v;
+        hasLightmap = true;
     }
 
     @Override
     public float[] lightmap() {
-        return lightmap == null ? null : lightmap.clone();
+        return hasLightmap ? lightmap : null;
     }
 
     @Override
@@ -223,9 +270,13 @@ final class FrameStateVk implements FrameState {
                 ez *= inv;
             }
             if (light == 16384) { // GL_LIGHT0
-                light0Eye = new float[] {ex, ey, ez};
+                light0Eye[0] = ex;
+                light0Eye[1] = ey;
+                light0Eye[2] = ez;
             } else if (light == 16385) { // GL_LIGHT1
-                light1Eye = new float[] {ex, ey, ez};
+                light1Eye[0] = ex;
+                light1Eye[1] = ey;
+                light1Eye[2] = ez;
             }
         }
     }
@@ -270,7 +321,10 @@ final class FrameStateVk implements FrameState {
         if (view.remaining() < 4) {
             throw new IllegalArgumentException("a fog colour needs 4 floats, the buffer has " + view.remaining());
         }
-        fogColor = new float[] {view.get(), view.get(), view.get(), view.get()};
+        fogColor[0] = view.get();
+        fogColor[1] = view.get();
+        fogColor[2] = view.get();
+        fogColor[3] = view.get();
         // The term itself is not computed yet - see the note on these methods in FrameState.
         FrameStates.reportSkippedOnce("fog", "world geometry is not faded towards the sky colour with distance");
     }
@@ -293,10 +347,10 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void colorMask(boolean red, boolean green, boolean blue, boolean alpha) {
-        if (colorMask[0] == red && colorMask[1] == green && colorMask[2] == blue && colorMask[3] == alpha) {
-            return;
-        }
-        colorMask = new boolean[] {red, green, blue, alpha};
+        colorMask[0] = red;
+        colorMask[1] = green;
+        colorMask[2] = blue;
+        colorMask[3] = alpha;
     }
 
     @Override
@@ -348,24 +402,26 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void color(float red, float green, float blue, float alpha) {
-        if (vertexColor[0] == red && vertexColor[1] == green && vertexColor[2] == blue && vertexColor[3] == alpha) {
-            return;
-        }
-        vertexColor = new float[] {red, green, blue, alpha};
+        vertexColor[0] = red;
+        vertexColor[1] = green;
+        vertexColor[2] = blue;
+        vertexColor[3] = alpha;
     }
 
     @Override
     public void blendFunc(int glSourceFactor, int glDestinationFactor) {
         blendSource = blendFactor(glSourceFactor);
         blendDestination = blendFactor(glDestinationFactor);
-        blendSeparate = null;
+        hasBlendSeparate = false;
     }
 
     @Override
     public void blendFuncSeparate(int glSourceRgb, int glDestinationRgb, int glSourceAlpha, int glDestinationAlpha) {
-        blendSeparate = new int[] {
-                blendFactor(glSourceRgb), blendFactor(glDestinationRgb),
-                blendFactor(glSourceAlpha), blendFactor(glDestinationAlpha)};
+        blendSeparate[0] = blendFactor(glSourceRgb);
+        blendSeparate[1] = blendFactor(glDestinationRgb);
+        blendSeparate[2] = blendFactor(glSourceAlpha);
+        blendSeparate[3] = blendFactor(glDestinationAlpha);
+        hasBlendSeparate = true;
     }
 
     @Override
@@ -380,7 +436,7 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public int[] blendFactors() {
-        return blendSeparate;
+        return hasBlendSeparate ? blendSeparate : null;
     }
 
     @Override
@@ -422,18 +478,18 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void viewport(int x, int y, int width, int height) {
-        if (viewport[0] == x && viewport[1] == y && viewport[2] == width && viewport[3] == height) {
-            return;
-        }
-        viewport = new int[] {x, y, width, height};
+        viewport[0] = x;
+        viewport[1] = y;
+        viewport[2] = width;
+        viewport[3] = height;
     }
 
     @Override
     public void scissor(int x, int y, int width, int height) {
-        if (scissor[0] == x && scissor[1] == y && scissor[2] == width && scissor[3] == height) {
-            return;
-        }
-        scissor = new int[] {x, y, width, height};
+        scissor[0] = x;
+        scissor[1] = y;
+        scissor[2] = width;
+        scissor[3] = height;
     }
 
     @Override
@@ -443,7 +499,10 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void clearColor(float red, float green, float blue, float alpha) {
-        clearColor = new float[] {red, green, blue, alpha};
+        clearColor[0] = red;
+        clearColor[1] = green;
+        clearColor[2] = blue;
+        clearColor[3] = alpha;
         // The frame asks for one clear colour, so the last value set here is the one that reaches it.
         net.minecraftforge.client.render.target.FrameRecording recording =
                 net.minecraftforge.client.render.target.FrameRecordings.current();
@@ -477,6 +536,22 @@ final class FrameStateVk implements FrameState {
         }
     }
 
+    private MatrixStack currentStack() {
+        if (matrixMode == MODELVIEW) {
+            return modelViewStack;
+        } else if (matrixMode == PROJECTION) {
+            return projectionStack;
+        } else if (matrixMode == TEXTURE) {
+            return textureStacks[activeTextureUnit & 7];
+        }
+        return modelViewStack;
+    }
+
+    private Matrix4f current() {
+        normalMatrixDirty = true;
+        return currentStack().current();
+    }
+
     @Override
     public void matrixMode(int glMode) {
         matrixMode = switch (glMode) {
@@ -487,22 +562,20 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void loadIdentity() {
-        current().identity();
+        normalMatrixDirty = true;
+        currentStack().loadIdentity();
     }
 
     @Override
     public void pushMatrix() {
-        stack().push(new Matrix4f(current()));
+        normalMatrixDirty = true;
+        currentStack().push();
     }
 
     @Override
     public void popMatrix() {
-        int key = currentMatrixKey();
-        Deque<Matrix4f> stack = matrixStacks.computeIfAbsent(key, mode -> new ArrayDeque<>());
-        if (stack.isEmpty()) {
-            throw new IllegalStateException("popMatrix without a matching pushMatrix in mode " + matrixMode);
-        }
-        currentMatrix.put(key, stack.pop());
+        normalMatrixDirty = true;
+        currentStack().pop();
     }
 
     @Override
@@ -600,30 +673,16 @@ final class FrameStateVk implements FrameState {
         attributeDepth--;
     }
 
-    private int currentMatrixKey() {
-        if (matrixMode == TEXTURE) {
-            return (TEXTURE << 8) | (activeTextureUnit() & 0xFF);
-        }
-        return matrixMode;
-    }
-
-    private Matrix4f current() {
-        return currentMatrix.computeIfAbsent(currentMatrixKey(), mode -> new Matrix4f());
-    }
-
-    private Deque<Matrix4f> stack() {
-        return matrixStacks.computeIfAbsent(currentMatrixKey(), mode -> new ArrayDeque<>());
-    }
-
     /** The matrix of one mode, for a draw that needs to hand it to a push constant. */
     public Matrix4fc matrix(int glMode) {
-        if (glMode == TEXTURE) {
-            int key = (TEXTURE << 8) | (activeTextureUnit() & 0xFF);
-            Matrix4f m = currentMatrix.get(key);
-            return m != null ? m : new Matrix4f();
+        if (glMode == MODELVIEW) {
+            return modelViewStack.current();
+        } else if (glMode == PROJECTION) {
+            return projectionStack.current();
+        } else if (glMode == TEXTURE) {
+            return textureStacks[activeTextureUnit & 7].current();
         }
-        Matrix4f m = currentMatrix.get(glMode);
-        return m != null ? m : new Matrix4f();
+        return modelViewStack.current();
     }
 
     private static int comparison(int glComparison) {

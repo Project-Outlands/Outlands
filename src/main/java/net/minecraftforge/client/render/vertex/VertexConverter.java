@@ -2,6 +2,8 @@ package net.minecraftforge.client.render.vertex;
 
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
@@ -36,6 +38,11 @@ public final class VertexConverter {
 
     /** Full lightmap: both components at their maximum, which is what an unlit-input vertex should look like. */
     private static final int FULL_LIGHTMAP = 0xFFFF;
+
+    private static final VarHandle FLOAT_VIEW =
+            MethodHandles.byteArrayViewVarHandle(float[].class, ByteOrder.nativeOrder());
+    private static final VarHandle SHORT_VIEW =
+            MethodHandles.byteArrayViewVarHandle(short[].class, ByteOrder.nativeOrder());
 
     private VertexConverter() {}
 
@@ -84,6 +91,111 @@ public final class VertexConverter {
     }
 
     /**
+     * Converts vertices directly from a byte array in-place into an existing {@code target} buffer at {@code targetOffset}.
+     */
+    public static void convert(byte[] source, VertexLayout layout, int vertexCount, int fallbackColor,
+                               float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                               float[] light0, float[] light1, float[] textureMatrix,
+                               ByteBuffer target, int targetOffset) {
+        convert(source, 0, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled,
+                normalMatrix, light0, light1, textureMatrix, target, targetOffset);
+    }
+
+    /**
+     * Converts vertices directly from a byte array starting at {@code sourceOffset} in-place into an existing
+     * {@code target} buffer at {@code targetOffset}.
+     */
+    public static void convert(byte[] source, int sourceOffset, VertexLayout layout, int vertexCount, int fallbackColor,
+                               float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                               float[] light0, float[] light1, float[] textureMatrix,
+                               ByteBuffer target, int targetOffset) {
+        int inStride = layout.stride();
+        int required = vertexCount * inStride;
+        if (source.length - sourceOffset < required) {
+            throw new IllegalArgumentException("layout needs " + required + " bytes for " + vertexCount
+                    + " vertices at stride " + inStride + ", the array has " + (source.length - sourceOffset));
+        }
+
+        List<VertexLayout.Attribute> attributes = layout.attributes();
+        VertexLayout.Attribute normalAttr = null;
+        for (VertexLayout.Attribute attr : attributes) {
+            if (attr.usage() == VertexFormatElement.EnumUsage.NORMAL) {
+                normalAttr = attr;
+                break;
+            }
+        }
+        int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
+        if (fallbackLightmap != null) {
+            int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
+            int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
+            fallbackLight = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
+        }
+
+        int fbR = (fallbackColor >>> 16) & 0xFF;
+        int fbG = (fallbackColor >>> 8) & 0xFF;
+        int fbB = fallbackColor & 0xFF;
+        int fbA = (fallbackColor >>> 24) & 0xFF;
+        int packedFallbackColor = (fbA << 24) | (fbB << 16) | (fbG << 8) | fbR;
+
+        float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
+        float cachedFactor = 1.0F;
+
+        for (int vertex = 0; vertex < vertexCount; vertex++) {
+            int base = targetOffset + vertex * STRIDE;
+            int sourceBase = sourceOffset + vertex * inStride;
+
+            target.putInt(base + COLOR_OFFSET, packedFallbackColor);
+            target.putFloat(base + UV_OFFSET, 0.0F);
+            target.putFloat(base + UV_OFFSET + 4, 0.0F);
+            target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
+
+            for (VertexLayout.Attribute attribute : attributes) {
+                int at = sourceBase + attribute.offset();
+                switch (attribute.usage()) {
+                    case POSITION -> copyPosition(source, at, target, base, attribute);
+                    case COLOR -> copyColor(source, at, target, base, attribute);
+                    case UV -> copyUv(source, at, target, base, attribute, textureMatrix);
+                    default -> {
+                    }
+                }
+            }
+
+            if (normalAttr != null && lightingEnabled && normalMatrix != null && light0 != null && light1 != null) {
+                int at = sourceBase + normalAttr.offset();
+                float nx, ny, nz;
+                if (normalAttr.type() == VertexFormatElement.EnumType.BYTE
+                        || normalAttr.type() == VertexFormatElement.EnumType.UBYTE) {
+                    nx = source[at];
+                    ny = source[at + 1];
+                    nz = source[at + 2];
+                } else if (normalAttr.type() == VertexFormatElement.EnumType.FLOAT) {
+                    nx = (float) FLOAT_VIEW.get(source, at);
+                    ny = (float) FLOAT_VIEW.get(source, at + 4);
+                    nz = (float) FLOAT_VIEW.get(source, at + 8);
+                } else {
+                    nx = 0.0F; ny = 0.0F; nz = 0.0F;
+                }
+
+                if (nx != lastNx || ny != lastNy || nz != lastNz) {
+                    lastNx = nx;
+                    lastNy = ny;
+                    lastNz = nz;
+                    cachedFactor = computeNormalLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, light0, light1);
+                }
+
+                if (cachedFactor < 0.9999F) {
+                    int r = target.get(base + COLOR_OFFSET) & 0xFF;
+                    int g = target.get(base + COLOR_OFFSET + 1) & 0xFF;
+                    int b = target.get(base + COLOR_OFFSET + 2) & 0xFF;
+                    target.put(base + COLOR_OFFSET, (byte) Math.round(r * cachedFactor));
+                    target.put(base + COLOR_OFFSET + 1, (byte) Math.round(g * cachedFactor));
+                    target.put(base + COLOR_OFFSET + 2, (byte) Math.round(b * cachedFactor));
+                }
+            }
+        }
+    }
+
+    /**
      * Converts vertices in-place into an existing {@code target} buffer at {@code targetOffset}, optionally applying
      * fixed-function diffuse lighting in eye space and 2D texture coordinate transformation.
      */
@@ -91,6 +203,12 @@ public final class VertexConverter {
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
                                float[] light0, float[] light1, float[] textureMatrix,
                                ByteBuffer target, int targetOffset) {
+        if (source.hasArray()) {
+            convert(source.array(), source.arrayOffset() + source.position(), layout, vertexCount,
+                    fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1,
+                    textureMatrix, target, targetOffset);
+            return;
+        }
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -213,6 +331,18 @@ public final class VertexConverter {
         return out;
     }
 
+    private static void copyPosition(byte[] source, int at, ByteBuffer out, int base,
+            VertexLayout.Attribute attribute) {
+        if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
+            throw new UnsupportedOperationException("position of type " + attribute.type()
+                    + " is not handled: vanilla only uses FLOAT positions");
+        }
+        out.putFloat(base + POSITION_OFFSET, (float) FLOAT_VIEW.get(source, at));
+        out.putFloat(base + POSITION_OFFSET + 4, (float) FLOAT_VIEW.get(source, at + 4));
+        // A two-component position exists (GUI points); its third coordinate is zero rather than absent.
+        out.putFloat(base + POSITION_OFFSET + 8, attribute.count() >= 3 ? (float) FLOAT_VIEW.get(source, at + 8) : 0.0F);
+    }
+
     private static void copyPosition(ByteBuffer in, int at, ByteBuffer out, int base,
             VertexLayout.Attribute attribute) {
         if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
@@ -223,6 +353,27 @@ public final class VertexConverter {
         out.putFloat(base + POSITION_OFFSET + 4, in.getFloat(at + 4));
         // A two-component position exists (GUI points); its third coordinate is zero rather than absent.
         out.putFloat(base + POSITION_OFFSET + 8, attribute.count() >= 3 ? in.getFloat(at + 8) : 0.0F);
+    }
+
+    private static void copyColor(byte[] source, int at, ByteBuffer out, int base,
+            VertexLayout.Attribute attribute) {
+        if (attribute.type() == VertexFormatElement.EnumType.UBYTE && attribute.count() == 4) {
+            // The target is the same R8G8B8A8_UNORM, so the four bytes move unchanged.
+            out.put(base + COLOR_OFFSET, source[at]);
+            out.put(base + COLOR_OFFSET + 1, source[at + 1]);
+            out.put(base + COLOR_OFFSET + 2, source[at + 2]);
+            out.put(base + COLOR_OFFSET + 3, source[at + 3]);
+            return;
+        }
+        if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
+            out.put(base + COLOR_OFFSET, toByte((float) FLOAT_VIEW.get(source, at)));
+            out.put(base + COLOR_OFFSET + 1, toByte((float) FLOAT_VIEW.get(source, at + 4)));
+            out.put(base + COLOR_OFFSET + 2, toByte((float) FLOAT_VIEW.get(source, at + 8)));
+            out.put(base + COLOR_OFFSET + 3, attribute.count() >= 4 ? toByte((float) FLOAT_VIEW.get(source, at + 12)) : (byte) 0xFF);
+            return;
+        }
+        throw new UnsupportedOperationException("colour of type " + attribute.type() + " x " + attribute.count()
+                + " is not handled");
     }
 
     private static void copyColor(ByteBuffer in, int at, ByteBuffer out, int base,
@@ -244,6 +395,36 @@ public final class VertexConverter {
         }
         throw new UnsupportedOperationException("colour of type " + attribute.type() + " x " + attribute.count()
                 + " is not handled");
+    }
+
+    private static void copyUv(byte[] source, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute,
+                               float[] textureMatrix) {
+        if (attribute.uvIndex() == 1) {
+            // The second texture coordinate is the lightmap: two unsigned shorts in the target.
+            if (attribute.type() != VertexFormatElement.EnumType.SHORT
+                    && attribute.type() != VertexFormatElement.EnumType.USHORT) {
+                throw new UnsupportedOperationException("lightmap of type " + attribute.type()
+                        + " is not handled: vanilla uses SHORT");
+            }
+            out.putShort(base + LIGHTMAP_OFFSET, (short) SHORT_VIEW.get(source, at));
+            out.putShort(base + LIGHTMAP_OFFSET + 2, (short) SHORT_VIEW.get(source, at + 2));
+            return;
+        }
+        if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
+            throw new UnsupportedOperationException("texture coordinate of type " + attribute.type()
+                    + " is not handled: vanilla uses FLOAT");
+        }
+        float u = (float) FLOAT_VIEW.get(source, at);
+        float v = (float) FLOAT_VIEW.get(source, at + 4);
+        if (textureMatrix != null) {
+            float uPrime = textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12];
+            float vPrime = textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13];
+            out.putFloat(base + UV_OFFSET, uPrime);
+            out.putFloat(base + UV_OFFSET + 4, vPrime);
+        } else {
+            out.putFloat(base + UV_OFFSET, u);
+            out.putFloat(base + UV_OFFSET + 4, v);
+        }
     }
 
     private static void copyUv(ByteBuffer in, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute,

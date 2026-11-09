@@ -33,6 +33,7 @@ final class DisplayListVk implements DisplayListBackend {
 
     private final Int2ObjectMap<List<Draw>> lists = new Int2ObjectLinkedOpenHashMap<>();
     private final Int2ObjectMap<List<Draw>> inProgress = new Int2ObjectOpenHashMap<>();
+    private final DrawState cachedCallState = new DrawState();
     private Integer recording;
     private int nextName = 1;
 
@@ -142,10 +143,14 @@ final class DisplayListVk implements DisplayListBackend {
                             + " collecting the frame, which happens once the device exists.");
         }
         // Replaying a list is recording its draws again: GL bakes the vertex data into the list and takes matrix and
-        // enable state at call time, which is exactly what DrawState.current() is here.
-        for (Draw draw : draws) {
-            FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), draw.vertices(),
-                    DrawState.current());
+        // enable state at call time, which is captured once per call into cachedCallState.
+        var state = net.minecraftforge.client.render.state.backend.FrameStates.instance();
+        if (state != null) {
+            cachedCallState.captureFrom(state);
+            for (int i = 0; i < draws.size(); i++) {
+                Draw draw = draws.get(i);
+                FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), draw.vertices(), cachedCallState);
+            }
         }
     }
 

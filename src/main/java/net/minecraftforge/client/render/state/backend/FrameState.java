@@ -48,6 +48,13 @@ public interface FrameState {
     org.joml.Matrix4fc modelView();
 
     /**
+     * Multiplies projection by modelview and writes the 16 column-major float values into {@code target}.
+     */
+    default void computeMvp(float[] target) {
+        new org.joml.Matrix4f(projection()).mul(modelView()).get(target);
+    }
+
+    /**
      * Copies the matrix currently in effect for a GL matrix target into {@code out}, column-major, 16 floats.
      *
      * <p><b>Why this is a matrix method and not a state query.</b> {@code glGetFloatv} is the only state readback

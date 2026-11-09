@@ -118,12 +118,17 @@ final class VulkanStream implements AutoCloseable {
     private int cachedChannels;
     private VulkanPipeline cachedPipeline;
 
+    static final int STATIC_QUAD_CAPACITY = 65_536;
+    static final int STATIC_QUAD_INDEX_COUNT = STATIC_QUAD_CAPACITY * 6;
+    private final VulkanBuffer staticQuadIndexBuffer;
+
     VulkanStream(VkDevice device, VulkanContext context, int colorFormat, int depthFormat,
                  VulkanDescriptors descriptors, VulkanTextures textures) {
         this.device = device;
         this.context = context;
         this.colorFormat = colorFormat;
         this.depthFormat = depthFormat;
+        this.staticQuadIndexBuffer = createStaticQuadIndexBuffer(device, context);
         this.vertexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
         this.indexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
@@ -218,7 +223,7 @@ final class VulkanStream implements AutoCloseable {
             FrameDraws.Draw draw = draws.get(i);
             totalVertices += draw.vertexCount();
             PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
-            if (shape.needsIndexing()) {
+            if (shape.needsIndexing() && !isStaticQuad(shape, draw.vertexCount())) {
                 totalIndices += shape.indexCount(draw.vertexCount());
             }
         }
@@ -254,7 +259,7 @@ final class VulkanStream implements AutoCloseable {
             FrameDraws.Draw draw = draws.get(i);
             offsets[i] = currentVertexOffset;
             DrawState ds = draw.state();
-            VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
+            VertexConverter.convert(draw.vertices(),
                     draw.layout(), draw.vertexCount(), ds.colorArgb(), ds.lightmap(),
                     ds.lightingEnabled(), ds.normalMatrix(), ds.light0(), ds.light1(),
                     ds.textureMatrix(),
@@ -263,9 +268,13 @@ final class VulkanStream implements AutoCloseable {
 
             PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
             if (shape.needsIndexing()) {
-                indexOffsets[i] = currentIndexOffset;
-                shape.writeIndices(draw.vertexCount(), targetIbo);
-                currentIndexOffset += shape.indexCount(draw.vertexCount());
+                if (isStaticQuad(shape, draw.vertexCount())) {
+                    indexOffsets[i] = 0;
+                } else {
+                    indexOffsets[i] = currentIndexOffset;
+                    shape.writeIndices(draw.vertexCount(), targetIbo);
+                    currentIndexOffset += shape.indexCount(draw.vertexCount());
+                }
             }
         }
 
@@ -286,7 +295,7 @@ final class VulkanStream implements AutoCloseable {
             java.nio.FloatBuffer push = constants.asFloatBuffer();
             long boundSet = 0L;
             long boundPipeline = 0L;
-            boolean indexBufferBound = false;
+            long boundIndexBuffer = 0L;
             // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
             // value is the whole viewport, which is what an unclipped frame uses.
             org.lwjgl.vulkan.VkViewport.Buffer viewport = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
@@ -323,7 +332,7 @@ final class VulkanStream implements AutoCloseable {
                     }
                     boundSet = 0L;
                     boundPipeline = 0L;
-                    indexBufferBound = false;
+                    boundIndexBuffer = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.Clear clearOp) {
@@ -451,10 +460,12 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = textureSets[indexOfOp];
                 }
                 if (shape.needsIndexing()) {
-                    if (!indexBufferBound) {
-                        vkCmdBindIndexBuffer(commandBuffer, indexBuffers[slot].handle(), 0L,
+                    boolean staticQuad = isStaticQuad(shape, draw.vertexCount());
+                    long neededIndexBuffer = staticQuad ? staticQuadIndexBuffer.handle() : indexBuffers[slot].handle();
+                    if (boundIndexBuffer != neededIndexBuffer) {
+                        vkCmdBindIndexBuffer(commandBuffer, neededIndexBuffer, 0L,
                                 org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
-                        indexBufferBound = true;
+                        boundIndexBuffer = neededIndexBuffer;
                     }
                     vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[indexOfOp],
                             offsets[indexOfOp] / VertexConverter.STRIDE, 0);
@@ -624,8 +635,33 @@ final class VulkanStream implements AutoCloseable {
         }
     }
 
+    private static VulkanBuffer createStaticQuadIndexBuffer(VkDevice device, VulkanContext context) {
+        VulkanBuffer buf = VulkanBuffer.createDynamic(device, context,
+                org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                (long) STATIC_QUAD_INDEX_COUNT * Integer.BYTES);
+        java.nio.IntBuffer ibo = org.lwjgl.system.MemoryUtil.memIntBuffer(
+                buf.mappedAddress(), STATIC_QUAD_INDEX_COUNT);
+        for (int q = 0; q < STATIC_QUAD_CAPACITY; q++) {
+            int base = q * 4;
+            ibo.put(base);
+            ibo.put(base + 1);
+            ibo.put(base + 2);
+            ibo.put(base);
+            ibo.put(base + 2);
+            ibo.put(base + 3);
+        }
+        return buf;
+    }
+
+    static boolean isStaticQuad(PrimitiveShape shape, int vertexCount) {
+        return shape.glMode() == 7 && (vertexCount / 4) <= STATIC_QUAD_CAPACITY;
+    }
+
     @Override
     public void close() {
+        if (staticQuadIndexBuffer != null) {
+            staticQuadIndexBuffer.close();
+        }
         for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
             if (vertexBuffers[slot] != null) {
                 vertexBuffers[slot].close();

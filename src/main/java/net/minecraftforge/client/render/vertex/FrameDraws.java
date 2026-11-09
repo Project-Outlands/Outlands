@@ -35,33 +35,49 @@ public final class FrameDraws {
      * <p>The state is part of the draw, not of the frame. Reading it at replay time would apply one matrix and one
      * set of enable bits to every draw in the frame, which is not what GL did.</p>
      */
-    public record Draw(VertexLayout layout, int mode, int vertexCount, byte[] vertices, DrawState state)
-            implements Operation {}
+    public static final class Draw implements Operation {
+        private VertexLayout layout;
+        private int mode;
+        private int vertexCount;
+        private byte[] vertices;
+        private final DrawState state;
+
+        public Draw() {
+            this.state = new DrawState();
+        }
+
+        public Draw(VertexLayout layout, int mode, int vertexCount, byte[] vertices, DrawState state) {
+            this.layout = layout;
+            this.mode = mode;
+            this.vertexCount = vertexCount;
+            this.vertices = vertices;
+            this.state = new DrawState();
+            this.state.copyFrom(state);
+        }
+
+        public void set(VertexLayout layout, int mode, int vertexCount, byte[] vertices, DrawState stateSource) {
+            this.layout = layout;
+            this.mode = mode;
+            this.vertexCount = vertexCount;
+            this.vertices = vertices;
+            this.state.copyFrom(stateSource);
+        }
+
+        public VertexLayout layout() { return layout; }
+        public int mode() { return mode; }
+        public int vertexCount() { return vertexCount; }
+        public byte[] vertices() { return vertices; }
+        public DrawState state() { return state; }
+    }
 
     /**
      * A framebuffer-to-texture copy, at its place in the sequence.
-     *
-     * @param texture the destination texture handle
-     * @param level   the destination mip level
-     * @param xOffset left edge in the destination
-     * @param yOffset top edge in the destination
-     * @param x       left edge of the source rectangle, in framebuffer pixels
-     * @param y       bottom edge of the source rectangle, in GL's bottom-up framebuffer coordinates
-     * @param width   the rectangle's width
-     * @param height  the rectangle's height
      */
     public record FramebufferCopy(int texture, int level, int xOffset, int yOffset, int x, int y, int width,
                                   int height) implements Operation {}
 
     /**
      * One render layer of the captured terrain, at its place in the sequence.
-     *
-     * <p>The chunks themselves are not in here: they are the backend's packed mesh, which outlives the frame. What the
-     * frame carries is the decision to draw one layer and the camera it was asked for with - the matrix is the game's
-     * at that moment, and the layer's chunks are relative to their origins.</p>
-     *
-     * @param layer the {@code BlockRenderLayer} ordinal
-     * @param mvp   projection times modelview, column-major, GL convention
      */
     public record TerrainLayer(int layer, float[] mvp) implements Operation {
         public TerrainLayer {
@@ -73,12 +89,6 @@ public final class FrameDraws {
 
     /**
      * An attachment clear requested mid-frame.
-     *
-     * @param mask            GL clear mask (GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT)
-     * @param color           clear color (RGBA)
-     * @param depth           clear depth
-     * @param scissorEnabled  whether scissor test was enabled for the clear
-     * @param scissorBox      scissor rectangle (GL convention: x, y, width, height)
      */
     public record Clear(int mask, float[] color, double depth, boolean scissorEnabled, int[] scissorBox)
             implements Operation {
@@ -92,26 +102,42 @@ public final class FrameDraws {
         }
     }
 
-    private static final List<Operation> DRAWS = new ArrayList<>();
+    private static final Object LOCK = new Object();
+    private static final List<Operation> ACTIVE_DRAWS = new ArrayList<>(1024);
+    private static final List<Operation> DRAINED_DRAWS = new ArrayList<>(1024);
+    private static final List<Draw> DRAW_POOL = new ArrayList<>(1024);
+    private static int poolCursor = 0;
     private static volatile boolean collecting;
 
     private FrameDraws() {}
 
+    private static Draw obtainDraw() {
+        if (poolCursor >= DRAW_POOL.size()) {
+            Draw d = new Draw();
+            DRAW_POOL.add(d);
+            poolCursor++;
+            return d;
+        }
+        return DRAW_POOL.get(poolCursor++);
+    }
+
     /** Starts collecting. Called by a backend that will replay the list later in the frame. */
     public static void beginCollecting() {
-        synchronized (DRAWS) {
-            DRAWS.clear();
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.clear();
+            poolCursor = 0;
+            collecting = true;
         }
-        collecting = true;
     }
 
     /** Stops collecting and returns what was recorded, in order. */
     public static List<Operation> drain() {
-        collecting = false;
-        synchronized (DRAWS) {
-            List<Operation> copy = new ArrayList<>(DRAWS);
-            DRAWS.clear();
-            return copy;
+        synchronized (LOCK) {
+            collecting = false;
+            DRAINED_DRAWS.clear();
+            DRAINED_DRAWS.addAll(ACTIVE_DRAWS);
+            ACTIVE_DRAWS.clear();
+            return DRAINED_DRAWS;
         }
     }
 
@@ -138,8 +164,10 @@ public final class FrameDraws {
         ByteBuffer view = data.duplicate();
         view.position(0);
         view.get(copy, 0, bytes);
-        synchronized (DRAWS) {
-            DRAWS.add(new Draw(layout, mode, vertexCount, copy, state));
+        synchronized (LOCK) {
+            Draw draw = obtainDraw();
+            draw.set(layout, mode, vertexCount, copy, state);
+            ACTIVE_DRAWS.add(draw);
         }
         return true;
     }
@@ -154,8 +182,10 @@ public final class FrameDraws {
         if (!collecting) {
             return false;
         }
-        synchronized (DRAWS) {
-            DRAWS.add(new Draw(layout, mode, vertexCount, vertices, state));
+        synchronized (LOCK) {
+            Draw draw = obtainDraw();
+            draw.set(layout, mode, vertexCount, vertices, state);
+            ACTIVE_DRAWS.add(draw);
         }
         return true;
     }
@@ -170,8 +200,8 @@ public final class FrameDraws {
         if (!collecting) {
             return false;
         }
-        synchronized (DRAWS) {
-            DRAWS.add(new FramebufferCopy(texture, level, xOffset, yOffset, x, y, width, height));
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.add(new FramebufferCopy(texture, level, xOffset, yOffset, x, y, width, height));
         }
         return true;
     }
@@ -185,8 +215,8 @@ public final class FrameDraws {
         if (!collecting) {
             return false;
         }
-        synchronized (DRAWS) {
-            DRAWS.add(new TerrainLayer(layer, mvp));
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp));
         }
         return true;
     }
@@ -201,16 +231,16 @@ public final class FrameDraws {
         if (!collecting) {
             return false;
         }
-        synchronized (DRAWS) {
-            DRAWS.add(new Clear(mask, color, depth, scissorEnabled, scissorBox));
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.add(new Clear(mask, color, depth, scissorEnabled, scissorBox));
         }
         return true;
     }
 
     /** How many operations are waiting. Diagnostics. */
     public static int pending() {
-        synchronized (DRAWS) {
-            return DRAWS.size();
+        synchronized (LOCK) {
+            return ACTIVE_DRAWS.size();
         }
     }
 }
