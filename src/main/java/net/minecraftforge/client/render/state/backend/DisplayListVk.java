@@ -106,7 +106,7 @@ final class DisplayListVk implements DisplayListBackend {
         // Replaying a list is recording its draws again: GL bakes the vertex data into the list and takes matrix and
         // enable state at call time, which is exactly what DrawState.current() is here.
         for (Draw draw : draws) {
-            FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), ByteBuffer.wrap(draw.vertices()),
+            FrameDraws.record(draw.layout(), draw.mode(), draw.vertexCount(), draw.vertices(),
                     DrawState.current());
         }
     }

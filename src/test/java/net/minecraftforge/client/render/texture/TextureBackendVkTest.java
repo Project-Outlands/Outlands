@@ -127,4 +127,25 @@ class TextureBackendVkTest {
         backend.activeUnit(0);
         org.junit.jupiter.api.Assertions.assertTrue(backend.isTexture2DEnabled());
     }
+
+    @Test
+    void subUploadRecordsDirtyRegionAndDrainsCleanly() {
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 16, 16, pixels(256));
+
+        org.junit.jupiter.api.Assertions.assertTrue(backend.drainSubUpdates(id).isEmpty(),
+                "full upload clears pending sub-updates");
+
+        backend.subUpload(id, 0, 2, 3, 4, 5, pixels(20));
+        java.util.List<TextureBackend.SubUpdate> updates = backend.drainSubUpdates(id);
+        assertEquals(1, updates.size());
+        assertEquals(2, updates.get(0).xOffset());
+        assertEquals(3, updates.get(0).yOffset());
+        assertEquals(4, updates.get(0).width());
+        assertEquals(5, updates.get(0).height());
+
+        org.junit.jupiter.api.Assertions.assertTrue(backend.drainSubUpdates(id).isEmpty(),
+                "drainSubUpdates must clear pending updates after draining");
+    }
 }

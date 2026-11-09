@@ -172,6 +172,19 @@ public interface TextureBackend {
     int levelParameter(int id, int level, int glTarget, int glPname);
 
     /**
+     * One sub-rectangle of level 0 that was updated since last drained.
+     */
+    record SubUpdate(int xOffset, int yOffset, int width, int height) {}
+
+    /**
+     * Drains and returns all sub-rectangle updates recorded for a texture since the last drain.
+     *
+     * @param id the texture handle
+     * @return the list of sub-updates, or an empty list if none are pending
+     */
+    java.util.List<SubUpdate> drainSubUpdates(int id);
+
+    /**
      * How many textures hold data that has not been turned into a device image yet.
      *
      * <p>Diagnostics, and the reason the deferred part of this path is visible rather than assumed: a texture that

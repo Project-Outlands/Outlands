@@ -99,7 +99,21 @@ final class VulkanStream implements AutoCloseable {
      * ({@code VUID-vkCmdCopyBufferToImage-renderpass}). The replay then only binds what is already there.</p>
      */
     private final Map<Integer, Long> resolved = new HashMap<>();
+    private final List<FrameDraws.Draw> draws = new ArrayList<>();
     private int drawsThisFrame;
+
+    private VulkanPipeline.VK10Topology cachedTopology;
+    private boolean cachedDepthTest;
+    private boolean cachedDepthWrite;
+    private int cachedDepthFunc;
+    private boolean cachedBlend;
+    private boolean cachedCull;
+    private int cachedSrcRgb;
+    private int cachedDstRgb;
+    private int cachedSrcAlpha;
+    private int cachedDstAlpha;
+    private int cachedChannels;
+    private VulkanPipeline cachedPipeline;
 
     VulkanStream(VkDevice device, VulkanContext context, int colorFormat, int depthFormat,
                  VulkanDescriptors descriptors, VulkanTextures textures) {
@@ -183,7 +197,7 @@ final class VulkanStream implements AutoCloseable {
      */
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget target) {
-        List<FrameDraws.Draw> draws = new ArrayList<>(ops.size());
+        draws.clear();
         for (int i = 0; i < ops.size(); i++) {
             if (ops.get(i) instanceof FrameDraws.Draw d) {
                 draws.add(d);
@@ -370,10 +384,41 @@ final class VulkanStream implements AutoCloseable {
                     continue;
                 }
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
-                // Each draw carries the matrix and enable bits it was issued with. Using the frame's current state
-                // here instead would apply one matrix to every draw - which drew the whole menu with the panorama's
-                // perspective matrix and left the GUI off-screen.
-                VulkanPipeline pipeline = pipelineFor(stateFor(shape, draw.state()));
+                VulkanPipeline.VK10Topology topo = VulkanPipeline.VK10Topology.of(shape.topology());
+                DrawState ds = draw.state();
+                boolean[] mask = ds.colorMask();
+                int channels = (mask[0] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT : 0)
+                        | (mask[1] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT : 0)
+                        | (mask[2] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT : 0)
+                        | (mask[3] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT : 0);
+
+                VulkanPipeline pipeline;
+                if (cachedPipeline != null && topo == cachedTopology
+                        && ds.depthTest() == cachedDepthTest && ds.depthWrite() == cachedDepthWrite
+                        && ds.depthFunc() == cachedDepthFunc && ds.blend() == cachedBlend && ds.cull() == cachedCull
+                        && ds.blendSourceRgb() == cachedSrcRgb && ds.blendDestinationRgb() == cachedDstRgb
+                        && ds.blendSourceAlpha() == cachedSrcAlpha && ds.blendDestinationAlpha() == cachedDstAlpha
+                        && channels == cachedChannels) {
+                    pipeline = cachedPipeline;
+                } else {
+                    VulkanPipeline.PipelineState ps = new VulkanPipeline.PipelineState(topo,
+                            ds.depthTest(), ds.depthWrite(), ds.depthFunc(), ds.blend(), ds.cull(),
+                            ds.blendSourceRgb(), ds.blendDestinationRgb(), ds.blendSourceAlpha(),
+                            ds.blendDestinationAlpha(), channels);
+                    pipeline = pipelineFor(ps);
+                    cachedTopology = topo;
+                    cachedDepthTest = ds.depthTest();
+                    cachedDepthWrite = ds.depthWrite();
+                    cachedDepthFunc = ds.depthFunc();
+                    cachedBlend = ds.blend();
+                    cachedCull = ds.cull();
+                    cachedSrcRgb = ds.blendSourceRgb();
+                    cachedDstRgb = ds.blendDestinationRgb();
+                    cachedSrcAlpha = ds.blendSourceAlpha();
+                    cachedDstAlpha = ds.blendDestinationAlpha();
+                    cachedChannels = channels;
+                    cachedPipeline = pipeline;
+                }
                 if (pipeline.handle() != boundPipeline) {
                     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
                     boundPipeline = pipeline.handle();
@@ -507,28 +552,7 @@ final class VulkanStream implements AutoCloseable {
         target.position(0);
     }
 
-    /**
-     * The pipeline state for a draw.
-     *
-     * <p>Blend, depth test, culling and the blend factors come from the draw because that is what the game's
-     * {@code GlStateManager} calls had set when the draw was issued. Depth comparison is not in the key yet: vanilla
-     * changes it (the GUI uses LEQUAL, the world LESS), which is a visible difference on coplanar geometry, so it is
-     * the next entry rather than an assumption.</p>
-     */
-    private VulkanPipeline.PipelineState stateFor(PrimitiveShape shape, DrawState state) {
-        // EXPERIMENT: the main menu's final backdrop draw covers the screen with the copied panorama yet produces
-        // nothing, while the twelve-vertex blur quads that put the same texture into the same corner do appear.
-        // The two differ by viewport, measured correct, so the difference lies in one of these pieces of state.
-        boolean[] mask = state.colorMask();
-        int channels = (mask[0] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT : 0)
-                | (mask[1] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT : 0)
-                | (mask[2] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT : 0)
-                | (mask[3] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT : 0);
-        return new VulkanPipeline.PipelineState(VulkanPipeline.VK10Topology.of(shape.topology()),
-                state.depthTest(), state.depthWrite(), state.depthFunc(), state.blend(), state.cull(),
-                state.blendSourceRgb(), state.blendDestinationRgb(), state.blendSourceAlpha(),
-                state.blendDestinationAlpha(), channels);
-    }
+
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {
         return pipelines.computeIfAbsent(state,

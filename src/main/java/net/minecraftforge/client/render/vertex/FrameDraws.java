@@ -145,6 +145,22 @@ public final class FrameDraws {
     }
 
     /**
+     * Adds one draw with an existing vertex byte array directly without defensive copying.
+     * Used by display lists whose vertex bytes are already immutable and captured.
+     *
+     * @return {@code false} when nothing is collecting
+     */
+    public static boolean record(VertexLayout layout, int mode, int vertexCount, byte[] vertices, DrawState state) {
+        if (!collecting) {
+            return false;
+        }
+        synchronized (DRAWS) {
+            DRAWS.add(new Draw(layout, mode, vertexCount, vertices, state));
+        }
+        return true;
+    }
+
+    /**
      * Adds a framebuffer-to-texture copy at this point in the sequence.
      *
      * @return {@code false} when nothing is collecting, which means there is no frame to copy inside

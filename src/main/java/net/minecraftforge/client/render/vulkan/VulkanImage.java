@@ -212,6 +212,32 @@ final class VulkanImage implements AutoCloseable {
     }
 
     /**
+     * Copies one or more sub-regions from {@code staging} into this image and leaves it sampleable.
+     */
+    void subUpload(VkCommandBuffer commandBuffer, long staging, org.lwjgl.vulkan.VkBufferImageCopy.Buffer regions) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            transition(commandBuffer, stack,
+                    initialised ? org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                            : org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+            org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, regions);
+
+            transition(commandBuffer, stack,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT);
+            initialised = true;
+        }
+    }
+
+
+
+    /**
      * Records a copy of this image into {@code destination}, leaving the image sampleable again.
      *
      * <p>For the upload verification, and deliberately part of the same command buffer as the upload: it reads
@@ -335,6 +361,8 @@ final class VulkanImage implements AutoCloseable {
             initialised = true;
         }
     }
+
+
 
     /** A layout transition for an image this object does not own, such as the frame's colour attachment. */
     private static void transitionExternal(VkCommandBuffer commandBuffer, MemoryStack stack, long image,

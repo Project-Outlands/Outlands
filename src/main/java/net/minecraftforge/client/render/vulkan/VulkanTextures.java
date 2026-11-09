@@ -111,7 +111,7 @@ final class VulkanTextures implements AutoCloseable {
         if (!whiteUploaded) {
             // Opaque white, in the image's own byte order. Done here rather than in the constructor because filling
             // an image needs a recording command buffer, and this is the first moment one exists.
-            staging(commandBuffer, slot, white,
+            stagingFull(commandBuffer, slot, white,
                     new TextureImage(0, 1, 1, new int[] {0xFFFFFFFF},
                             TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 1L));
             whiteUploaded = true;
@@ -160,6 +160,8 @@ final class VulkanTextures implements AutoCloseable {
             long set = descriptors.allocate(created.view(), sampler);
             entry = new Entry(created, sampler, set, -1L);
             entries.put(textureId, entry);
+            source.drainSubUpdates(textureId);
+            stagingFull(commandBuffer, slot, entry.image(), image);
         } else if (entry.image().width() != image.width() || entry.image().height() != image.height()) {
             // A texture cannot be resized in place, and GL did allow it: glTexImage2D on an existing name replaces
             // the level at a possibly different size. The sampler survives, so only the image and its set change.
@@ -168,36 +170,84 @@ final class VulkanTextures implements AutoCloseable {
             long set = descriptors.allocate(created.view(), entry.sampler());
             entry = new Entry(created, entry.sampler(), set, -1L);
             entries.put(textureId, entry);
+            source.drainSubUpdates(textureId);
+            stagingFull(commandBuffer, slot, entry.image(), image);
+        } else {
+            java.util.List<TextureBackend.SubUpdate> subUpdates = source.drainSubUpdates(textureId);
+            if (!subUpdates.isEmpty()) {
+                stagingSub(commandBuffer, slot, entry.image(), image, subUpdates);
+            } else {
+                stagingFull(commandBuffer, slot, entry.image(), image);
+            }
         }
 
-        staging(commandBuffer, slot, entry.image(), image);
         entries.put(textureId, new Entry(entry.image(), entry.sampler(), entry.descriptorSet(), image.version()));
         return entry.descriptorSet();
     }
 
-    /**
-     * Copies {@code image}'s pixels into a staging buffer and records the upload.
-     *
-     * <p>Staging buffers are pooled and reused across frames once fences retire, eliminating host allocation churn
-     * and driver-side {@code vkAllocateMemory} stalls during per-frame dynamic texture updates.</p>
-     */
-    private void staging(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image) {
-        byte[] staged = toStagingBytes(image);
-        VulkanBuffer buffer = null;
+    private VulkanBuffer acquireStaging(long byteSize) {
         for (int i = 0; i < stagingPool.size(); i++) {
             VulkanBuffer candidate = stagingPool.get(i);
-            if (candidate.size() >= staged.length) {
-                buffer = stagingPool.remove(i);
-                break;
+            if (candidate.size() >= byteSize) {
+                return stagingPool.remove(i);
             }
         }
-        if (buffer == null) {
-            buffer = VulkanBuffer.createStaging(context.device(), context, staged);
-        } else {
-            org.lwjgl.system.MemoryUtil.memByteBuffer(buffer.mappedAddress(), staged.length).put(staged);
-        }
+        return VulkanBuffer.createStaging(context.device(), context, byteSize);
+    }
+
+    private void stagingFull(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image) {
+        int[] argb = image.argb();
+        int byteSize = argb.length * 4;
+        VulkanBuffer buffer = acquireStaging(byteSize);
+        org.lwjgl.system.MemoryUtil.memIntBuffer(buffer.mappedAddress(), argb.length).put(argb);
         pendingStaging[slot].add(buffer);
         target.upload(commandBuffer, buffer.handle());
+    }
+
+    private void stagingSub(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image,
+                            java.util.List<TextureBackend.SubUpdate> subUpdates) {
+        long totalBytes = 0L;
+        for (TextureBackend.SubUpdate sub : subUpdates) {
+            totalBytes += (long) sub.width() * sub.height() * 4L;
+        }
+        if (totalBytes <= 0L) {
+            return;
+        }
+        VulkanBuffer buffer = acquireStaging(totalBytes);
+        int[] argb = image.argb();
+        int imageWidth = image.width();
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkBufferImageCopy.Buffer regions =
+                    org.lwjgl.vulkan.VkBufferImageCopy.calloc(subUpdates.size(), stack);
+
+            long currentByteOffset = 0L;
+            for (int i = 0; i < subUpdates.size(); i++) {
+                TextureBackend.SubUpdate sub = subUpdates.get(i);
+                int subPixels = sub.width() * sub.height();
+
+                java.nio.IntBuffer mapped = org.lwjgl.system.MemoryUtil.memIntBuffer(
+                        buffer.mappedAddress() + currentByteOffset, subPixels);
+                for (int row = 0; row < sub.height(); row++) {
+                    mapped.position(row * sub.width());
+                    mapped.put(argb, (sub.yOffset() + row) * imageWidth + sub.xOffset(), sub.width());
+                }
+
+                regions.get(i)
+                        .bufferOffset(currentByteOffset)
+                        .bufferRowLength(0)
+                        .bufferImageHeight(0);
+                regions.get(i).imageOffset().x(sub.xOffset()).y(sub.yOffset()).z(0);
+                regions.get(i).imageExtent().width(sub.width()).height(sub.height()).depth(1);
+                regions.get(i).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(0).baseArrayLayer(0).layerCount(1);
+
+                currentByteOffset += (long) subPixels * 4L;
+            }
+
+            pendingStaging[slot].add(buffer);
+            target.subUpload(commandBuffer, buffer.handle(), regions);
+        }
     }
 
     /**
@@ -211,34 +261,7 @@ final class VulkanTextures implements AutoCloseable {
         pendingStaging[slot].clear();
     }
 
-    /**
-     * The pixels in the image's own byte order, unchanged in orientation.
-     *
-     * <p><b>No row flip, and that is the whole point.</b> The familiar "GL's origin is bottom-left, Vulkan's is
-     * top-left" applies to the <i>framebuffer</i>, not to texel indexing: {@code glTexImage2D} puts the first row of
-     * data at texel row 0, and sampling at {@code v = 0} reads texel row 0, in both APIs. Flipping here would mirror
-     * every image against the UVs the game computed for it, which on the main menu's six-face panorama shows up as
-     * faces that are upside down and one of them in the sky.</p>
-     *
-     * <p>The one real conversion is the byte order: the ints are {@code 0xAARRGGBB} and the image is
-     * {@code B8G8R8A8}, which on a little-endian machine is the same four bytes, so this is a copy with the int
-     * unpacked rather than a swizzle.</p>
-     */
-    private static byte[] toStagingBytes(TextureImage image) {
-        int width = image.width();
-        int height = image.height();
-        int[] argb = image.argb();
-        byte[] out = new byte[width * height * 4];
-        for (int texel = 0; texel < argb.length; texel++) {
-            int pixel = argb[texel];
-            int at = texel * 4;
-            out[at] = (byte) pixel;              // B
-            out[at + 1] = (byte) (pixel >>> 8);  // G
-            out[at + 2] = (byte) (pixel >>> 16); // R
-            out[at + 3] = (byte) (pixel >>> 24); // A
-        }
-        return out;
-    }
+
 
     /**
      * Copies part of this frame's framebuffer into a texture.

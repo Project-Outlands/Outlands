@@ -86,6 +86,14 @@ final class VulkanBuffer implements AutoCloseable {
     }
 
     /**
+     * Creates host-visible staging memory of {@code size} bytes without pre-allocated data.
+     */
+    static VulkanBuffer createStaging(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                                      long size) {
+        return createDynamic(device, context, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, size);
+    }
+
+    /**
      * Creates host-visible memory holding {@code data}, for use as a copy source.
      */
     static VulkanBuffer createStaging(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,

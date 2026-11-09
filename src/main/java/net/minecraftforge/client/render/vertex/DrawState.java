@@ -65,6 +65,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, int 
         }
     }
 
+    private static final org.joml.Matrix4f MVP_SCRATCH = new org.joml.Matrix4f();
+
     /**
      * Reads the state the game has set through {@code GlStateManager}.
      *
@@ -75,11 +77,10 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, int 
         if (state == null) {
             throw new IllegalStateException("no frame state installed: draws are being captured on the GL path");
         }
-        org.joml.Matrix4f mvp = new org.joml.Matrix4f();
-        mvp.set(state.projection()).mul(state.modelView());
+        MVP_SCRATCH.set(state.projection()).mul(state.modelView());
 
         float[] values = new float[16];
-        mvp.get(values);
+        MVP_SCRATCH.get(values);
 
         // A backend that records blend factors separately has four; GL's plain blendFunc sets two that apply to
         // both channels, so the separate form is the one to read when it exists.

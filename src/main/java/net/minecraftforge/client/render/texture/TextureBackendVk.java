@@ -46,6 +46,7 @@ final class TextureBackendVk implements TextureBackend {
         final Map<Integer, Level> levels = new HashMap<>();
         final Map<Integer, Integer> intParameters = new HashMap<>();
         final Map<Integer, Float> floatParameters = new HashMap<>();
+        final java.util.List<SubUpdate> pendingSubUpdates = new java.util.ArrayList<>();
         /**
          * Bumped on every write, so a device-side cache can tell an unchanged texture from a same-handle one.
          *
@@ -103,6 +104,7 @@ final class TextureBackendVk implements TextureBackend {
         texture.levels.clear();
         texture.intParameters.clear();
         texture.floatParameters.clear();
+        texture.pendingSubUpdates.clear();
         texture.version++;
         boundUnit.values().removeIf(bound -> bound == id);
     }
@@ -227,6 +229,7 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public void upload(int id, int level, int width, int height, IntBuffer pixels) {
         Texture texture = texture(id);
+        texture.pendingSubUpdates.clear();
         if (pixels == null) {
             // Allocation without data: undefined contents of the right size, filled later by subUpload.
             texture.levels.put(level, new Level(width, height, new int[width * height]));
@@ -244,7 +247,8 @@ final class TextureBackendVk implements TextureBackend {
 
     @Override
     public void subUpload(int id, int level, int xOffset, int yOffset, int width, int height, IntBuffer pixels) {
-        Level target = texture(id).levels.get(level);
+        Texture texture = texture(id);
+        Level target = texture.levels.get(level);
         if (target == null) {
             throw new IllegalStateException("subUpload into texture " + id + " level " + level
                     + " before it was allocated");
@@ -254,16 +258,28 @@ final class TextureBackendVk implements TextureBackend {
                     + yOffset + " does not fit texture " + id + " level " + level + " (" + target.width + "x"
                     + target.height + ")");
         }
-        int[] source = new int[width * height];
         IntBuffer view = pixels.duplicate();
         view.rewind();
-        view.get(source, 0, Math.min(source.length, view.remaining()));
-
         for (int row = 0; row < height; row++) {
-            System.arraycopy(source, row * width, target.pixels, (yOffset + row) * target.width + xOffset, width);
+            view.position(row * width);
+            view.get(target.pixels, (yOffset + row) * target.width + xOffset, width);
         }
         target.hasData = true;
-        texture(id).version++;
+        if (level == 0) {
+            texture.pendingSubUpdates.add(new SubUpdate(xOffset, yOffset, width, height));
+        }
+        texture.version++;
+    }
+
+    @Override
+    public java.util.List<SubUpdate> drainSubUpdates(int id) {
+        Texture texture = textures.get(id);
+        if (texture == null || texture.pendingSubUpdates.isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.List<SubUpdate> updates = new java.util.ArrayList<>(texture.pendingSubUpdates);
+        texture.pendingSubUpdates.clear();
+        return updates;
     }
 
     @Override
