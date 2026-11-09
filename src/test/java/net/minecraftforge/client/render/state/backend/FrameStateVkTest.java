@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.state.backend;
 
 import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 import org.junit.jupiter.api.Test;
 
@@ -206,6 +207,28 @@ class FrameStateVkTest {
 
         state.loadIdentity();
         assertNull(state.textureMatrix());
+    }
+
+    @Test
+    void lightmapTextureMatrixOnUnit1DoesNotAffectUnit0TextureMatrix() {
+        FrameStateVk state = new FrameStateVk();
+        // Simulate EntityRenderer.enableLightmap() on texture unit 1
+        state.activeTextureUnit(1);
+        state.matrixMode(TEXTURE);
+        state.loadIdentity();
+        state.scale(0.00390625F, 0.00390625F, 0.00390625F);
+        state.translate(8.0F, 8.0F, 8.0F);
+        state.matrixMode(MODELVIEW);
+        state.activeTextureUnit(0);
+
+        // Unit 0 texture matrix must remain null (identity) - must not collapse UVs of GUI/items/font
+        assertNull(state.textureMatrix(), "Unit 0 texture matrix must not be polluted by unit 1 lightmap scaling");
+
+        // Unit 1 matrix can still be queried when unit 1 is active
+        state.activeTextureUnit(1);
+        Matrix4fc m1 = state.matrix(TEXTURE);
+        assertEquals(0.00390625F, m1.m00(), 0.0001F);
+        assertEquals(0.03125F, m1.m30(), 0.0001F); // 8.0 * 0.00390625 = 0.03125
     }
 
     @Test

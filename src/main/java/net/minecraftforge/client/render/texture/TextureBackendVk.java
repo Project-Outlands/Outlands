@@ -153,6 +153,16 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public void activeUnit(int unit) {
         this.activeUnit = unit;
+        net.minecraftforge.client.render.state.backend.FrameState fs =
+                net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
+        if (fs != null) {
+            fs.activeTextureUnit(unit);
+        }
+    }
+
+    @Override
+    public int activeUnit() {
+        return activeUnit;
     }
 
     /**

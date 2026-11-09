@@ -63,6 +63,11 @@ public interface TextureBackend {
     void activeUnit(int unit);
 
     /**
+     * The active texture unit, zero-based.
+     */
+    int activeUnit();
+
+    /**
      * Reports whether 2D texturing is enabled on the given unit.
      *
      * @param unit the texture unit, zero-based

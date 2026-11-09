@@ -71,11 +71,23 @@ public interface FrameState {
     int depthFunc();
 
     /**
-     * The 4x4 texture matrix (mode 5890) currently in effect, or {@code null} if it is identity.
+     * The 4x4 texture matrix (mode 5890) currently in effect for texture unit 0, or {@code null} if it is identity.
      *
      * <p>Used for enchantment glint and repeating texture effects that scroll or scale texture coordinates.</p>
      */
     float[] textureMatrix();
+
+    /**
+     * Reports that the active texture unit changed.
+     *
+     * @param unit the texture unit, zero-based
+     */
+    void activeTextureUnit(int unit);
+
+    /**
+     * The active texture unit, zero-based.
+     */
+    int activeTextureUnit();
 
     /**
      * The normal matrix (inverse transpose of modelview 3x3) for lighting, or {@code null} if none.

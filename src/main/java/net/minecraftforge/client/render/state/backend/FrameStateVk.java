@@ -127,13 +127,25 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public float[] textureMatrix() {
-        Matrix4f m = currentMatrix.get(TEXTURE);
+        Matrix4f m = currentMatrix.get(TEXTURE << 8);
         if (m == null || isIdentity(m)) {
             return null;
         }
         float[] values = new float[16];
         m.get(values);
         return values;
+    }
+
+    private int activeTextureUnit;
+
+    @Override
+    public void activeTextureUnit(int unit) {
+        this.activeTextureUnit = unit;
+    }
+
+    @Override
+    public int activeTextureUnit() {
+        return activeTextureUnit;
     }
 
     @Override
@@ -482,11 +494,12 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void popMatrix() {
-        Deque<Matrix4f> stack = stack();
+        int key = currentMatrixKey();
+        Deque<Matrix4f> stack = matrixStacks.computeIfAbsent(key, mode -> new ArrayDeque<>());
         if (stack.isEmpty()) {
             throw new IllegalStateException("popMatrix without a matching pushMatrix in mode " + matrixMode);
         }
-        currentMatrix.put(matrixMode, stack.pop());
+        currentMatrix.put(key, stack.pop());
     }
 
     @Override
@@ -584,16 +597,27 @@ final class FrameStateVk implements FrameState {
         attributeDepth--;
     }
 
+    private int currentMatrixKey() {
+        if (matrixMode == TEXTURE) {
+            return (TEXTURE << 8) | (activeTextureUnit() & 0xFF);
+        }
+        return matrixMode;
+    }
+
     private Matrix4f current() {
-        return currentMatrix.computeIfAbsent(matrixMode, mode -> new Matrix4f());
+        return currentMatrix.computeIfAbsent(currentMatrixKey(), mode -> new Matrix4f());
     }
 
     private Deque<Matrix4f> stack() {
-        return matrixStacks.computeIfAbsent(matrixMode, mode -> new ArrayDeque<>());
+        return matrixStacks.computeIfAbsent(currentMatrixKey(), mode -> new ArrayDeque<>());
     }
 
     /** The matrix of one mode, for a draw that needs to hand it to a push constant. */
     public Matrix4fc matrix(int glMode) {
+        if (glMode == TEXTURE) {
+            int key = (TEXTURE << 8) | (activeTextureUnit() & 0xFF);
+            return currentMatrix.getOrDefault(key, new Matrix4f());
+        }
         return currentMatrix.getOrDefault(glMode, new Matrix4f());
     }
 
