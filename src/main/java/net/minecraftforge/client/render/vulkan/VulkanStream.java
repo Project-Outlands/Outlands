@@ -13,6 +13,9 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
 
+import it.unimi.dsi.fastutil.ints.Int2LongMap;
+import it.unimi.dsi.fastutil.ints.Int2LongOpenHashMap;
+
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -98,7 +101,7 @@ final class VulkanStream implements AutoCloseable {
      * for the first time records a copy and a layout transition, and Vulkan forbids both inside a render pass
      * ({@code VUID-vkCmdCopyBufferToImage-renderpass}). The replay then only binds what is already there.</p>
      */
-    private final Map<Integer, Long> resolved = new HashMap<>();
+    private final Int2LongMap resolved = new Int2LongOpenHashMap();
     private final List<FrameDraws.Draw> draws = new ArrayList<>();
     private int drawsThisFrame;
 
@@ -133,6 +136,7 @@ final class VulkanStream implements AutoCloseable {
         this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
         this.descriptors = descriptors;
         this.textures = textures;
+        this.resolved.defaultReturnValue(0L);
     }
 
     /** How many draws the last replayed frame had. Diagnostics. */
@@ -185,8 +189,8 @@ final class VulkanStream implements AutoCloseable {
      * @return the resolved set, or the white stand-in when the handle was not part of the pre-flight
      */
     long descriptorSetOf(int texture) {
-        Long set = resolved.get(texture);
-        return set != null ? set : textures.whiteDescriptorSet();
+        long set = resolved.get(texture);
+        return set != 0L ? set : textures.whiteDescriptorSet();
     }
 
     /**

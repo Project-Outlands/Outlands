@@ -1,5 +1,8 @@
 package net.minecraftforge.client.render.state.backend;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 
@@ -63,8 +66,8 @@ final class FrameStateVk implements FrameState {
     private static final int PROJECTION = 5889;
     private static final int TEXTURE = 5890;
     /** One stack per GL matrix mode constant. */
-    private final Map<Integer, Deque<Matrix4f>> matrixStacks = new HashMap<>();
-    private final Map<Integer, Matrix4f> currentMatrix = new HashMap<>();
+    private final Int2ObjectMap<Deque<Matrix4f>> matrixStacks = new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectMap<Matrix4f> currentMatrix = new Int2ObjectOpenHashMap<>();
     private final float[] multiplyScratchValues = new float[16];
     private final Matrix4f multiplyScratchMatrix = new Matrix4f();
     private final float[] readMatrixScratch = new float[16];
@@ -616,9 +619,11 @@ final class FrameStateVk implements FrameState {
     public Matrix4fc matrix(int glMode) {
         if (glMode == TEXTURE) {
             int key = (TEXTURE << 8) | (activeTextureUnit() & 0xFF);
-            return currentMatrix.getOrDefault(key, new Matrix4f());
+            Matrix4f m = currentMatrix.get(key);
+            return m != null ? m : new Matrix4f();
         }
-        return currentMatrix.getOrDefault(glMode, new Matrix4f());
+        Matrix4f m = currentMatrix.get(glMode);
+        return m != null ? m : new Matrix4f();
     }
 
     private static int comparison(int glComparison) {

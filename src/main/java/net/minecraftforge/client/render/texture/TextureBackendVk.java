@@ -1,8 +1,15 @@
 package net.minecraftforge.client.render.texture;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatMap;
+import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+
 import java.nio.IntBuffer;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Texture data on the Vulkan backend, held until a device image can be made of it.
@@ -43,9 +50,9 @@ final class TextureBackendVk implements TextureBackend {
     }
 
     private static final class Texture {
-        final Map<Integer, Level> levels = new HashMap<>();
-        final Map<Integer, Integer> intParameters = new HashMap<>();
-        final Map<Integer, Float> floatParameters = new HashMap<>();
+        final Int2ObjectMap<Level> levels = new Int2ObjectOpenHashMap<>();
+        final Int2IntMap intParameters = new Int2IntOpenHashMap();
+        final Int2FloatMap floatParameters = new Int2FloatOpenHashMap();
         final java.util.List<SubUpdate> pendingSubUpdates = new java.util.ArrayList<>();
         /**
          * Bumped on every write, so a device-side cache can tell an unchanged texture from a same-handle one.
@@ -55,19 +62,24 @@ final class TextureBackendVk implements TextureBackend {
          */
         long version;
 
+        Texture() {
+            intParameters.defaultReturnValue(TextureImage.UNSET);
+        }
+
         boolean hasData() {
             return levels.values().stream().anyMatch(level -> level.hasData);
         }
     }
 
-    private final Map<Integer, Texture> textures = new HashMap<>();
+    private final Int2ObjectMap<Texture> textures = new Int2ObjectOpenHashMap<>();
     /** Textures that have received a framebuffer copy, and therefore need an sRGB image. */
-    private final java.util.Set<Integer> framebufferTargets = new java.util.HashSet<>();
-    private final Map<Integer, Integer> boundUnit = new HashMap<>();
+    private final IntSet framebufferTargets = new IntOpenHashSet();
+    private final Int2IntMap boundUnit = new Int2IntOpenHashMap();
     private final boolean[] unitTexture2dEnabled = new boolean[32];
     {
         // Unit 0 starts enabled in Minecraft
         unitTexture2dEnabled[0] = true;
+        boundUnit.defaultReturnValue(0);
     }
     /**
      * Which unit the game last made active, zero-based.
@@ -106,12 +118,12 @@ final class TextureBackendVk implements TextureBackend {
         texture.floatParameters.clear();
         texture.pendingSubUpdates.clear();
         texture.version++;
-        boundUnit.values().removeIf(bound -> bound == id);
+        boundUnit.int2IntEntrySet().removeIf(entry -> entry.getIntValue() == id);
     }
 
     @Override
     public int boundTexture(int unit) {
-        return boundUnit.getOrDefault(unit, 0);
+        return boundUnit.get(unit);
     }
 
     /**
@@ -143,8 +155,7 @@ final class TextureBackendVk implements TextureBackend {
     }
 
     private static int parameter(Texture texture, int pname) {
-        Integer value = texture.intParameters.get(pname);
-        return value == null ? TextureImage.UNSET : value;
+        return texture.intParameters.get(pname);
     }
 
     @Override
@@ -176,7 +187,7 @@ final class TextureBackendVk implements TextureBackend {
      */
     @Override
     public int boundTexture() {
-        return boundUnit.getOrDefault(activeUnit, 0);
+        return boundUnit.get(activeUnit);
     }
 
     @Override

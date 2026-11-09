@@ -1,5 +1,10 @@
 package net.minecraftforge.client.render.vulkan;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2LongMap;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+
 import net.minecraftforge.client.render.texture.TextureBackend;
 import net.minecraftforge.client.render.texture.TextureImage;
 import net.minecraftforge.client.render.vertex.FrameDraws;
@@ -51,9 +56,9 @@ final class VulkanTextures implements AutoCloseable {
     private final VulkanDescriptors descriptors;
     private final TextureBackend source;
 
-    private final Map<Integer, Entry> entries = new HashMap<>();
+    private final Int2ObjectMap<Entry> entries = new Int2ObjectOpenHashMap<>();
     /** Samplers, keyed by the GL parameters that produced them. Vanilla uses a handful of combinations. */
-    private final Map<Long, Long> samplers = new HashMap<>();
+    private final Long2LongMap samplers = new Long2LongOpenHashMap();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
     private final List<VulkanBuffer> stagingPool = new ArrayList<>();
@@ -95,6 +100,7 @@ final class VulkanTextures implements AutoCloseable {
             this.pendingStaging[slot] = new ArrayList<>();
         }
 
+        this.samplers.defaultReturnValue(0L);
         // The stand-in is white in either encoding, so its format only has to match for consistency.
         this.white = VulkanImage.create(context.device(), context, 1, 1, textureFormat());
         this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET);
@@ -340,8 +346,8 @@ final class VulkanTextures implements AutoCloseable {
      */
     private long sampler(int minFilter, int magFilter, int wrapS, int wrapT) {
         long key = ((long) minFilter << 48) | ((long) magFilter << 32) | ((long) wrapS << 16) | (wrapT & 0xFFFFL);
-        Long existing = samplers.get(key);
-        if (existing != null) {
+        long existing = samplers.get(key);
+        if (existing != 0L) {
             return existing;
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {

@@ -1,9 +1,10 @@
 package net.minecraftforge.client.render.vulkan;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectRBTreeMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
+
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 /**
  * Sub-allocates blocks of memory within a contiguous range {@code [0, capacity]}.
@@ -51,7 +52,7 @@ public final class BlockAllocator {
     private final int alignment;
     private int usedBytes;
 
-    private final TreeMap<Integer, List<Block>> freeBlocksBySize = new TreeMap<>();
+    private final Int2ObjectRBTreeMap<List<Block>> freeBlocksBySize = new Int2ObjectRBTreeMap<>();
     private final Block head; // First block in address order
 
     public BlockAllocator(int capacity, int alignment) {
@@ -96,15 +97,16 @@ public final class BlockAllocator {
             throw new IllegalArgumentException("allocation size must be positive: " + size);
         }
         int alignedSize = (size + alignment - 1) / alignment * alignment;
-        Map.Entry<Integer, List<Block>> entry = freeBlocksBySize.ceilingEntry(alignedSize);
-        if (entry == null) {
+        Int2ObjectSortedMap<List<Block>> tail = freeBlocksBySize.tailMap(alignedSize);
+        if (tail.isEmpty()) {
             return null;
         }
 
-        List<Block> list = entry.getValue();
+        int key = tail.firstIntKey();
+        List<Block> list = tail.get(key);
         Block block = list.remove(list.size() - 1);
         if (list.isEmpty()) {
-            freeBlocksBySize.remove(entry.getKey());
+            freeBlocksBySize.remove(key);
         }
 
         if (block.size > alignedSize) {

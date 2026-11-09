@@ -1,15 +1,16 @@
 package net.minecraftforge.client.render.state.backend;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+
 import net.minecraftforge.client.render.vertex.DrawState;
 import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.VertexLayout;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Display lists on the Vulkan backend: the recorded draws, kept as bytes.
@@ -30,8 +31,8 @@ final class DisplayListVk implements DisplayListBackend {
     /** One recorded draw. */
     record Draw(VertexLayout layout, int mode, int vertexCount, byte[] vertices) {}
 
-    private final Map<Integer, List<Draw>> lists = new LinkedHashMap<>();
-    private final Map<Integer, List<Draw>> inProgress = new HashMap<>();
+    private final Int2ObjectMap<List<Draw>> lists = new Int2ObjectLinkedOpenHashMap<>();
+    private final Int2ObjectMap<List<Draw>> inProgress = new Int2ObjectOpenHashMap<>();
     private Integer recording;
     private int nextName = 1;
 
@@ -76,7 +77,8 @@ final class DisplayListVk implements DisplayListBackend {
         if (recording == null) {
             throw new IllegalStateException("glEndList without glNewList");
         }
-        lists.put(recording, inProgress.remove(recording));
+        int id = recording;
+        lists.put(id, inProgress.remove(id));
         recording = null;
     }
 
@@ -130,12 +132,13 @@ final class DisplayListVk implements DisplayListBackend {
         if (recording == null) {
             return false;
         }
+        int id = recording;
         int bytes = vertexCount * layout.stride();
         byte[] copy = new byte[bytes];
         ByteBuffer view = data.duplicate();
         view.position(0);
         view.get(copy, 0, Math.min(bytes, view.remaining()));
-        inProgress.get(recording).add(new Draw(layout, mode, vertexCount, copy));
+        inProgress.get(id).add(new Draw(layout, mode, vertexCount, copy));
         return true;
     }
 }

@@ -1,7 +1,7 @@
 package net.minecraftforge.client.render.vertex;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 
 /**
  * The generic vertex attributes a draw declared, on a backend that has no client-side attribute arrays.
@@ -21,7 +21,7 @@ public final class PendingVertexAttributes {
     /** One declared attribute: its component count, type and stride, and where the bytes are. */
     public record Attribute(int index, int count, int glType, int stride) {}
 
-    private static final Map<Integer, Attribute> CURRENT = new LinkedHashMap<>();
+    private static final Int2ObjectMap<Attribute> CURRENT = new Int2ObjectLinkedOpenHashMap<>();
 
     private PendingVertexAttributes() {}
 
