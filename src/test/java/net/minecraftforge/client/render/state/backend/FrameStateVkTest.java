@@ -160,4 +160,21 @@ class FrameStateVkTest {
         assertThrows(IllegalStateException.class, state::popAttributes);
         assertFalse(false);
     }
+
+    @Test
+    void glLightTransformsDirectionByCurrentModelView() {
+        FrameStateVk state = new FrameStateVk();
+        state.matrixMode(MODELVIEW);
+        // Rotate 90 degrees around Y: maps +X to -Z, +Z to +X
+        state.rotate(90.0F, 0.0F, 1.0F, 0.0F);
+
+        FloatBuffer pos0 = FloatBuffer.wrap(new float[] {1.0F, 0.0F, 0.0F, 0.0F});
+        state.glLight(16384, 4611, pos0); // GL_LIGHT0, GL_POSITION
+
+        float[] l0 = state.light0Eye();
+        // (1, 0, 0) rotated by 90 Y is (0, 0, -1) in eye space
+        assertEquals(0.0F, l0[0], 1.0e-5F);
+        assertEquals(0.0F, l0[1], 1.0e-5F);
+        assertEquals(-1.0F, l0[2], 1.0e-5F);
+    }
 }

@@ -209,10 +209,23 @@ class VertexConverterTest {
         source.put(b3 + 25, (byte) 0);
         source.put(b3 + 26, (byte) 0);
 
-        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 4))
+        // When lighting is disabled (e.g. 2D items in GUI), normals are ignored and colors stay untouched.
+        ByteBuffer outNoLighting = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 4))
+                .order(ByteOrder.nativeOrder());
+        int outStride = VertexConverter.STRIDE;
+        for (int i = 0; i < 4; i++) {
+            assertEquals(200, outNoLighting.get(outStride * i + 12) & 0xFF, "unlit vertex " + i + " stays unattenuated");
+            assertEquals(255, outNoLighting.get(outStride * i + 15) & 0xFF, "alpha is preserved");
+        }
+
+        // When lighting is enabled, diffuse lighting modulates vertex RGB based on normalMatrix and light vectors.
+        float[] identity3x3 = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        float[] l0 = {0.1617F, 0.8085F, -0.5659F};
+        float[] l1 = {-0.1617F, 0.8085F, 0.5659F};
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 4,
+                        0xFFFFFFFF, null, true, identity3x3, l0, l1))
                 .order(ByteOrder.nativeOrder());
 
-        int outStride = VertexConverter.STRIDE;
         // Vertex 0: top face factor 1.0 -> 200
         assertEquals(200, out.get(12) & 0xFF, "top face stays unattenuated");
         assertEquals(255, out.get(15) & 0xFF, "alpha is preserved");
@@ -221,11 +234,11 @@ class VertexConverterTest {
         assertEquals(80, out.get(outStride + 12) & 0xFF, "bottom face factor 0.4");
         assertEquals(255, out.get(outStride + 15) & 0xFF, "alpha is preserved");
 
-        // Vertex 2: Z+ (south) face factor 0.722 -> 144
-        assertEquals(144, out.get(outStride * 2 + 12) & 0xFF, "Z+ face factor 0.722");
+        // Vertex 2: Z+ (south) face factor 0.740 -> 148
+        assertEquals(148, out.get(outStride * 2 + 12) & 0xFF, "Z+ face factor 0.740");
 
-        // Vertex 3: X+ (east) face factor 0.637 -> 127
-        assertEquals(127, out.get(outStride * 3 + 12) & 0xFF, "X+ face factor 0.637");
+        // Vertex 3: X+ (east) face factor 0.497 -> 99
+        assertEquals(99, out.get(outStride * 3 + 12) & 0xFF, "X+ face factor 0.497");
     }
 
     @Test
@@ -246,7 +259,11 @@ class VertexConverterTest {
         source.put(stride + 22, (byte) 0);
 
         int fallbackColor = (0xFF << 24) | (200 << 16) | (200 << 8) | 200;
-        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2, fallbackColor, null))
+        float[] identity3x3 = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        float[] l0 = {0.1617F, 0.8085F, -0.5659F};
+        float[] l1 = {-0.1617F, 0.8085F, 0.5659F};
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2, fallbackColor, null,
+                        true, identity3x3, l0, l1))
                 .order(ByteOrder.nativeOrder());
 
         int outStride = VertexConverter.STRIDE;

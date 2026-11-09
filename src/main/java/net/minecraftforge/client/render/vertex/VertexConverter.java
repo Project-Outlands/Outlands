@@ -69,6 +69,16 @@ public final class VertexConverter {
      */
     public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, ByteBuffer target, int targetOffset) {
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, false, null, null, null, target, targetOffset);
+    }
+
+    /**
+     * Converts vertices in-place into an existing {@code target} buffer at {@code targetOffset}, optionally applying
+     * fixed-function diffuse lighting in eye space.
+     */
+    public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                               float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                               float[] light0, float[] light1, ByteBuffer target, int targetOffset) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -125,8 +135,9 @@ public final class VertexConverter {
                 }
             }
 
-            if (normalAttr != null) {
-                applyNormalLighting(in, sourceBase + normalAttr.offset(), target, base, normalAttr);
+            if (normalAttr != null && lightingEnabled && normalMatrix != null && light0 != null && light1 != null) {
+                applyNormalLighting(in, sourceBase + normalAttr.offset(), target, base, normalAttr,
+                        normalMatrix, light0, light1);
             }
         }
     }
@@ -140,9 +151,15 @@ public final class VertexConverter {
      */
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                  float[] fallbackLightmap) {
+        return convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, false, null, null, null);
+    }
+
+    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                                 float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                                 float[] light0, float[] light1) {
         byte[] out = new byte[vertexCount * STRIDE];
         ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
-        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, target, 0);
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1, target, 0);
         return out;
     }
 
@@ -205,7 +222,8 @@ public final class VertexConverter {
     }
 
     private static void applyNormalLighting(ByteBuffer in, int at, ByteBuffer out, int base,
-                                            VertexLayout.Attribute attribute) {
+                                            VertexLayout.Attribute attribute,
+                                            float[] nm, float[] l0, float[] l1) {
         float nx, ny, nz;
         if (attribute.type() == VertexFormatElement.EnumType.BYTE
                 || attribute.type() == VertexFormatElement.EnumType.UBYTE) {
@@ -221,16 +239,22 @@ public final class VertexConverter {
         }
         float lenSq = nx * nx + ny * ny + nz * nz;
         if (lenSq > 0.01F) {
-            float invLen = 1.0F / (float) Math.sqrt(lenSq);
-            nx *= invLen;
-            ny *= invLen;
-            nz *= invLen;
-            // Exact OpenGL standard item lighting (RenderHelper.enableGUIStandardItemLighting):
-            // Light 0 in model space: (0.3943, 0.9172, -0.0578)
-            // Light 1 in model space: (-0.5766, 0.6166, 0.5360)
-            // Ambient: 0.4, Diffuse 0.6 per light
-            float d0 = Math.max(0.0F, 0.3943F * nx + 0.9172F * ny - 0.0578F * nz);
-            float d1 = Math.max(0.0F, -0.5766F * nx + 0.6166F * ny + 0.5360F * nz);
+            // Transform normal to eye space using column-major 3x3 normalMatrix:
+            float ex = nm[0] * nx + nm[3] * ny + nm[6] * nz;
+            float ey = nm[1] * nx + nm[4] * ny + nm[7] * nz;
+            float ez = nm[2] * nx + nm[5] * ny + nm[8] * nz;
+            float eLenSq = ex * ex + ey * ey + ez * ez;
+            if (eLenSq < 1e-4F) {
+                return;
+            }
+            float invLen = 1.0F / (float) Math.sqrt(eLenSq);
+            ex *= invLen;
+            ey *= invLen;
+            ez *= invLen;
+
+            // OpenGL standard item lighting: ambient 0.4, diffuse 0.6 per light
+            float d0 = Math.max(0.0F, ex * l0[0] + ey * l0[1] + ez * l0[2]);
+            float d1 = Math.max(0.0F, ex * l1[0] + ey * l1[1] + ez * l1[2]);
             float factor = Math.min(1.0F, 0.4F + 0.6F * d0 + 0.6F * d1);
             int r = out.get(base + COLOR_OFFSET) & 0xFF;
             int g = out.get(base + COLOR_OFFSET + 1) & 0xFF;

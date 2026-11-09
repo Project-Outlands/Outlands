@@ -80,6 +80,8 @@ final class FrameStateVk implements FrameState {
     private float[] lightmap;
     /** The texture the game's lightmap lives in, or {@code 0}. */
     private int lightmapTexture;
+    private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
+    private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -145,6 +147,46 @@ final class FrameStateVk implements FrameState {
     @Override
     public int lightmapTexture() {
         return lightmapTexture;
+    }
+
+    @Override
+    public void glLight(int light, int pname, FloatBuffer params) {
+        if (pname == 4611 && params != null && params.remaining() >= 3) { // GL_POSITION
+            int pos = params.position();
+            float x = params.get(pos);
+            float y = params.get(pos + 1);
+            float z = params.get(pos + 2);
+            Matrix4fc mv = modelView();
+            float ex = mv.m00() * x + mv.m10() * y + mv.m20() * z;
+            float ey = mv.m01() * x + mv.m11() * y + mv.m21() * z;
+            float ez = mv.m02() * x + mv.m12() * y + mv.m22() * z;
+            float len = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
+            if (len > 1e-4F) {
+                float inv = 1.0F / len;
+                ex *= inv;
+                ey *= inv;
+                ez *= inv;
+            }
+            if (light == 16384) { // GL_LIGHT0
+                light0Eye[0] = ex;
+                light0Eye[1] = ey;
+                light0Eye[2] = ez;
+            } else if (light == 16385) { // GL_LIGHT1
+                light1Eye[0] = ex;
+                light1Eye[1] = ey;
+                light1Eye[2] = ez;
+            }
+        }
+    }
+
+    @Override
+    public float[] light0Eye() {
+        return light0Eye.clone();
+    }
+
+    @Override
+    public float[] light1Eye() {
+        return light1Eye.clone();
     }
 
     @Override

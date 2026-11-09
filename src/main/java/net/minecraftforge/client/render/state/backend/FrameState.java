@@ -150,6 +150,21 @@ public interface FrameState {
     /** The lightmap texture handle, or {@code 0}. */
     int lightmapTexture();
 
+    /**
+     * Intercepts fixed-function {@code glLight} for directional lights in eye space.
+     */
+    default void glLight(int light, int pname, java.nio.FloatBuffer params) {}
+
+    /** Eye-space direction vector for light 0. */
+    default float[] light0Eye() {
+        return new float[] {0.1617F, 0.8085F, -0.5659F};
+    }
+
+    /** Eye-space direction vector for light 1. */
+    default float[] light1Eye() {
+        return new float[] {-0.1617F, 0.8085F, 0.5659F};
+    }
+
     // endregion
 
     void shadeModel(int glModel);

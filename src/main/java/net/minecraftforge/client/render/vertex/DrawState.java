@@ -41,7 +41,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
                         int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
                         boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport,
-                        boolean[] colorMask, float[] lightmap) {
+                        boolean[] colorMask, float[] lightmap,
+                        boolean lightingEnabled, float[] normalMatrix, float[] light0, float[] light1) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -96,6 +97,19 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
             destinationAlpha = destinationRgb;
         }
 
+        boolean lighting = state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.LIGHTING);
+        float[] normalMatrix = null;
+        float[] l0 = null;
+        float[] l1 = null;
+        if (lighting) {
+            org.joml.Matrix3f nm = new org.joml.Matrix3f();
+            state.modelView().normal(nm);
+            normalMatrix = new float[9];
+            nm.get(normalMatrix);
+            l0 = state.light0Eye();
+            l1 = state.light1Eye();
+        }
+
         return new DrawState(values,
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.DEPTH_TEST),
                 state.depthWriteEnabled(),
@@ -110,7 +124,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
                 state.viewport(),
                 state.colorMask(),
-                lightmapCoord(state));
+                lightmapCoord(state),
+                lighting, normalMatrix, l0, l1);
     }
 
     private static float[] lightmapCoord(net.minecraftforge.client.render.state.backend.FrameState state) {

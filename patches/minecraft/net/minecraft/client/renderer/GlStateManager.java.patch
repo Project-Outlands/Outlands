@@ -38,7 +38,7 @@
      public static void glLight(int light, int pname, FloatBuffer params)
      {
 -        GL11.glLight(light, pname, params);
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.skipLighting("glLight")) { return; }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.glLight(light, pname, params)) { return; }
 +        GL11.glLightfv(light, pname, params);
      }
  

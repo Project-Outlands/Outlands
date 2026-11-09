@@ -221,8 +221,10 @@ final class VulkanStream implements AutoCloseable {
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
             offsets[i] = currentVertexOffset;
+            DrawState ds = draw.state();
             VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
-                    draw.layout(), draw.vertexCount(), draw.state().colorArgb(), draw.state().lightmap(),
+                    draw.layout(), draw.vertexCount(), ds.colorArgb(), ds.lightmap(),
+                    ds.lightingEnabled(), ds.normalMatrix(), ds.light0(), ds.light1(),
                     targetVbo, currentVertexOffset);
             currentVertexOffset += draw.vertexCount() * VertexConverter.STRIDE;
 

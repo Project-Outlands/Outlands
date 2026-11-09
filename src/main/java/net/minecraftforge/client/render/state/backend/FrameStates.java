@@ -186,6 +186,15 @@ public final class FrameStates {
      * <p>Not a throw, because it does not stop a frame from rendering: it makes lit geometry flat. Reported once per
      * entry point so the log says which of them are still doing nothing.</p>
      */
+    public static boolean glLight(int light, int pname, java.nio.FloatBuffer params) {
+        FrameState state = forNonGl();
+        if (state == null) {
+            return false;
+        }
+        state.glLight(light, pname, params);
+        return true;
+    }
+
     public static boolean skipLighting(String operation) {
         if (forNonGl() == null) {
             return false;
