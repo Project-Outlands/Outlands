@@ -54,10 +54,9 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final VulkanTextures textures;
     private final TerrainArenaPool arenaPool;
 
-    private static final int INITIAL_INDIRECT_CAPACITY = 4096;
+    static final int MAX_INDIRECT_CAPACITY = 65_536;
     private final VulkanBuffer[] indirectBuffers;
     private final VulkanBuffer[] chunkOffsetBuffers;
-    private int indirectCapacity = INITIAL_INDIRECT_CAPACITY;
     private int chunkCursor;
     private int indirectCursor;
     private IntArrayList[] slabBuckets;
@@ -148,8 +147,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         VulkanBuffer[] chunkOffsetBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
         try {
             for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
-                indirectBuffers[slot] = VulkanBuffer.createIndirect(device, context, (long) INITIAL_INDIRECT_CAPACITY * 20L);
-                chunkOffsetBuffers[slot] = VulkanBuffer.createChunkData(device, context, (long) INITIAL_INDIRECT_CAPACITY * 16L);
+                indirectBuffers[slot] = VulkanBuffer.createIndirect(device, context, (long) MAX_INDIRECT_CAPACITY * 20L);
+                chunkOffsetBuffers[slot] = VulkanBuffer.createChunkData(device, context, (long) MAX_INDIRECT_CAPACITY * 16L);
             }
         } catch (RuntimeException e) {
             for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
@@ -219,15 +218,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             list.remove(slice);
         }
         slice.setLayerListIndex(-1);
-    }
-
-    private void ensureIndirectCapacity(int requiredCount) {
-        int newCapacity = Math.max(requiredCount, indirectCapacity * 2);
-        for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
-            indirectBuffers[i].ensureCapacity((long) newCapacity * 20L);
-            chunkOffsetBuffers[i].ensureCapacity((long) newCapacity * 16L);
-        }
-        this.indirectCapacity = newCapacity;
     }
 
     private void ensureSlabBuckets(int count) {
@@ -322,9 +312,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             return;
         }
         int layerSlicesCount = list.size();
-        if (indirectCursor + layerSlicesCount > indirectCapacity) {
-            ensureIndirectCapacity(indirectCursor + layerSlicesCount);
-        }
         int drawn = 0;
         int culled = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -369,6 +356,12 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                             slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
                         culled++;
                         continue;
+                    }
+
+                    if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
+                        LOGGER.warn("Indirect draw buffer capacity ({}) reached in layer {}; skipping remaining slices",
+                                MAX_INDIRECT_CAPACITY, layer);
+                        break;
                     }
 
                     int chunkId = chunkCursor++;
@@ -416,7 +409,13 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     }
                     int startCmdIndex = indirectCursor;
                     int bucketSize = bucket.size();
+                    int slabDrawn = 0;
                     for (int k = 0; k < bucketSize; k++) {
+                        if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
+                            LOGGER.warn("Indirect draw buffer capacity ({}) reached in layer {}; skipping remaining slices",
+                                    MAX_INDIRECT_CAPACITY, layer);
+                            break;
+                        }
                         TerrainSlice slice = list.get(bucket.getInt(k));
 
                         int chunkId = chunkCursor++;
@@ -433,15 +432,24 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                         MemoryUtil.memPutInt(cmdAddr + 8, 0);
                         MemoryUtil.memPutInt(cmdAddr + 12, slice.vertexOffset());
                         MemoryUtil.memPutInt(cmdAddr + 16, chunkId);
+                        slabDrawn++;
                     }
                     bucket.clear();
 
-                    vkCmdBindVertexBuffers(commandBuffer, 0,
-                            stack.longs(arenaPool.slab(s).buffer().handle()),
-                            stack.mallocLong(1).put(0, 0L));
-                    vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
-                            startCmdIndex * 20L, bucketSize, 20);
-                    drawn += bucketSize;
+                    if (slabDrawn > 0) {
+                        vkCmdBindVertexBuffers(commandBuffer, 0,
+                                stack.longs(arenaPool.slab(s).buffer().handle()),
+                                stack.mallocLong(1).put(0, 0L));
+                        vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
+                                startCmdIndex * 20L, slabDrawn, 20);
+                        drawn += slabDrawn;
+                    }
+                    if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
+                        for (int remaining = s + 1; remaining < slabCount; remaining++) {
+                            slabBuckets[remaining].clear();
+                        }
+                        break;
+                    }
                 }
             }
 

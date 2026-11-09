@@ -83,4 +83,19 @@ class VulkanIndirectDrawTest {
         assertEquals(0.0f, constants.getFloat(80), 1e-6f);
         assertTrue(VulkanPipeline.PUSH_CONSTANT_BYTES <= 128);
     }
+
+    @Test
+    void maxIndirectCapacityAccommodatesHighRenderDistanceWithoutReallocation() {
+        assertEquals(65_536, VulkanTerrainLayer.MAX_INDIRECT_CAPACITY);
+        long indirectBufferSize = (long) VulkanTerrainLayer.MAX_INDIRECT_CAPACITY * 20L;
+        long chunkOffsetBufferSize = (long) VulkanTerrainLayer.MAX_INDIRECT_CAPACITY * 16L;
+
+        assertEquals(1_310_720L, indirectBufferSize);
+        assertEquals(1_048_576L, chunkOffsetBufferSize);
+
+        // Indirect buffer offset alignment must be a multiple of 4
+        assertEquals(0, indirectBufferSize % 4);
+        // Chunk offset buffer element alignment in std430 must be a multiple of 16 (sizeof vec4)
+        assertEquals(0, chunkOffsetBufferSize % 16);
+    }
 }
