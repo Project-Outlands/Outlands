@@ -109,7 +109,7 @@ public final class FrameDraws {
     public static List<Operation> drain() {
         collecting = false;
         synchronized (DRAWS) {
-            List<Operation> copy = List.copyOf(DRAWS);
+            List<Operation> copy = new ArrayList<>(DRAWS);
             DRAWS.clear();
             return copy;
         }

@@ -5,6 +5,8 @@ import net.minecraft.client.renderer.vertex.VertexFormatElement;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A {@code VertexFormat} expressed as the attribute list a pipeline can be built from.
@@ -123,6 +125,8 @@ public final class VertexLayout {
         this.attributes = List.copyOf(attributes);
     }
 
+    private static final Map<VertexFormat, VertexLayout> CACHE = new ConcurrentHashMap<>();
+
     /**
      * Translates a vanilla format.
      *
@@ -130,6 +134,10 @@ public final class VertexLayout {
      *         and Vulkan cannot express
      */
     public static VertexLayout of(VertexFormat format) {
+        return CACHE.computeIfAbsent(format, VertexLayout::create);
+    }
+
+    private static VertexLayout create(VertexFormat format) {
         int stride = format.getSize();
         List<Attribute> attributes = new ArrayList<>(format.getElementCount());
         for (int i = 0; i < format.getElementCount(); i++) {
@@ -179,5 +187,17 @@ public final class VertexLayout {
     /** Only the elements a shader receives. */
     public List<Attribute> shaderAttributes() {
         return attributes.stream().filter(Attribute::isAttribute).toList();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof VertexLayout that)) return false;
+        return stride == that.stride && attributes.equals(that.attributes);
+    }
+
+    @Override
+    public int hashCode() {
+        return 31 * stride + attributes.hashCode();
     }
 }

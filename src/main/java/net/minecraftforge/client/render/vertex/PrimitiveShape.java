@@ -55,6 +55,21 @@ public final class PrimitiveShape {
     private final int glMode;
     private final Topology topology;
 
+    private static final PrimitiveShape[] CACHE = new PrimitiveShape[9];
+    static {
+        for (int m = 0; m <= 8; m++) {
+            Topology t = switch (m) {
+                case GL_POINTS -> Topology.POINT_LIST;
+                case GL_LINES, GL_LINE_LOOP -> Topology.LINE_LIST;
+                case GL_LINE_STRIP -> Topology.LINE_STRIP;
+                case GL_TRIANGLES, GL_TRIANGLE_FAN, GL_QUADS, GL_QUAD_STRIP -> Topology.TRIANGLE_LIST;
+                case GL_TRIANGLE_STRIP -> Topology.TRIANGLE_STRIP;
+                default -> throw new IllegalStateException();
+            };
+            CACHE[m] = new PrimitiveShape(m, t);
+        }
+    }
+
     private PrimitiveShape(int glMode, Topology topology) {
         this.glMode = glMode;
         this.topology = topology;
@@ -67,18 +82,11 @@ public final class PrimitiveShape {
      *         silently drew nothing would be a missing feature that looks like a rendering bug.
      */
     public static PrimitiveShape ofGlMode(int glMode) {
-        return switch (glMode) {
-            case GL_POINTS -> new PrimitiveShape(glMode, Topology.POINT_LIST);
-            case GL_LINES -> new PrimitiveShape(glMode, Topology.LINE_LIST);
-            case GL_LINE_STRIP -> new PrimitiveShape(glMode, Topology.LINE_STRIP);
-            case GL_TRIANGLES -> new PrimitiveShape(glMode, Topology.TRIANGLE_LIST);
-            case GL_TRIANGLE_STRIP -> new PrimitiveShape(glMode, Topology.TRIANGLE_STRIP);
-            // The four with no Vulkan equivalent. All of them convert to a list.
-            case GL_LINE_LOOP -> new PrimitiveShape(glMode, Topology.LINE_LIST);
-            case GL_TRIANGLE_FAN, GL_QUADS, GL_QUAD_STRIP -> new PrimitiveShape(glMode, Topology.TRIANGLE_LIST);
-            default -> throw new IllegalArgumentException("no Vulkan topology for GL primitive mode " + glMode
-                    + "; the modes this code knows are 0..8");
-        };
+        if (glMode >= 0 && glMode < CACHE.length) {
+            return CACHE[glMode];
+        }
+        throw new IllegalArgumentException("no Vulkan topology for GL primitive mode " + glMode
+                + "; the modes this code knows are 0..8");
     }
 
     /** The GL constant this was built from. */

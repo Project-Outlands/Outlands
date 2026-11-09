@@ -58,11 +58,24 @@ class DisplayListVkTest {
 
         UnsupportedOperationException thrown =
                 assertThrows(UnsupportedOperationException.class, () -> lists.call(id));
-        // The message has to say the recording worked, or the next person assumes the list is empty and looks in
-        // the wrong place.
-        assertTrue(thrown.getMessage().contains("2 draws"), thrown.getMessage());
+        // Consecutive quads are consolidated into a single draw of 8 vertices
+        assertTrue(thrown.getMessage().contains("1 draws"), thrown.getMessage());
         assertTrue(thrown.getMessage().contains("8 vertices"), thrown.getMessage());
         assertTrue(thrown.getMessage().contains("frame"), thrown.getMessage());
+    }
+
+    @Test
+    void consolidationMergesMultipleQuadsIntoSingleDraw() {
+        DisplayListVk lists = new DisplayListVk();
+        int id = lists.generate(1);
+        lists.begin(id, GL_COMPILE);
+        // 6 quads like a ModelBox cube
+        for (int i = 0; i < 6; i++) {
+            lists.capture(VertexLayout.of(DefaultVertexFormats.BLOCK), GL_QUADS, 4, vertices(1));
+        }
+        lists.end();
+
+        assertEquals(1, lists.drawCount(id), "6 quads of same layout must be consolidated into 1 draw");
     }
 
     @Test

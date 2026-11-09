@@ -78,8 +78,44 @@ final class DisplayListVk implements DisplayListBackend {
             throw new IllegalStateException("glEndList without glNewList");
         }
         int id = recording;
-        lists.put(id, inProgress.remove(id));
+        List<Draw> raw = inProgress.remove(id);
+        lists.put(id, consolidate(raw));
         recording = null;
+    }
+
+    private static List<Draw> consolidate(List<Draw> raw) {
+        if (raw == null || raw.size() <= 1) {
+            return raw;
+        }
+        List<Draw> merged = new ArrayList<>(raw.size());
+        Draw current = null;
+        for (int i = 0; i < raw.size(); i++) {
+            Draw draw = raw.get(i);
+            if (current == null) {
+                current = draw;
+            } else if (canMerge(current, draw)) {
+                int totalVertices = current.vertexCount() + draw.vertexCount();
+                byte[] combined = new byte[current.vertices().length + draw.vertices().length];
+                System.arraycopy(current.vertices(), 0, combined, 0, current.vertices().length);
+                System.arraycopy(draw.vertices(), 0, combined, current.vertices().length, draw.vertices().length);
+                current = new Draw(current.layout(), current.mode(), totalVertices, combined);
+            } else {
+                merged.add(current);
+                current = draw;
+            }
+        }
+        if (current != null) {
+            merged.add(current);
+        }
+        return merged;
+    }
+
+    private static boolean canMerge(Draw a, Draw b) {
+        if (a.mode() != b.mode() || !a.layout().equals(b.layout())) {
+            return false;
+        }
+        // Independent primitive modes: QUADS (7), TRIANGLES (4), LINES (1), POINTS (0)
+        return a.mode() == 7 || a.mode() == 4 || a.mode() == 1 || a.mode() == 0;
     }
 
     @Override

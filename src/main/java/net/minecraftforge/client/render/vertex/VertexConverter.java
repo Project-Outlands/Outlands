@@ -125,6 +125,9 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
         int packedFallbackColor = (fbA << 24) | (fbB << 16) | (fbG << 8) | fbR;
 
+        float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
+        float cachedFactor = 1.0F;
+
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
             int sourceBase = vertex * inStride;
@@ -148,8 +151,36 @@ public final class VertexConverter {
             }
 
             if (normalAttr != null && lightingEnabled && normalMatrix != null && light0 != null && light1 != null) {
-                applyNormalLighting(in, sourceBase + normalAttr.offset(), target, base, normalAttr,
-                        normalMatrix, light0, light1);
+                int at = sourceBase + normalAttr.offset();
+                float nx, ny, nz;
+                if (normalAttr.type() == VertexFormatElement.EnumType.BYTE
+                        || normalAttr.type() == VertexFormatElement.EnumType.UBYTE) {
+                    nx = in.get(at);
+                    ny = in.get(at + 1);
+                    nz = in.get(at + 2);
+                } else if (normalAttr.type() == VertexFormatElement.EnumType.FLOAT) {
+                    nx = in.getFloat(at);
+                    ny = in.getFloat(at + 4);
+                    nz = in.getFloat(at + 8);
+                } else {
+                    nx = 0.0F; ny = 0.0F; nz = 0.0F;
+                }
+
+                if (nx != lastNx || ny != lastNy || nz != lastNz) {
+                    lastNx = nx;
+                    lastNy = ny;
+                    lastNz = nz;
+                    cachedFactor = computeNormalLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, light0, light1);
+                }
+
+                if (cachedFactor < 0.9999F) {
+                    int r = target.get(base + COLOR_OFFSET) & 0xFF;
+                    int g = target.get(base + COLOR_OFFSET + 1) & 0xFF;
+                    int b = target.get(base + COLOR_OFFSET + 2) & 0xFF;
+                    target.put(base + COLOR_OFFSET, (byte) Math.round(r * cachedFactor));
+                    target.put(base + COLOR_OFFSET + 1, (byte) Math.round(g * cachedFactor));
+                    target.put(base + COLOR_OFFSET + 2, (byte) Math.round(b * cachedFactor));
+                }
             }
         }
     }
@@ -250,47 +281,34 @@ public final class VertexConverter {
         return (byte) Math.max(0, Math.min(255, scaled));
     }
 
-    private static void applyNormalLighting(ByteBuffer in, int at, ByteBuffer out, int base,
-                                            VertexLayout.Attribute attribute,
-                                            float[] nm, float[] l0, float[] l1) {
-        float nx, ny, nz;
-        if (attribute.type() == VertexFormatElement.EnumType.BYTE
-                || attribute.type() == VertexFormatElement.EnumType.UBYTE) {
-            nx = in.get(at) / 127.0F;
-            ny = in.get(at + 1) / 127.0F;
-            nz = in.get(at + 2) / 127.0F;
-        } else if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
-            nx = in.getFloat(at);
-            ny = in.getFloat(at + 4);
-            nz = in.getFloat(at + 8);
-        } else {
-            return;
+    private static float computeNormalLightingFactor(float nx, float ny, float nz,
+                                                     VertexFormatElement.EnumType type,
+                                                     float[] nm, float[] l0, float[] l1) {
+        if (type == VertexFormatElement.EnumType.BYTE || type == VertexFormatElement.EnumType.UBYTE) {
+            nx /= 127.0F;
+            ny /= 127.0F;
+            nz /= 127.0F;
         }
         float lenSq = nx * nx + ny * ny + nz * nz;
-        if (lenSq > 0.01F) {
-            // Transform normal to eye space using column-major 3x3 normalMatrix:
-            float ex = nm[0] * nx + nm[3] * ny + nm[6] * nz;
-            float ey = nm[1] * nx + nm[4] * ny + nm[7] * nz;
-            float ez = nm[2] * nx + nm[5] * ny + nm[8] * nz;
-            float eLenSq = ex * ex + ey * ey + ez * ez;
-            if (eLenSq < 1e-4F) {
-                return;
-            }
-            float invLen = 1.0F / (float) Math.sqrt(eLenSq);
-            ex *= invLen;
-            ey *= invLen;
-            ez *= invLen;
-
-            // OpenGL standard item lighting: ambient 0.4, diffuse 0.6 per light
-            float d0 = Math.max(0.0F, ex * l0[0] + ey * l0[1] + ez * l0[2]);
-            float d1 = Math.max(0.0F, ex * l1[0] + ey * l1[1] + ez * l1[2]);
-            float factor = Math.min(1.0F, 0.4F + 0.6F * d0 + 0.6F * d1);
-            int r = out.get(base + COLOR_OFFSET) & 0xFF;
-            int g = out.get(base + COLOR_OFFSET + 1) & 0xFF;
-            int b = out.get(base + COLOR_OFFSET + 2) & 0xFF;
-            out.put(base + COLOR_OFFSET, (byte) Math.round(r * factor));
-            out.put(base + COLOR_OFFSET + 1, (byte) Math.round(g * factor));
-            out.put(base + COLOR_OFFSET + 2, (byte) Math.round(b * factor));
+        if (lenSq <= 0.01F) {
+            return 1.0F;
         }
+        // Transform normal to eye space using column-major 3x3 normalMatrix:
+        float ex = nm[0] * nx + nm[3] * ny + nm[6] * nz;
+        float ey = nm[1] * nx + nm[4] * ny + nm[7] * nz;
+        float ez = nm[2] * nx + nm[5] * ny + nm[8] * nz;
+        float eLenSq = ex * ex + ey * ey + ez * ez;
+        if (eLenSq < 1e-4F) {
+            return 1.0F;
+        }
+        float invLen = 1.0F / (float) Math.sqrt(eLenSq);
+        ex *= invLen;
+        ey *= invLen;
+        ez *= invLen;
+
+        // OpenGL standard item lighting: ambient 0.4, diffuse 0.6 per light
+        float d0 = Math.max(0.0F, ex * l0[0] + ey * l0[1] + ez * l0[2]);
+        float d1 = Math.max(0.0F, ex * l1[0] + ey * l1[1] + ez * l1[2]);
+        return Math.min(1.0F, 0.4F + 0.6F * d0 + 0.6F * d1);
     }
 }
