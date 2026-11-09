@@ -28,7 +28,7 @@ class FrameStateVkTest {
     void allThirteenCapabilitiesAreKnown() {
         // The set is closed by the thirteen BooleanState constructions in vanilla. A backend switching on a value
         // with meaning is the point; a new one should fail to compile rather than fall through.
-        for (int glEnum : new int[] {2884, 2896, 2903, 2912, 2929, 2977, 3008, 3042, 3058, 3553, 10754, 32823, 32826}) {
+        for (int glEnum : new int[] {2884, 2896, 2903, 2912, 2929, 2977, 3008, 3042, 3058, 3089, 3553, 10754, 32823, 32826}) {
             Capability.ofGlEnum(glEnum);
         }
         assertThrows(IllegalArgumentException.class, () -> Capability.ofGlEnum(3040),
@@ -38,11 +38,11 @@ class FrameStateVkTest {
     @Test
     void capabilitiesAreTrackedAndNotJustRecorded() {
         FrameStateVk state = new FrameStateVk();
-        // 13 toggles that vanilla drives through BooleanState, plus the eight GL_LIGHTn sources that
-        // RenderHelper.enableGUIStandardItemLighting turns on when an item icon is drawn. The count is asserted so
-        // that adding a capability is a deliberate act rather than a side effect - and so that removing one, which
-        // would make some draw silently unrepresented, fails here.
-        assertEquals(21, Capability.values().length);
+        // 13 toggles that vanilla drives through BooleanState, plus SCISSOR_TEST (3089), plus the eight GL_LIGHTn
+        // sources that RenderHelper.enableGUIStandardItemLighting turns on when an item icon is drawn. The count is
+        // asserted so that adding a capability is a deliberate act rather than a side effect - and so that removing one,
+        // which would make some draw silently unrepresented, fails here.
+        assertEquals(22, Capability.values().length);
         assertEquals(Capability.LIGHT_0, Capability.ofGlEnum(16384));
         assertEquals(Capability.LIGHT_7, Capability.ofGlEnum(16391));
 

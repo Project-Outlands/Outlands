@@ -121,19 +121,57 @@
                  {
                      this.chunksToUpdate.add(renderchunk4);
                  }
-@@ -1191,6 +1204,11 @@
+@@ -1165,12 +1178,18 @@
+             if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
+             {
+                 l++;
+-                this.renderContainer.addRenderChunk(renderchunk, blockLayerIn);
++                if (net.minecraftforge.client.render.RenderBackendSelection.glPath())
++                {
++                    this.renderContainer.addRenderChunk(renderchunk, blockLayerIn);
++                }
+             }
+         }
+ 
+         this.mc.profiler.func_194339_b(() -> "render_" + blockLayerIn);
+-        this.renderBlockLayer(blockLayerIn);
++        double viewX = entityIn.lastTickPosX + (entityIn.posX - entityIn.lastTickPosX) * partialTicks;
++        double viewY = entityIn.lastTickPosY + (entityIn.posY - entityIn.lastTickPosY) * partialTicks;
++        double viewZ = entityIn.lastTickPosZ + (entityIn.posZ - entityIn.lastTickPosZ) * partialTicks;
++        this.renderBlockLayer(blockLayerIn, viewX, viewY, viewZ);
+         this.mc.profiler.endSection();
+         return l;
+     }
+@@ -1178,6 +1197,12 @@
+     @SuppressWarnings("incomplete-switch")
+     private void renderBlockLayer(BlockRenderLayer blockLayerIn)
+     {
++        this.renderBlockLayer(blockLayerIn, 0.0, 0.0, 0.0);
++    }
++
++    @SuppressWarnings("incomplete-switch")
++    private void renderBlockLayer(BlockRenderLayer blockLayerIn, double viewX, double viewY, double viewZ)
++    {
+         this.mc.entityRenderer.enableLightmap();
+ 
+         if (OpenGlHelper.useVbo())
+@@ -1191,7 +1216,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
+-        this.renderContainer.renderChunkLayer(blockLayerIn);
 +        // The chunk meshes were captured when they finished building, so they never reached a GL buffer and this
 +        // backend's chunk draw has no vertices. The layer is issued here instead, where vanilla would have drawn it and
-+        // with the camera it would have used; the call below still runs, because it is what clears the container's
-+        // collected chunks, and it draws nothing. A no-op on the GL path, which draws exactly as before.
-+        net.minecraftforge.client.render.state.backend.FrameStates.recordTerrainLayer(blockLayerIn.ordinal());
-         this.renderContainer.renderChunkLayer(blockLayerIn);
++        // with the camera it would have used. On the GL path, the call below draws as before.
++        net.minecraftforge.client.render.state.backend.FrameStates.recordTerrainLayer(blockLayerIn.ordinal(), viewX, viewY, viewZ);
++        if (net.minecraftforge.client.render.RenderBackendSelection.glPath())
++        {
++            this.renderContainer.renderChunkLayer(blockLayerIn);
++        }
  
          if (OpenGlHelper.useVbo())
-@@ -1318,6 +1336,13 @@
+         {
+@@ -1318,6 +1350,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -147,7 +185,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1525,21 @@
+@@ -1500,22 +1539,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -178,7 +216,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1569,7 @@
+@@ -1545,6 +1583,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -186,7 +224,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1609,13 @@
+@@ -1584,14 +1623,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -204,7 +242,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +1984,8 @@
+@@ -1960,8 +1998,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -215,7 +253,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2019,8 @@
+@@ -1995,8 +2033,8 @@
                  }
              }
  
@@ -226,7 +264,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2074,7 @@
+@@ -2050,7 +2088,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -235,7 +273,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2114,13 @@
+@@ -2090,8 +2128,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -250,7 +288,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2380,11 @@
+@@ -2351,9 +2394,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -265,7 +303,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +2853,7 @@
+@@ -2822,7 +2867,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {

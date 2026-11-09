@@ -217,15 +217,15 @@ class VertexConverterTest {
         assertEquals(200, out.get(12) & 0xFF, "top face stays unattenuated");
         assertEquals(255, out.get(15) & 0xFF, "alpha is preserved");
 
-        // Vertex 1: bottom face factor 0.5 -> 100
-        assertEquals(100, out.get(outStride + 12) & 0xFF, "bottom face factor 0.5");
+        // Vertex 1: bottom face factor 0.4 -> 80
+        assertEquals(80, out.get(outStride + 12) & 0xFF, "bottom face factor 0.4");
         assertEquals(255, out.get(outStride + 15) & 0xFF, "alpha is preserved");
 
-        // Vertex 2: Z face factor 0.8 -> 160
-        assertEquals(160, out.get(outStride * 2 + 12) & 0xFF, "Z face factor 0.8");
+        // Vertex 2: Z+ (south) face factor 0.722 -> 144
+        assertEquals(144, out.get(outStride * 2 + 12) & 0xFF, "Z+ face factor 0.722");
 
-        // Vertex 3: X face factor 0.6 -> 120
-        assertEquals(120, out.get(outStride * 3 + 12) & 0xFF, "X face factor 0.6");
+        // Vertex 3: X+ (east) face factor 0.637 -> 127
+        assertEquals(127, out.get(outStride * 3 + 12) & 0xFF, "X+ face factor 0.637");
     }
 
     @Test
@@ -251,7 +251,7 @@ class VertexConverterTest {
 
         int outStride = VertexConverter.STRIDE;
         assertEquals(200, out.get(12) & 0xFF, "top face factor 1.0 on fallback colour");
-        assertEquals(100, out.get(outStride + 12) & 0xFF, "bottom face factor 0.5 on fallback colour");
+        assertEquals(80, out.get(outStride + 12) & 0xFF, "bottom face factor 0.4 on fallback colour");
         assertEquals(255, out.get(15) & 0xFF);
         assertEquals(255, out.get(outStride + 15) & 0xFF);
     }

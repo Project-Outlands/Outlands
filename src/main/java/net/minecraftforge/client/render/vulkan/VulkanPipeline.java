@@ -111,10 +111,16 @@ final class VulkanPipeline implements AutoCloseable {
         static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                 | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-        /** The state the terrain phase has always used. */
+        /** The state the terrain phase has always used for opaque and cutout geometry. */
         static PipelineState terrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true,
                     GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS);
+        }
+
+        /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
+        static PipelineState translucentTerrain() {
+            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, true, true,
+                    770, 771, 1, 0, ALL_CHANNELS);
         }
     }
 

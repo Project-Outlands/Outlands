@@ -166,15 +166,8 @@ public final class VulkanBackend implements RenderBackend {
             graph.freeze();
             // Only now, once the graph is frozen and the layer exists, does anything start capturing chunk meshes.
             // The consumer is the layer itself: it owns the buffers the meshes become.
-            // Chunk capture stays off for now, and that is a decision rather than an oversight.
-            //
-            // With it on, the patched uploadChunk hands the finished mesh to ChunkMeshCapture instead of uploading it,
-            // and the terrain layer is the only thing that can draw it. That path is built and its slices carry the
-            // right origins, but the layer's draws do not reach the screen while the same geometry drawn by the stream
-            // path does - so something in the layer's own draw is wrong and is not worth guessing at while the world
-            // renders without it. Turning capture on is a one-line change once that is found; leaving it off keeps
-            // vanilla's chunk upload, which the stream path already replays correctly, per-chunk matrices included.
-            // ChunkMeshCapture.enable();
+            // Enable chunk mesh capture so VulkanTerrainLayer receives chunk meshes.
+            ChunkMeshCapture.enable();
         } catch (RuntimeException | LinkageError e) {
             // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
             // log it once, and present nothing rather than throwing from inside the render loop every frame.

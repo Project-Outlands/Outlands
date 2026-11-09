@@ -40,7 +40,9 @@ public enum Capability {
     POLYGON_OFFSET_LINE,
     POLYGON_OFFSET_FILL,
     /** Fixed-function: a normal-rescaling mode with no Vulkan equivalent. */
-    RESCALE_NORMAL;
+    RESCALE_NORMAL,
+    /** Fixed-function: normal vector normalization with no Vulkan equivalent. */
+    NORMALIZE;
 
     /** Maps a GL capability constant. Throws for anything outside the set vanilla uses. */
     public static Capability ofGlEnum(int glCapability) {
@@ -58,10 +60,11 @@ public enum Capability {
             case 2903 -> COLOR_MATERIAL;
             case 2912 -> FOG;
             case 2929 -> DEPTH_TEST;
-            case 2977 -> SCISSOR_TEST;
+            case 2977 -> NORMALIZE;
             case 3008 -> ALPHA_TEST;
             case 3042 -> BLEND;
             case 3058 -> COLOR_LOGIC_OP;
+            case 3089 -> SCISSOR_TEST;
             case 3553 -> TEXTURE_2D;
             case 10754 -> POLYGON_OFFSET_LINE;
             case 32823 -> POLYGON_OFFSET_FILL;

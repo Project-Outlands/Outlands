@@ -65,6 +65,9 @@ final class FrameStateVk implements FrameState {
     /** One stack per GL matrix mode constant. */
     private final Map<Integer, Deque<Matrix4f>> matrixStacks = new HashMap<>();
     private final Map<Integer, Matrix4f> currentMatrix = new HashMap<>();
+    private final float[] multiplyScratchValues = new float[16];
+    private final Matrix4f multiplyScratchMatrix = new Matrix4f();
+    private final float[] readMatrixScratch = new float[16];
     private int attributeDepth;
 
     /** Fog state, at the defaults GL documents: GL_EXP at density 1, no colour, the linear range 0..1. */
@@ -409,15 +412,14 @@ final class FrameStateVk implements FrameState {
         //
         // The copy also leaves the caller's buffer position alone, which matters because vanilla reuses these
         // buffers across draws.
-        float[] values = new float[16];
         FloatBuffer view = columnMajor16.duplicate();
         view.rewind();
         if (view.remaining() < 16) {
             throw new IllegalArgumentException("a 4x4 matrix needs 16 floats, the buffer has " + view.remaining());
         }
-        view.get(values);
+        view.get(multiplyScratchValues);
         // JOML's storage is column-major, the same layout glMultMatrixf reads, so no transpose happens here.
-        current().mul(new Matrix4f().set(values));
+        current().mul(multiplyScratchMatrix.set(multiplyScratchValues));
     }
 
     @Override
@@ -462,9 +464,8 @@ final class FrameStateVk implements FrameState {
         // Read through get(column, row) rather than Matrix4fc.get(FloatBuffer) for the reason spelled out on
         // multiply(): that overload's Unsafe path trusts the buffer's native address field and dereferences it even
         // for a heap buffer, so it would kill the process on exactly the buffers vanilla and mods build with wrap().
-        float[] values = new float[16];
         for (int i = 0; i < 16; i++) {
-            values[i] = source.get(i >> 2, i & 3);   // column-major, the layout glGetFloatv writes
+            readMatrixScratch[i] = source.get(i >> 2, i & 3);   // column-major, the layout glGetFloatv writes
         }
         FloatBuffer view = out.duplicate();
         int at = view.position();
@@ -476,7 +477,7 @@ final class FrameStateVk implements FrameState {
         // the caller points at. Rewinding instead would write over data a caller deliberately offset past, and
         // advancing would consume a buffer vanilla reuses every frame.
         for (int i = 0; i < 16; i++) {
-            view.put(at + i, values[i]);
+            view.put(at + i, readMatrixScratch[i]);
         }
     }
 

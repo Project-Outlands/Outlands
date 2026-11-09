@@ -46,9 +46,14 @@ import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
  */
 final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
+    private static final org.apache.logging.log4j.Logger LOGGER =
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render");
+    private static int logFrameCounter = 0;
+
     private final VkDevice device;
     private final VulkanContext context;
     private final VulkanPipeline pipeline;
+    private final VulkanPipeline translucentPipeline;
     private final VulkanDescriptors descriptors;
     private final VulkanTextures textures;
     private VulkanBuffer vertices;
@@ -66,13 +71,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     /** Scratch for the camera the frame hands over, so a layer draw allocates nothing. */
     private final java.nio.FloatBuffer cameraScratch = java.nio.ByteBuffer.allocateDirect(64)
             .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+    /** Scratch for the 6 frustum planes (6 planes * 4 components = 24 floats). */
+    private final float[] frustumPlanes = new float[24];
 
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
+                               VulkanPipeline translucentPipeline,
                                VulkanDescriptors descriptors, VulkanTextures textures, VulkanBuffer vertices,
                                VulkanBuffer indices, TerrainMeshPacker.Pack pack, String source) {
         this.device = device;
         this.context = context;
         this.pipeline = pipeline;
+        this.translucentPipeline = translucentPipeline;
         this.descriptors = descriptors;
         this.textures = textures;
         this.vertices = vertices;
@@ -98,11 +107,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         VulkanShader vertex = VulkanShader.load(device, "/assets/outlands/shaders/terrain.vert.spv");
         VulkanShader fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
         VulkanPipeline pipeline;
+        VulkanPipeline translucentPipeline;
         try {
             // The terrain shader samples the block atlas exactly like a streamed draw does, so it needs the same
             // descriptor set layout and takes the texture through the same cache.
             pipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
                     descriptors.pipelineLayout(), descriptors.layout(), VulkanPipeline.PipelineState.terrain());
+            translucentPipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+                    descriptors.pipelineLayout(), descriptors.layout(), VulkanPipeline.PipelineState.translucentTerrain());
         } finally {
             // The module is only needed to build the pipeline; the pipeline owns the compiled code from then on.
             vertex.close();
@@ -132,12 +144,13 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             }
         } catch (RuntimeException e) {
             pipeline.close();
+            translucentPipeline.close();
             if (vertices != null) {
                 vertices.close();
             }
             throw e;
         }
-        return new VulkanTerrainLayer(device, context, pipeline, descriptors, textures, vertices, indices, pack, "none");
+        return new VulkanTerrainLayer(device, context, pipeline, translucentPipeline, descriptors, textures, vertices, indices, pack, "none");
     }
 
     /** The descriptor set for the atlas, resolved by the frame before the rendering instance opened. */
@@ -204,11 +217,15 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             return;
         }
         int drawn = 0;
+        int layerSlices = 0;
+        int culled = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+            VulkanPipeline activePipeline = layer == net.minecraft.util.BlockRenderLayer.TRANSLUCENT.ordinal()
+                    ? translucentPipeline : pipeline;
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline.handle());
             // The atlas set, resolved by the frame before this instance opened: resolving it here would record a copy
             // inside a render pass, which Vulkan does not allow - the validation layers named that one exactly.
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline.layout(), 0,
                     stack.longs(resolvedTexture, descriptors.lightmapSet(slot)), null);
             // Bound once for the whole layer: this is what packing buys.
             vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertices.handle()), stack.mallocLong(1).put(0, 0L));
@@ -226,14 +243,24 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             boolean alphaTest = layer == net.minecraft.util.BlockRenderLayer.CUTOUT_MIPPED.ordinal()
                     || layer == net.minecraft.util.BlockRenderLayer.CUTOUT.ordinal();
 
+            extractFrustumPlanes(cameraMatrix);
+
             boolean firstLayerReported = false;
             for (TerrainMeshPacker.Slice slice : slices) {
                 if (slice.layer() != layer) {
                     continue;
                 }
+                layerSlices++;
+                // Frustum cull chunks outside the view cone: [origin - 1, origin + 17] covers the 16x16x16 chunk
+                // plus a 1-block margin for protruding geometry (torches, ladders, fences).
+                if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
+                        slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
+                    culled++;
+                    continue;
+                }
                 if (!firstLayerReported && Boolean.getBoolean("outlands.render.debug")) {
                     firstLayerReported = true;
-                    org.apache.logging.log4j.LogManager.getLogger("Outlands|render").info(
+                    LOGGER.info(
                             "terrain layer {}: {} of {} slices, first origin {},{} {}", layer, drawn, slices.size(),
                             slice.originX(), slice.originY(), slice.originZ());
                 }
@@ -241,13 +268,87 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 // translation on the matrix - the same thing it did per chunk in preRenderChunk.
                 chunkMatrix.set(cameraScratch).translate(slice.originX(), slice.originY(), slice.originZ());
                 writeConstants(constants, chunkMatrix, alphaTest);
-                vkCmdPushConstants(commandBuffer, pipeline.layout(),
+                vkCmdPushConstants(commandBuffer, activePipeline.layout(),
                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
                 vkCmdDrawIndexed(commandBuffer, slice.indexCount(), 1, slice.firstIndex(), slice.vertexOffset(), 0);
                 drawn++;
             }
+            if (++logFrameCounter % 300 == 1 && layerSlices > 0) {
+                LOGGER.info("terrain layer {}: {} of {} slices drawn (frustum culled: {})", layer, drawn, layerSlices, culled);
+            }
         }
         drawCount = drawn;
+    }
+
+    /**
+     * Extracts the 6 frustum planes (A, B, C, D) from the column-major GL camera matrix (projection * modelview).
+     * For any point inside the frustum, A*x + B*y + C*z + D >= 0.
+     */
+    static void extractFrustumPlanes(float[] m, float[] planes) {
+        // Left plane: w + x >= 0 (row 3 + row 0)
+        planes[0]  = m[3]  + m[0];
+        planes[1]  = m[7]  + m[4];
+        planes[2]  = m[11] + m[8];
+        planes[3]  = m[15] + m[12];
+
+        // Right plane: w - x >= 0 (row 3 - row 0)
+        planes[4]  = m[3]  - m[0];
+        planes[5]  = m[7]  - m[4];
+        planes[6]  = m[11] - m[8];
+        planes[7]  = m[15] - m[12];
+
+        // Bottom plane: w + y >= 0 (row 3 + row 1)
+        planes[8]  = m[3]  + m[1];
+        planes[9]  = m[7]  + m[5];
+        planes[10] = m[11] + m[9];
+        planes[11] = m[15] + m[13];
+
+        // Top plane: w - y >= 0 (row 3 - row 1)
+        planes[12] = m[3]  - m[1];
+        planes[13] = m[7]  - m[5];
+        planes[14] = m[11] - m[9];
+        planes[15] = m[15] - m[13];
+
+        // Near plane: w + z >= 0 (row 3 + row 2)
+        planes[16] = m[3]  + m[2];
+        planes[17] = m[7]  + m[6];
+        planes[18] = m[11] + m[10];
+        planes[19] = m[15] + m[14];
+
+        // Far plane: w - z >= 0 (row 3 - row 2)
+        planes[20] = m[3]  - m[2];
+        planes[21] = m[7]  - m[6];
+        planes[22] = m[11] - m[10];
+        planes[23] = m[15] - m[14];
+    }
+
+    private void extractFrustumPlanes(float[] m) {
+        extractFrustumPlanes(m, frustumPlanes);
+    }
+
+    /**
+     * Tests whether the given axis-aligned bounding box intersects or lies inside the view frustum.
+     */
+    static boolean isBoxInFrustum(float[] planes, float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
+        for (int p = 0; p < 24; p += 4) {
+            float a = planes[p];
+            float b = planes[p + 1];
+            float c = planes[p + 2];
+            float d = planes[p + 3];
+
+            float px = a > 0.0f ? maxX : minX;
+            float py = b > 0.0f ? maxY : minY;
+            float pz = c > 0.0f ? maxZ : minZ;
+
+            if (a * px + b * py + c * pz + d < 0.0f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isBoxInFrustum(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
+        return isBoxInFrustum(frustumPlanes, minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     /**
@@ -335,6 +436,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             vertices.close();
         }
         pipeline.close();
+        translucentPipeline.close();
     }
 
     /**

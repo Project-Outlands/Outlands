@@ -221,9 +221,17 @@ public final class VertexConverter {
         }
         float lenSq = nx * nx + ny * ny + nz * nz;
         if (lenSq > 0.01F) {
-            // Directional diffuse light factor matching Forge LightUtil.diffuseLight:
-            // Y+ (top) = 1.0, Z (north/south) = 0.8, X (east/west) = 0.6, Y- (bottom) = 0.5.
-            float factor = Math.min(1.0F, nx * nx * 0.6F + ny * ny * ((3.0F + ny) / 4.0F) + nz * nz * 0.8F);
+            float invLen = 1.0F / (float) Math.sqrt(lenSq);
+            nx *= invLen;
+            ny *= invLen;
+            nz *= invLen;
+            // Exact OpenGL standard item lighting (RenderHelper.enableGUIStandardItemLighting):
+            // Light 0 in model space: (0.3943, 0.9172, -0.0578)
+            // Light 1 in model space: (-0.5766, 0.6166, 0.5360)
+            // Ambient: 0.4, Diffuse 0.6 per light
+            float d0 = Math.max(0.0F, 0.3943F * nx + 0.9172F * ny - 0.0578F * nz);
+            float d1 = Math.max(0.0F, -0.5766F * nx + 0.6166F * ny + 0.5360F * nz);
+            float factor = Math.min(1.0F, 0.4F + 0.6F * d0 + 0.6F * d1);
             int r = out.get(base + COLOR_OFFSET) & 0xFF;
             int g = out.get(base + COLOR_OFFSET + 1) & 0xFF;
             int b = out.get(base + COLOR_OFFSET + 2) & 0xFF;

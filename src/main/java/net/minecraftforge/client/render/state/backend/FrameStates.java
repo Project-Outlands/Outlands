@@ -98,11 +98,25 @@ public final class FrameStates {
      * @return whether the layer was recorded, i.e. whether the backend is drawing terrain
      */
     public static boolean recordTerrainLayer(int layer) {
+        return recordTerrainLayer(layer, 0.0, 0.0, 0.0);
+    }
+
+    /**
+     * Records one terrain render layer with the camera viewpoint offset in world space.
+     *
+     * <p>Vanilla's modelview matrix during chunk rendering only carries camera rotation and eye height; the chunk
+     * origins are translated relative to the viewpoint per-chunk ({@code blockpos - viewEntity}). Translating the
+     * camera matrix by {@code (-viewX, -viewY, -viewZ)} puts the camera in world space so that chunk origins in
+     * world coordinates align with the camera and view frustum.</p>
+     */
+    public static boolean recordTerrainLayer(int layer, double viewX, double viewY, double viewZ) {
         FrameState state = forNonGl();
         if (state == null) {
             return false;
         }
-        org.joml.Matrix4f mvp = new org.joml.Matrix4f(state.projection()).mul(state.modelView());
+        org.joml.Matrix4f view = new org.joml.Matrix4f(state.modelView())
+                .translate((float) -viewX, (float) -viewY, (float) -viewZ);
+        org.joml.Matrix4f mvp = new org.joml.Matrix4f(state.projection()).mul(view);
         float[] values = new float[16];
         mvp.get(values);
         return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(layer, values);

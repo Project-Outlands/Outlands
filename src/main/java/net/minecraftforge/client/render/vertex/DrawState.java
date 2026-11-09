@@ -110,7 +110,18 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison(),
                 state.viewport(),
                 state.colorMask(),
-                state.lightmap());
+                lightmapCoord(state));
+    }
+
+    private static float[] lightmapCoord(net.minecraftforge.client.render.state.backend.FrameState state) {
+        net.minecraftforge.client.render.texture.TextureBackend tb =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        // If texture unit 1 (lightmap unit) is disabled, the lightmap is not in effect (e.g. GUI rendering).
+        // Returning null ensures unlit geometry gets full brightness rather than stale world lighting.
+        if (tb != null && !tb.isTexture2DEnabled(1)) {
+            return null;
+        }
+        return state.lightmap();
     }
 
     /**
@@ -143,17 +154,14 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
     }
 
     /**
-     * The colour packed for a 32-bit write into a little-endian R8G8B8A8 buffer.
-     *
-     * <p>In little-endian native order, the lowest byte lands at offset 0, so R is placed in bits 0..7,
-     * G in bits 8..15, B in bits 16..23, and A in bits 24..31.</p>
+     * The colour packed as 0xAARRGGBB for conversion into vertex attributes.
      */
     public int colorArgb() {
         int r = Math.round(Math.max(0.0F, Math.min(1.0F, color[0])) * 255.0F);
         int g = Math.round(Math.max(0.0F, Math.min(1.0F, color[1])) * 255.0F);
         int b = Math.round(Math.max(0.0F, Math.min(1.0F, color[2])) * 255.0F);
         int a = Math.round(Math.max(0.0F, Math.min(1.0F, color[3])) * 255.0F);
-        return (a << 24) | (b << 16) | (g << 8) | r;
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     /**
