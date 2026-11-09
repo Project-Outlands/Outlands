@@ -565,6 +565,12 @@ final class VulkanStream implements AutoCloseable {
         this.terrain = terrain;
     }
 
+    void prepareFrame(int slot) {
+        if (terrain != null) {
+            terrain.prepareFrame(slot);
+        }
+    }
+
     @Override
     public void close() {
         for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {

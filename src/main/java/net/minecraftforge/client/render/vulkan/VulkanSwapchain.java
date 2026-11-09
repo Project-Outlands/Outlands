@@ -313,6 +313,9 @@ final class VulkanSwapchain {
         if (textures != null) {
             textures.releaseSlot(frame);
         }
+        if (stream != null) {
+            stream.prepareFrame(frame);
+        }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer imageIndexOut = stack.mallocInt(1);

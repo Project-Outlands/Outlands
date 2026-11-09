@@ -129,8 +129,8 @@ final class VulkanBuffer implements AutoCloseable {
         return out;
     }
 
-    private static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
-                                       byte[] data, int usage) {
+    static VulkanBuffer create(VkDevice device, net.minecraftforge.client.render.vulkan.VulkanContext context,
+                               byte[] data, int usage) {
         VulkanBuffer buf = new VulkanBuffer(device, context, usage);
         buf.allocate(data.length);
         if (data.length > 0) {

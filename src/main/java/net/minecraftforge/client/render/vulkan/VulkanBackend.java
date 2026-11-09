@@ -50,9 +50,6 @@ public final class VulkanBackend implements RenderBackend {
 
     private static final Logger LOGGER = LogManager.getLogger("Outlands|render");
 
-    /** How often the packed terrain may be rebuilt while chunk uploads are arriving. */
-    private static final long TERRAIN_REBUILD_INTERVAL_MS = 250L;
-
     private static final VulkanBackend INSTANCE = new VulkanBackend();
 
     private VulkanContext context;
@@ -60,11 +57,6 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanTerrainLayer terrainLayer;
     private VulkanDescriptors descriptors;
     private VulkanTextures textureCache;
-    /** Captures waiting for the next frame. Written by chunk workers, drained on the render thread. */
-    /** The capture count the terrain layer was last built from, so a frame with nothing new rebuilds nothing. */
-    private long installedCaptures = -1L;
-    /** When the terrain was last rebuilt, so a burst of chunk uploads does not rebuild it once per chunk. */
-    private long terrainRebuiltAt;
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
     /** Replays the game's own draws into the frame's rendering instance. */
@@ -183,7 +175,6 @@ public final class VulkanBackend implements RenderBackend {
             return;
         }
         try {
-            installCaptures();
             // The game reports which texture its lightmap lives in when it replaces it; the stream samples that image
             // through descriptor set 1, which is bound once per frame.
             net.minecraftforge.client.render.state.backend.FrameState frameState =
@@ -240,48 +231,7 @@ public final class VulkanBackend implements RenderBackend {
                 || format == org.lwjgl.vulkan.VK10.VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     }
 
-    /**
-     * Hands whatever chunk workers finished to the terrain layer.
-     *
-     * <p>Called on the render thread before recording, so a rebuild that finished mid-frame is picked up next frame
-     * rather than forcing the two threads to synchronise mid-draw.</p>
-     *
-     * <p><b>The whole terrain is repacked, not the changed chunk.</b> {@code useCaptured} replaces the packed buffers,
-     * because incremental updates need per-chunk slices that survive repacking. That is why this is throttled: a world
-     * load captures a thousand chunk layers in a few seconds, and rebuilding the pack for each of them would copy the
-     * whole terrain a thousand times. Coalescing them into one rebuild every quarter second costs a slightly coarser
-     * appearance while the world loads and nothing after it.</p>
-     *
-     * <p><b>Why captures are installed at all.</b> The patched {@code uploadChunk} hands the finished mesh here instead
-     * of uploading it to a GL buffer, so there is no other copy of it: the stream path's own chunk draws have no
-     * vertices. The terrain layer is the only thing that can draw them.</p>
-     */
-    private void installCaptures() {
-        if (terrainLayer == null) {
-            return;
-        }
-        long version = ChunkMeshCapture.version();
-        if (version == installedCaptures) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        if (installedCaptures >= 0 && now - terrainRebuiltAt < TERRAIN_REBUILD_INTERVAL_MS) {
-            return;
-        }
-        installedCaptures = version;
-        terrainRebuiltAt = now;
-        java.util.List<ChunkMeshCapture.Captured> captured = ChunkMeshCapture.current();
-        if (captured.isEmpty()) {
-            return;
-        }
-        // The buffers this replaces may still be read by a frame in flight: the swapchain has four slots and this runs
-        // before any fence is waited on. Waiting for the device here is the honest answer until the terrain buffers
-        // are retired per slot like the stream's are; the alternative is a destroyed-buffer-while-in-use error from
-        // the validation layers, which is how this was found.
-        org.lwjgl.vulkan.VK10.vkDeviceWaitIdle(context.device());
-        terrainLayer.useCaptured(captured);
-        LOGGER.info("terrain: {} chunk layers installed, {}", captured.size(), terrainLayer.source());
-    }
+
 
     @Override
     public void close() {

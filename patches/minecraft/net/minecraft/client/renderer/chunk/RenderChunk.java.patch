@@ -1,6 +1,14 @@
 --- before/net/minecraft/client/renderer/chunk/RenderChunk.java
 +++ after/net/minecraft/client/renderer/chunk/RenderChunk.java
-@@ -171,7 +171,7 @@
+@@ -98,6 +98,7 @@
+                 || y != this.position.getY()
+                 || z != this.position.getZ())
+         {
++            net.minecraftforge.client.render.ChunkMeshCapture.invalidateChunk(this.position.getX(), this.position.getY(), this.position.getZ());
+             this.stopCompileTask();
+             this.position.setPos(x, y, z);
+             this.boundingBox = new AxisAlignedBB(x, y, z, x + 16, y + 16, z + 16);
+@@ -171,7 +172,7 @@
                      lvt_9_1_.setOpaqueCube(blockpos$mutableblockpos);
                  }
  
@@ -9,7 +17,7 @@
                  {
                      TileEntity tileentity = this.worldView.getTileEntity(blockpos$mutableblockpos, Chunk.EnumCreateEntityType.CHECK);
  
-@@ -181,17 +181,19 @@
+@@ -181,17 +182,19 @@
  
                          if (tileentityspecialrenderer != null)
                          {
@@ -31,7 +39,7 @@
                  int j = blockrenderlayer1.ordinal();
  
                  if (block.getDefaultState().getRenderType() != EnumBlockRenderType.INVISIBLE)
-@@ -206,6 +208,8 @@
+@@ -206,6 +209,8 @@
  
                      aboolean[j] |= blockrendererdispatcher.renderBlock(iblockstate, blockpos$mutableblockpos, this.worldView, bufferbuilder);
                  }
@@ -40,7 +48,7 @@
              }
  
              for (BlockRenderLayer blockrenderlayer : BlockRenderLayer.values())
-@@ -269,38 +273,40 @@
+@@ -269,38 +274,40 @@
      public ChunkCompileTaskGenerator makeCompileTaskChunk()
      {
          this.lockCompileTask.lock();
@@ -88,7 +96,7 @@
              {
                  if (this.compileTask != null && this.compileTask.getStatus() != ChunkCompileTaskGenerator.Status.DONE)
                  {
-@@ -312,11 +318,15 @@
+@@ -312,11 +319,15 @@
                  this.compileTask.setCompiledChunk(this.compiledChunk);
                  return this.compileTask;
              }
@@ -104,7 +112,15 @@
      }
  
      protected double getDistanceSq()
-@@ -434,6 +444,26 @@
+@@ -393,6 +404,7 @@
+     {
+         this.stopCompileTask();
+         this.world = null;
++        net.minecraftforge.client.render.ChunkMeshCapture.invalidateChunk(this.position.getX(), this.position.getY(), this.position.getZ());
+ 
+         for (int i = 0; i < BlockRenderLayer.values().length; i++)
+         {
+@@ -434,6 +446,26 @@
      {
          return this.needsUpdate && this.needsImmediateUpdate;
      }

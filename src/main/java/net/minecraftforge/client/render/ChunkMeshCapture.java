@@ -4,38 +4,27 @@ import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.chunk.CompiledChunk;
 import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.world.World;
+import net.minecraftforge.client.event.ChunkLifecycle;
+import net.minecraftforge.client.event.ChunkLifecycleListener;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Where finished chunk meshes go when the renderer is not OpenGL.
  *
- * <p><b>Why a capture point and not a GL interception.</b> Vanilla's chunk build ends with an upload: {@code
- * ChunkRenderDispatcher.uploadChunk} hands a finished {@link BufferBuilder} to either a VBO or a display list. Both
- * are OpenGL. So the patch that calls this class sits before that choice, and it is the only place in the chunk
- * pipeline that knows the layer, the bytes and the chunk at once.</p>
- *
- * <p><b>Why a queue.</b> Uploads happen on the chunk-build workers, and in vanilla they are already marshalled to
- * the client thread before touching GL. The backend draws on the render thread, from inside the graph. A queue
- * between them keeps the two from having to know about each other's threading, and lets a rebuild that finishes
- * mid-frame be picked up next frame instead of forcing a stall.</p>
- *
- * <p><b>What a capture carries.</b> The layer, the chunk's origin, and the vertex bytes in vanilla's own format -
- * the format {@code TerrainVertexFormat} describes, untouched. Nothing is converted here; conversion belongs to
- * whoever builds GPU meshes, which is the backend.</p>
- *
- * <p><b>Disabled by default.</b> While disabled the patch is a single field read and the vanilla path runs
- * unchanged, so this costs nothing on a GL renderer and cannot change its behaviour.</p>
- *
- * <p><b>What this class keeps, and what it does not.</b> The latest capture per chunk and layer, which is the set the
- * backend installs each time it changes - a rebuild supersedes the previous mesh for that layer, so the map is the
- * current world and not a work queue. The backend is told when it changed through {@link #version()}; it does not
- * consume entries, because consuming them would mean installing only the newest chunk and dropping the rest.</p>
+ * <p><b>Incremental capture stream.</b> Chunk meshing workers enqueue updates and removals as chunks are built,
+ * repositioned, or unloaded. The render thread drains these events on frame boundaries to incrementally update the
+ * GPU arena sub-allocator without full repacking or GPU pipeline stalls.</p>
  */
 public final class ChunkMeshCapture {
 
@@ -45,36 +34,124 @@ public final class ChunkMeshCapture {
     public record Captured(int chunkX, int chunkY, int chunkZ, BlockRenderLayer layer, byte[] vertices,
                            int quadCount) {}
 
+    /** Uniquely identifies a chunk layer mesh. */
+    public record Key(int chunkX, int chunkY, int chunkZ, BlockRenderLayer layer) {}
+
+    /** An incremental mesh event for the GPU backend. */
+    public record CaptureEvent(Type type, Key key, Captured capture) {
+        public enum Type { UPDATE, REMOVE, CLEAR }
+
+        public static CaptureEvent update(Key key, Captured capture) {
+            return new CaptureEvent(Type.UPDATE, key, capture);
+        }
+
+        public static CaptureEvent remove(Key key) {
+            return new CaptureEvent(Type.REMOVE, key, null);
+        }
+
+        public static CaptureEvent clear() {
+            return new CaptureEvent(Type.CLEAR, null, null);
+        }
+    }
+
     /** Whether captures are being kept. */
     private static volatile boolean enabled;
 
-    /** Latest capture per (chunk, layer). A rebuild supersedes the previous mesh for the same layer. */
+    /** Latest capture per (chunk, layer). */
     private static final Map<Key, Captured> CURRENT = new ConcurrentHashMap<>();
+
+    /** Incremental capture event queue consumed by the render thread. */
+    private static final Queue<CaptureEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<>();
 
     private static final AtomicLong captured = new AtomicLong();
     private static final AtomicLong dropped = new AtomicLong();
 
-    private record Key(int chunkX, int chunkY, int chunkZ, BlockRenderLayer layer) {}
+    private static final ChunkLifecycleListener LIFECYCLE_LISTENER = new ChunkLifecycleListener() {
+        @Override
+        public void onChunkUnload(World world, int chunkX, int chunkZ) {
+            invalidateChunkColumn(chunkX, chunkZ);
+        }
+
+        @Override
+        public void onWorldUnload(World world) {
+            clear();
+        }
+    };
 
     private ChunkMeshCapture() {}
 
     /**
      * Turns capture on. Called by the backend when it starts.
-     *
-     * <p>Turning it off again drops what was kept: the meshes are only valid against the renderer that asked for
-     * them.</p>
      */
     public static void enable() {
         enabled = true;
+        ChunkLifecycle.register(LIFECYCLE_LISTENER);
     }
 
     public static void disable() {
         enabled = false;
+        ChunkLifecycle.unregister(LIFECYCLE_LISTENER);
         CURRENT.clear();
+        PENDING_EVENTS.clear();
     }
 
     public static boolean isEnabled() {
         return enabled;
+    }
+
+    /** Clears all current meshes and notifies the backend to reset its arena allocations. */
+    public static void clear() {
+        CURRENT.clear();
+        PENDING_EVENTS.clear();
+        if (enabled) {
+            PENDING_EVENTS.add(CaptureEvent.clear());
+        }
+    }
+
+    /** Whether there are pending capture events for the render thread. */
+    public static boolean hasPendingEvents() {
+        return !PENDING_EVENTS.isEmpty();
+    }
+
+    /** Drains all pending capture events. Called on the render thread. */
+    public static List<CaptureEvent> drainEvents() {
+        List<CaptureEvent> list = new ArrayList<>();
+        CaptureEvent event;
+        while ((event = PENDING_EVENTS.poll()) != null) {
+            list.add(event);
+        }
+        return list;
+    }
+
+    /**
+     * Removes and invalidates all layers for the chunk at (x, y, z).
+     * Called when a RenderChunk moves coordinates or deletes GL resources.
+     */
+    public static void invalidateChunk(int x, int y, int z) {
+        if (!enabled) {
+            return;
+        }
+        for (BlockRenderLayer layer : BlockRenderLayer.values()) {
+            Key key = new Key(x, y, z, layer);
+            if (CURRENT.remove(key) != null) {
+                PENDING_EVENTS.add(CaptureEvent.remove(key));
+            }
+        }
+    }
+
+    /**
+     * Removes and invalidates all 16 render chunk sections in the column (chunkX, chunkZ).
+     * Called on chunk unload.
+     */
+    public static void invalidateChunkColumn(int chunkX, int chunkZ) {
+        if (!enabled) {
+            return;
+        }
+        int originX = chunkX * 16;
+        int originZ = chunkZ * 16;
+        for (int y = 0; y < 256; y += 16) {
+            invalidateChunk(originX, y, originZ);
+        }
     }
 
     /** Every capture that is still current, one per chunk and layer. Read by the render thread. */
@@ -82,12 +159,7 @@ public final class ChunkMeshCapture {
         return java.util.List.copyOf(CURRENT.values());
     }
 
-    /**
-     * How many captures have ever been taken.
-     *
-     * <p>The backend compares this against the value it last installed, so a frame with nothing new does not rebuild
-     * the packed terrain buffers.</p>
-     */
+    /** How many captures have ever been taken. */
     public static long version() {
         return captured.get();
     }
@@ -104,23 +176,43 @@ public final class ChunkMeshCapture {
         }
         try {
             int quadCount = buffer.getVertexCount() / 4;
-            // The length comes from the buffer, not from a vertex-format constant: this class captures vanilla's
-            // bytes and has no business knowing what a Vulkan pipeline thinks a vertex is. finishDrawing() has
-            // already set position and limit, so the remaining bytes are exactly the finished mesh.
+            int chunkX = chunk.getPosition().getX();
+            int chunkY = chunk.getPosition().getY();
+            int chunkZ = chunk.getPosition().getZ();
+            Key key = new Key(chunkX, chunkY, chunkZ, layer);
+
+            if (quadCount == 0) {
+                if (CURRENT.remove(key) != null) {
+                    PENDING_EVENTS.add(CaptureEvent.remove(key));
+                    captured.incrementAndGet();
+                }
+                return true;
+            }
+
             java.nio.ByteBuffer source = buffer.getByteBuffer();
             source.position(0);
             byte[] vertices = new byte[source.remaining()];
             source.get(vertices);
             source.position(0);
 
-            Captured capture = new Captured(chunk.getPosition().getX(), chunk.getPosition().getY(),
-                    chunk.getPosition().getZ(), layer, vertices, quadCount);
-            CURRENT.put(new Key(capture.chunkX(), capture.chunkY(), capture.chunkZ(), layer), capture);
+            Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, vertices, quadCount);
+            CURRENT.put(key, capture);
+            PENDING_EVENTS.add(CaptureEvent.update(key, capture));
             captured.incrementAndGet();
+
+            // Also check if any other layers became empty in this compiled chunk
+            if (compiled != null) {
+                for (BlockRenderLayer l : BlockRenderLayer.values()) {
+                    if (l != layer && compiled.isLayerEmpty(l)) {
+                        Key emptyKey = new Key(chunkX, chunkY, chunkZ, l);
+                        if (CURRENT.remove(emptyKey) != null) {
+                            PENDING_EVENTS.add(CaptureEvent.remove(emptyKey));
+                        }
+                    }
+                }
+            }
             return true;
         } catch (Throwable t) {
-            // A capture failure must not break chunk building: fall through to the vanilla path, which will do
-            // whatever it does with no GL context, and log once so it is diagnosable.
             dropped.incrementAndGet();
             LOGGER.error("Failed to capture a chunk mesh for {} at {}; falling back to the GL path", layer, chunk, t);
             return false;
@@ -129,6 +221,7 @@ public final class ChunkMeshCapture {
 
     /** Diagnostics: how many captures were taken, and how many failed. */
     public static String statistics() {
-        return "captured=" + captured.get() + " failed=" + dropped.get() + " current=" + CURRENT.size();
+        return "captured=" + captured.get() + " failed=" + dropped.get() + " current=" + CURRENT.size()
+                + " pending=" + PENDING_EVENTS.size();
     }
 }
