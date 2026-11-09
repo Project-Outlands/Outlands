@@ -272,4 +272,40 @@ class VertexConverterTest {
         assertEquals(255, out.get(15) & 0xFF);
         assertEquals(255, out.get(outStride + 15) & 0xFF);
     }
+
+    @Test
+    void textureMatrixTransformsUvCoordinatesForEnchantmentGlint() {
+        VertexFormat format = DefaultVertexFormats.ITEM;
+        int stride = format.getSize();
+        ByteBuffer source = direct(stride * 2);
+
+        // ITEM layout: POSITION(12), COLOR(4), TEX(8), NORMAL(3), PADDING(1) -> 28 bytes
+        // Vertex 0: UV = (0.25, 0.5)
+        source.putFloat(16, 0.25F);
+        source.putFloat(20, 0.5F);
+
+        // Vertex 1: UV = (0.1, 0.2)
+        source.putFloat(stride + 16, 0.1F);
+        source.putFloat(stride + 20, 0.2F);
+
+        // Create texture matrix: scale(8.0, 8.0, 8.0) -> translate(0.5, 0.0, 0.0)
+        org.joml.Matrix4f m = new org.joml.Matrix4f();
+        m.scale(8.0F, 8.0F, 8.0F);
+        m.translate(0.5F, 0.0F, 0.0F);
+        float[] texMat = new float[16];
+        m.get(texMat);
+
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2,
+                        0xFFFFFFFF, null, false, null, null, null, texMat))
+                .order(ByteOrder.nativeOrder());
+
+        int outStride = VertexConverter.STRIDE;
+        // Vertex 0: u' = 0.25 * 8.0 + 4.0 = 6.0, v' = 0.5 * 8.0 = 4.0
+        assertEquals(6.0F, out.getFloat(16), 0.001F);
+        assertEquals(4.0F, out.getFloat(20), 0.001F);
+
+        // Vertex 1: u' = 0.1 * 8.0 + 4.0 = 4.8, v' = 0.2 * 8.0 = 1.6
+        assertEquals(4.8F, out.getFloat(outStride + 16), 0.001F);
+        assertEquals(1.6F, out.getFloat(outStride + 20), 0.001F);
+    }
 }

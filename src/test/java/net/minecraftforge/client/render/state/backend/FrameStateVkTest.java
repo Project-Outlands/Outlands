@@ -8,6 +8,9 @@ import java.nio.FloatBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FrameStateVkTest {
 
     private static final int MODELVIEW = 5888;
+    private static final int TEXTURE = 5890;
 
     private static Vector4f transform(FrameStateVk state, float x, float y, float z) {
         Matrix4f matrix = new Matrix4f(state.matrix(MODELVIEW));
@@ -176,5 +180,45 @@ class FrameStateVkTest {
         assertEquals(0.0F, l0[0], 1.0e-5F);
         assertEquals(0.0F, l0[1], 1.0e-5F);
         assertEquals(-1.0F, l0[2], 1.0e-5F);
+    }
+
+    @Test
+    void depthFuncIsTracked() {
+        FrameStateVk state = new FrameStateVk();
+        assertEquals(513, state.depthFunc()); // GL_LESS default
+        state.depthFunc(514); // GL_EQUAL
+        assertEquals(514, state.depthFunc());
+        state.depthFunc(515); // GL_LEQUAL
+        assertEquals(515, state.depthFunc());
+    }
+
+    @Test
+    void textureMatrixReturnsNullWhenIdentityAndValuesWhenTransformed() {
+        FrameStateVk state = new FrameStateVk();
+        state.matrixMode(TEXTURE);
+        assertNull(state.textureMatrix());
+
+        state.scale(8.0F, 8.0F, 8.0F);
+        float[] mat = state.textureMatrix();
+        assertNotNull(mat);
+        assertEquals(8.0F, mat[0], 0.001F);
+        assertEquals(8.0F, mat[5], 0.001F);
+
+        state.loadIdentity();
+        assertNull(state.textureMatrix());
+    }
+
+    @Test
+    void cachedArraysAvoidAllocationsWhenUnmodified() {
+        FrameStateVk state = new FrameStateVk();
+        assertSame(state.currentColor(), state.currentColor());
+        assertSame(state.viewport(), state.viewport());
+        assertSame(state.scissorBox(), state.scissorBox());
+        assertSame(state.colorMask(), state.colorMask());
+        assertSame(state.light0Eye(), state.light0Eye());
+        assertSame(state.light1Eye(), state.light1Eye());
+
+        state.color(0.5F, 0.5F, 0.5F, 1.0F);
+        assertEquals(0.5F, state.currentColor()[0], 0.001F);
     }
 }

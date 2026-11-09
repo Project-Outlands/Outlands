@@ -80,8 +80,8 @@ final class FrameStateVk implements FrameState {
     private float[] lightmap;
     /** The texture the game's lightmap lives in, or {@code 0}. */
     private int lightmapTexture;
-    private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
-    private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
+    private float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
+    private float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -106,6 +106,46 @@ final class FrameStateVk implements FrameState {
     @Override
     public void depthFunc(int glComparison) {
         depthComparison = comparison(glComparison);
+    }
+
+    @Override
+    public int depthFunc() {
+        return depthComparison;
+    }
+
+    private final org.joml.Matrix3f normalScratch = new org.joml.Matrix3f();
+
+    private static boolean isIdentity(Matrix4f m) {
+        if ((m.properties() & org.joml.Matrix4fc.PROPERTY_IDENTITY) != 0) {
+            return true;
+        }
+        return m.m00() == 1.0F && m.m01() == 0.0F && m.m02() == 0.0F && m.m03() == 0.0F
+                && m.m10() == 0.0F && m.m11() == 1.0F && m.m12() == 0.0F && m.m13() == 0.0F
+                && m.m20() == 0.0F && m.m21() == 0.0F && m.m22() == 1.0F && m.m23() == 0.0F
+                && m.m30() == 0.0F && m.m31() == 0.0F && m.m32() == 0.0F && m.m33() == 1.0F;
+    }
+
+    @Override
+    public float[] textureMatrix() {
+        Matrix4f m = currentMatrix.get(TEXTURE);
+        if (m == null || isIdentity(m)) {
+            return null;
+        }
+        float[] values = new float[16];
+        m.get(values);
+        return values;
+    }
+
+    @Override
+    public float[] normalMatrix() {
+        Matrix4f mv = currentMatrix.get(MODELVIEW);
+        if (mv == null) {
+            return null;
+        }
+        float[] out = new float[9];
+        mv.normal(normalScratch);
+        normalScratch.get(out);
+        return out;
     }
 
     @Override
@@ -168,25 +208,21 @@ final class FrameStateVk implements FrameState {
                 ez *= inv;
             }
             if (light == 16384) { // GL_LIGHT0
-                light0Eye[0] = ex;
-                light0Eye[1] = ey;
-                light0Eye[2] = ez;
+                light0Eye = new float[] {ex, ey, ez};
             } else if (light == 16385) { // GL_LIGHT1
-                light1Eye[0] = ex;
-                light1Eye[1] = ey;
-                light1Eye[2] = ez;
+                light1Eye = new float[] {ex, ey, ez};
             }
         }
     }
 
     @Override
     public float[] light0Eye() {
-        return light0Eye.clone();
+        return light0Eye;
     }
 
     @Override
     public float[] light1Eye() {
-        return light1Eye.clone();
+        return light1Eye;
     }
 
     @Override
@@ -242,12 +278,15 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void colorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+        if (colorMask[0] == red && colorMask[1] == green && colorMask[2] == blue && colorMask[3] == alpha) {
+            return;
+        }
         colorMask = new boolean[] {red, green, blue, alpha};
     }
 
     @Override
     public boolean[] colorMask() {
-        return colorMask.clone();
+        return colorMask;
     }
 
     @Override
@@ -264,12 +303,12 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public float[] currentColor() {
-        return vertexColor.clone();
+        return vertexColor;
     }
 
     @Override
     public int[] viewport() {
-        return viewport.clone();
+        return viewport;
     }
 
     @Override
@@ -294,6 +333,9 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void color(float red, float green, float blue, float alpha) {
+        if (vertexColor[0] == red && vertexColor[1] == green && vertexColor[2] == blue && vertexColor[3] == alpha) {
+            return;
+        }
         vertexColor = new float[] {red, green, blue, alpha};
     }
 
@@ -323,7 +365,7 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public int[] blendFactors() {
-        return blendSeparate == null ? null : blendSeparate.clone();
+        return blendSeparate;
     }
 
     @Override
@@ -365,17 +407,23 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void viewport(int x, int y, int width, int height) {
+        if (viewport[0] == x && viewport[1] == y && viewport[2] == width && viewport[3] == height) {
+            return;
+        }
         viewport = new int[] {x, y, width, height};
     }
 
     @Override
     public void scissor(int x, int y, int width, int height) {
+        if (scissor[0] == x && scissor[1] == y && scissor[2] == width && scissor[3] == height) {
+            return;
+        }
         scissor = new int[] {x, y, width, height};
     }
 
     @Override
     public int[] scissorBox() {
-        return scissor.clone();
+        return scissor;
     }
 
     @Override

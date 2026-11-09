@@ -105,7 +105,7 @@ final class VulkanPipeline implements AutoCloseable {
      * @param srcAlpha   the GL source blend factor for alpha
      * @param dstAlpha   the GL destination blend factor for alpha
      */
-    record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, boolean blend,
+    record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, int depthFunc, boolean blend,
                          boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask) {
         /** Every colour channel, which is what a pipeline built without a mask writes. */
         static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
@@ -113,13 +113,13 @@ final class VulkanPipeline implements AutoCloseable {
 
         /** The state the terrain phase has always used for opaque and cutout geometry. */
         static PipelineState terrain() {
-            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, false, true,
+            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, 515, false, true,
                     GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS);
         }
 
         /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
         static PipelineState translucentTerrain() {
-            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, true, true,
+            return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, 515, true, true,
                     770, 771, 1, 0, ALL_CHANNELS);
         }
     }
@@ -304,7 +304,7 @@ final class VulkanPipeline implements AutoCloseable {
                 .sType$Default()
                 .depthTestEnable(state.depthTest())
                 .depthWriteEnable(state.depthWrite())
-                .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
+                .depthCompareOp(compareOp(state.depthFunc()));
 
         VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
                 VkPipelineColorBlendAttachmentState.calloc(1, stack);
@@ -390,6 +390,20 @@ final class VulkanPipeline implements AutoCloseable {
             case 775 -> VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;             // GL_ONE_MINUS_DST_COLOR
             case 776 -> VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;              // GL_SRC_ALPHA_SATURATE
             default -> throw new IllegalArgumentException("blend factor " + glFactor + " is not translated");
+        };
+    }
+
+    static int compareOp(int glFunc) {
+        return switch (glFunc) {
+            case 512 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_NEVER;            // GL_NEVER
+            case 513 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS;             // GL_LESS
+            case 514 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_EQUAL;            // GL_EQUAL
+            case 515 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;    // GL_LEQUAL
+            case 516 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_GREATER;          // GL_GREATER
+            case 517 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_NOT_EQUAL;        // GL_NOTEQUAL
+            case 518 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_GREATER_OR_EQUAL; // GL_GEQUAL
+            case 519 -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_ALWAYS;           // GL_ALWAYS
+            default -> org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
         };
     }
 }

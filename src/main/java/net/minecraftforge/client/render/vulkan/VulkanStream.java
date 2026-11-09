@@ -64,6 +64,10 @@ final class VulkanStream implements AutoCloseable {
     /** {@code GL_GREATER}, the alpha test comparison vanilla sets when it enables the test. */
     private static final int GL_GREATER = 516;
 
+    private int[] offsets = new int[256];
+    private int[] indexOffsets = new int[256];
+    private long[] textureSets = new long[256];
+
     /**
      * Resizable dynamic buffers per frame in flight.
      *
@@ -179,8 +183,12 @@ final class VulkanStream implements AutoCloseable {
      */
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget target) {
-        List<FrameDraws.Draw> draws = ops.stream()
-                .filter(FrameDraws.Draw.class::isInstance).map(FrameDraws.Draw.class::cast).toList();
+        List<FrameDraws.Draw> draws = new ArrayList<>(ops.size());
+        for (int i = 0; i < ops.size(); i++) {
+            if (ops.get(i) instanceof FrameDraws.Draw d) {
+                draws.add(d);
+            }
+        }
         drawsThisFrame = draws.size();
         if (ops.isEmpty()) {
             return;
@@ -188,7 +196,8 @@ final class VulkanStream implements AutoCloseable {
 
         int totalVertices = 0;
         int totalIndices = 0;
-        for (FrameDraws.Draw draw : draws) {
+        for (int i = 0; i < draws.size(); i++) {
+            FrameDraws.Draw draw = draws.get(i);
             totalVertices += draw.vertexCount();
             PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
             if (shape.needsIndexing()) {
@@ -215,8 +224,13 @@ final class VulkanStream implements AutoCloseable {
 
         int currentVertexOffset = 0;
         int currentIndexOffset = 0;
-        int[] offsets = new int[draws.size()];
-        int[] indexOffsets = new int[draws.size()];
+        int nDraws = draws.size();
+        if (offsets.length < nDraws) {
+            int newCap = Math.max(nDraws, offsets.length * 2);
+            offsets = new int[newCap];
+            indexOffsets = new int[newCap];
+            textureSets = new long[newCap];
+        }
 
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
@@ -225,6 +239,7 @@ final class VulkanStream implements AutoCloseable {
             VertexConverter.convert(ByteBuffer.wrap(draw.vertices()),
                     draw.layout(), draw.vertexCount(), ds.colorArgb(), ds.lightmap(),
                     ds.lightingEnabled(), ds.normalMatrix(), ds.light0(), ds.light1(),
+                    ds.textureMatrix(),
                     targetVbo, currentVertexOffset);
             currentVertexOffset += draw.vertexCount() * VertexConverter.STRIDE;
 
@@ -236,7 +251,6 @@ final class VulkanStream implements AutoCloseable {
             }
         }
 
-        long[] textureSets = new long[draws.size()];
         for (int i = 0; i < draws.size(); i++) {
             DrawState state = draws.get(i).state();
             // A draw with texturing disabled samples nothing: GL replaces the sample with white and takes the colour
@@ -251,7 +265,10 @@ final class VulkanStream implements AutoCloseable {
             }
 
             ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
+            java.nio.FloatBuffer push = constants.asFloatBuffer();
             long boundSet = 0L;
+            long boundPipeline = 0L;
+            boolean indexBufferBound = false;
             // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
             // value is the whole viewport, which is what an unclipped frame uses.
             org.lwjgl.vulkan.VkViewport.Buffer viewport = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
@@ -287,6 +304,8 @@ final class VulkanStream implements AutoCloseable {
                         vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffers[slot].handle()), stack.longs(0L));
                     }
                     boundSet = 0L;
+                    boundPipeline = 0L;
+                    indexBufferBound = false;
                     continue;
                 }
                 if (op instanceof FrameDraws.Clear clearOp) {
@@ -355,8 +374,11 @@ final class VulkanStream implements AutoCloseable {
                 // here instead would apply one matrix to every draw - which drew the whole menu with the panorama's
                 // perspective matrix and left the GUI off-screen.
                 VulkanPipeline pipeline = pipelineFor(stateFor(shape, draw.state()));
-                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-                java.nio.FloatBuffer push = constants.asFloatBuffer();
+                if (pipeline.handle() != boundPipeline) {
+                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+                    boundPipeline = pipeline.handle();
+                }
+                push.position(0);
                 writeMvp(push, draw.state().mvp());
                 push.put(16, draw.state().alphaReference());
                 // GL_GREATER is the only comparison vanilla uses; anything else is rejected rather than approximated.
@@ -380,8 +402,11 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = textureSets[indexOfOp];
                 }
                 if (shape.needsIndexing()) {
-                    vkCmdBindIndexBuffer(commandBuffer, indexBuffers[slot].handle(), 0L,
-                            org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
+                    if (!indexBufferBound) {
+                        vkCmdBindIndexBuffer(commandBuffer, indexBuffers[slot].handle(), 0L,
+                                org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
+                        indexBufferBound = true;
+                    }
                     vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[indexOfOp],
                             offsets[indexOfOp] / VertexConverter.STRIDE, 0);
                 } else {
@@ -500,7 +525,7 @@ final class VulkanStream implements AutoCloseable {
                 | (mask[2] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT : 0)
                 | (mask[3] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT : 0);
         return new VulkanPipeline.PipelineState(VulkanPipeline.VK10Topology.of(shape.topology()),
-                state.depthTest(), state.depthWrite(), state.blend(), state.cull(),
+                state.depthTest(), state.depthWrite(), state.depthFunc(), state.blend(), state.cull(),
                 state.blendSourceRgb(), state.blendDestinationRgb(), state.blendSourceAlpha(),
                 state.blendDestinationAlpha(), channels);
     }

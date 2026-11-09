@@ -67,6 +67,21 @@ public interface FrameState {
 
     void depthFunc(int glComparison);
 
+    /** The depth comparison function currently in effect (e.g. GL_LEQUAL 515, GL_EQUAL 514). */
+    int depthFunc();
+
+    /**
+     * The 4x4 texture matrix (mode 5890) currently in effect, or {@code null} if it is identity.
+     *
+     * <p>Used for enchantment glint and repeating texture effects that scroll or scale texture coordinates.</p>
+     */
+    float[] textureMatrix();
+
+    /**
+     * The normal matrix (inverse transpose of modelview 3x3) for lighting, or {@code null} if none.
+     */
+    float[] normalMatrix();
+
     void alphaFunc(int glComparison, float reference);
 
     /** Whether the alpha test is active, i.e. whether fragments below the reference are discarded. */

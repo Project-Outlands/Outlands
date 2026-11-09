@@ -79,6 +79,18 @@ public final class VertexConverter {
     public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
                                float[] light0, float[] light1, ByteBuffer target, int targetOffset) {
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix,
+                light0, light1, null, target, targetOffset);
+    }
+
+    /**
+     * Converts vertices in-place into an existing {@code target} buffer at {@code targetOffset}, optionally applying
+     * fixed-function diffuse lighting in eye space and 2D texture coordinate transformation.
+     */
+    public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                               float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                               float[] light0, float[] light1, float[] textureMatrix,
+                               ByteBuffer target, int targetOffset) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
         if (source.limit() < required) {
@@ -128,7 +140,7 @@ public final class VertexConverter {
                 switch (attribute.usage()) {
                     case POSITION -> copyPosition(in, at, target, base, attribute);
                     case COLOR -> copyColor(in, at, target, base, attribute);
-                    case UV -> copyUv(in, at, target, base, attribute);
+                    case UV -> copyUv(in, at, target, base, attribute, textureMatrix);
                     default -> {
                         // NORMAL is handled below after colour is populated; GENERIC/PADDING skipped.
                     }
@@ -157,9 +169,16 @@ public final class VertexConverter {
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                  float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
                                  float[] light0, float[] light1) {
+        return convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix,
+                light0, light1, null);
+    }
+
+    public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
+                                 float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
+                                 float[] light0, float[] light1, float[] textureMatrix) {
         byte[] out = new byte[vertexCount * STRIDE];
         ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
-        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1, target, 0);
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1, textureMatrix, target, 0);
         return out;
     }
 
@@ -196,7 +215,8 @@ public final class VertexConverter {
                 + " is not handled");
     }
 
-    private static void copyUv(ByteBuffer in, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute) {
+    private static void copyUv(ByteBuffer in, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute,
+                               float[] textureMatrix) {
         if (attribute.uvIndex() == 1) {
             // The second texture coordinate is the lightmap: two unsigned shorts in the target.
             if (attribute.type() != VertexFormatElement.EnumType.SHORT
@@ -212,8 +232,17 @@ public final class VertexConverter {
             throw new UnsupportedOperationException("texture coordinate of type " + attribute.type()
                     + " is not handled: vanilla uses FLOAT");
         }
-        out.putFloat(base + UV_OFFSET, in.getFloat(at));
-        out.putFloat(base + UV_OFFSET + 4, in.getFloat(at + 4));
+        float u = in.getFloat(at);
+        float v = in.getFloat(at + 4);
+        if (textureMatrix != null) {
+            float uPrime = textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12];
+            float vPrime = textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13];
+            out.putFloat(base + UV_OFFSET, uPrime);
+            out.putFloat(base + UV_OFFSET + 4, vPrime);
+        } else {
+            out.putFloat(base + UV_OFFSET, u);
+            out.putFloat(base + UV_OFFSET + 4, v);
+        }
     }
 
     private static byte toByte(float value) {

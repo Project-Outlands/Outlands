@@ -36,13 +36,16 @@ package net.minecraftforge.client.render.vertex;
  * @param colorMask            which of red, green, blue, alpha the draw may write
  * @param lightmap             the constant lightmap coordinate, {@code u, v} in 0..1, or {@code null} when the game
  *                             set none; used for geometry whose format carries no lightmap attribute
+ * @param depthFunc            the depth comparison function (e.g. GL_LEQUAL 515, GL_EQUAL 514)
+ * @param textureMatrix        the 4x4 texture matrix for mode 5890, or {@code null} if identity
  */
-public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, boolean blend, boolean cull,
+public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, int depthFunc, boolean blend, boolean cull,
                         int blendSourceRgb, int blendDestinationRgb, int blendSourceAlpha, int blendDestinationAlpha,
                         int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
                         boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport,
                         boolean[] colorMask, float[] lightmap,
-                        boolean lightingEnabled, float[] normalMatrix, float[] light0, float[] light1) {
+                        boolean lightingEnabled, float[] normalMatrix, float[] light0, float[] light1,
+                        float[] textureMatrix) {
 
     public DrawState {
         if (mvp.length != 16) {
@@ -102,10 +105,7 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         float[] l0 = null;
         float[] l1 = null;
         if (lighting) {
-            org.joml.Matrix3f nm = new org.joml.Matrix3f();
-            state.modelView().normal(nm);
-            normalMatrix = new float[9];
-            nm.get(normalMatrix);
+            normalMatrix = state.normalMatrix();
             l0 = state.light0Eye();
             l1 = state.light1Eye();
         }
@@ -113,6 +113,7 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
         return new DrawState(values,
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.DEPTH_TEST),
                 state.depthWriteEnabled(),
+                state.depthFunc(),
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.BLEND),
                 state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.CULL_FACE),
                 sourceRgb, destinationRgb, sourceAlpha, destinationAlpha,
@@ -125,7 +126,8 @@ public record DrawState(float[] mvp, boolean depthTest, boolean depthWrite, bool
                 state.viewport(),
                 state.colorMask(),
                 lightmapCoord(state),
-                lighting, normalMatrix, l0, l1);
+                lighting, normalMatrix, l0, l1,
+                state.textureMatrix());
     }
 
     private static float[] lightmapCoord(net.minecraftforge.client.render.state.backend.FrameState state) {

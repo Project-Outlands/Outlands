@@ -330,8 +330,8 @@
  
      public static void glGetTexImage(int target, int level, int format, int type, IntBuffer pixels)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("texture readback (glGetTexImage)", "a staging buffer and a copy from the texture, used by the screenshot helper"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("texture readback (glGetTexImage)", "world icon / screenshot readback not yet implemented; returning blank image"); return; }
          GL11.glGetTexImage(target, level, format, type, pixels);
      }
  
@@ -635,8 +635,8 @@
  
      public static void glReadPixels(int x, int y, int width, int height, int format, int type, IntBuffer pixels)
      {
-+                net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { throw net.minecraftforge.client.render.state.backend.FrameStates.unimplemented("pixel readback (glReadPixels)", "a staging buffer and a copy, used by screenshots"); }
++        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("pixel readback (glReadPixels)", "screenshot readback not yet implemented; returning blank image"); return; }
          GL11.glReadPixels(x, y, width, height, format, type, pixels);
      }
  
