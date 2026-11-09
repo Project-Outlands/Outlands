@@ -17,6 +17,7 @@ import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan13Features;
+import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan14Features;
 import org.lwjgl.vulkan.VkQueue;
 import org.lwjgl.vulkan.VkQueueFamilyProperties;
@@ -48,6 +49,7 @@ import static org.lwjgl.vulkan.VK10.vkEnumerateInstanceExtensionProperties;
 import static org.lwjgl.vulkan.VK10.vkEnumerateInstanceLayerProperties;
 import static org.lwjgl.vulkan.VK10.vkEnumeratePhysicalDevices;
 import static org.lwjgl.vulkan.VK10.vkGetDeviceQueue;
+import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceFeatures;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceProperties;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceQueueFamilyProperties;
 import static org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceFeatures2;
@@ -84,9 +86,12 @@ final class VulkanContext {
     private final VkQueue graphicsQueue;
     private final int graphicsFamily;
     private final String deviceName;
+    private final boolean multiDrawIndirect;
+    private final boolean drawIndirectFirstInstance;
 
     private VulkanContext(VkInstance instance, long debugMessenger, long surface, VkPhysicalDevice physicalDevice,
-                          VkDevice device, VkQueue graphicsQueue, int graphicsFamily, String deviceName) {
+                          VkDevice device, VkQueue graphicsQueue, int graphicsFamily, String deviceName,
+                          boolean multiDrawIndirect, boolean drawIndirectFirstInstance) {
         this.instance = instance;
         this.debugMessenger = debugMessenger;
         this.surface = surface;
@@ -95,6 +100,20 @@ final class VulkanContext {
         this.graphicsQueue = graphicsQueue;
         this.graphicsFamily = graphicsFamily;
         this.deviceName = deviceName;
+        this.multiDrawIndirect = multiDrawIndirect;
+        this.drawIndirectFirstInstance = drawIndirectFirstInstance;
+    }
+
+    boolean supportsIndirect() {
+        return multiDrawIndirect && drawIndirectFirstInstance;
+    }
+
+    boolean multiDrawIndirect() {
+        return multiDrawIndirect;
+    }
+
+    boolean drawIndirectFirstInstance() {
+        return drawIndirectFirstInstance;
     }
 
     VkInstance instance() {
@@ -220,13 +239,16 @@ final class VulkanContext {
                     VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
                     vkGetPhysicalDeviceProperties(physicalDevice, properties);
                     int graphicsFamily = graphicsFamily(physicalDevice, surface);
-                    VkDevice device = createDevice(physicalDevice, graphicsFamily, stack);
+                    DeviceResult deviceResult = createDevice(physicalDevice, graphicsFamily, stack);
+                    VkDevice device = deviceResult.device();
                     VkQueue queue = queue(device, graphicsFamily, stack);
 
-                    LOGGER.info("Vulkan device: {} ({})", properties.deviceNameString(),
-                            VulkanProbe.version(properties.apiVersion()));
+                    LOGGER.info("Vulkan device: {} ({}) [MDI: {}, firstInstance: {}]", properties.deviceNameString(),
+                            VulkanProbe.version(properties.apiVersion()),
+                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance());
                     return new VulkanContext(instance, debugMessenger, surface, physicalDevice, device, queue,
-                            graphicsFamily, properties.deviceNameString());
+                            graphicsFamily, properties.deviceNameString(),
+                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance());
                 } catch (RuntimeException e) {
                     vkDestroySurfaceKHR(instance, surface, null);
                     throw e;
@@ -344,7 +366,13 @@ final class VulkanContext {
         }
     }
 
-    private static VkDevice createDevice(VkPhysicalDevice physicalDevice, int family, MemoryStack stack) {
+    private record DeviceResult(VkDevice device, boolean multiDrawIndirect, boolean drawIndirectFirstInstance) {}
+
+    private static DeviceResult createDevice(VkPhysicalDevice physicalDevice, int family, MemoryStack stack) {
+        // Query Vulkan 1.0 physical device features (multiDrawIndirect, drawIndirectFirstInstance)
+        VkPhysicalDeviceFeatures supported10 = VkPhysicalDeviceFeatures.calloc(stack);
+        vkGetPhysicalDeviceFeatures(physicalDevice, supported10);
+
         // One query per feature struct rather than one chained query. Chaining is legal, but a single wrong link
         // silently reports every feature as unsupported, and the failure looks exactly like "this GPU is too old".
         // Three calls happen once at startup and remove that whole class of mistake.
@@ -361,6 +389,13 @@ final class VulkanContext {
         vkGetPhysicalDeviceFeatures2(physicalDevice,
                 VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(supported14.address()));
 
+        boolean mdi = supported10.multiDrawIndirect();
+        boolean firstInstance = supported10.drawIndirectFirstInstance();
+
+        VkPhysicalDeviceFeatures enable10 = VkPhysicalDeviceFeatures.calloc(stack)
+                .multiDrawIndirect(mdi)
+                .drawIndirectFirstInstance(firstInstance);
+
         // Enable only what the device reports. Asking for an unsupported feature fails device creation, and the
         // interesting case (a non-conformant implementation such as MoltenVK) should degrade with a named reason.
         VkPhysicalDeviceVulkan12Features enable12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
@@ -369,7 +404,8 @@ final class VulkanContext {
                 .descriptorIndexing(supported12.descriptorIndexing())
                 .shaderSampledImageArrayNonUniformIndexing(supported12.shaderSampledImageArrayNonUniformIndexing())
                 .descriptorBindingVariableDescriptorCount(supported12.descriptorBindingVariableDescriptorCount())
-                .runtimeDescriptorArray(supported12.runtimeDescriptorArray());
+                .runtimeDescriptorArray(supported12.runtimeDescriptorArray())
+                .drawIndirectCount(supported12.drawIndirectCount());
         VkPhysicalDeviceVulkan13Features enable13 = VkPhysicalDeviceVulkan13Features.calloc(stack)
                 .sType$Default()
                 .pNext(enable12.address())
@@ -387,6 +423,9 @@ final class VulkanContext {
                 .hostImageCopy(supported14.hostImageCopy())
                 .maintenance5(supported14.maintenance5());
 
+        reportMissing("multiDrawIndirect", mdi);
+        reportMissing("drawIndirectFirstInstance", firstInstance);
+        reportMissing("drawIndirectCount", supported12.drawIndirectCount());
         reportMissing("bufferDeviceAddress", supported12.bufferDeviceAddress());
         reportMissing("descriptorIndexing", supported12.descriptorIndexing());
         reportMissing("dynamicRendering", supported13.dynamicRendering());
@@ -407,12 +446,13 @@ final class VulkanContext {
         VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack)
                 .sType$Default()
                 .pNext(enable14.address())
+                .pEnabledFeatures(enable10)
                 .pQueueCreateInfos(queueCreateInfo)
                 .ppEnabledExtensionNames(extensionNames);
 
         PointerBuffer deviceOut = stack.mallocPointer(1);
         VkCheck.check(vkCreateDevice(physicalDevice, createInfo, null, deviceOut), "vkCreateDevice");
-        return new VkDevice(deviceOut.get(0), physicalDevice, createInfo);
+        return new DeviceResult(new VkDevice(deviceOut.get(0), physicalDevice, createInfo), mdi, firstInstance);
     }
 
     private static void reportMissing(String feature, boolean supported) {

@@ -46,6 +46,7 @@ final class VulkanBuffer implements AutoCloseable {
     private long size;
     private long allocationSize;
     private long mappedAddress;
+    private long deviceAddress;
 
     private VulkanBuffer(VkDevice device, VulkanContext context, int usage) {
         this.device = device;
@@ -63,6 +64,10 @@ final class VulkanBuffer implements AutoCloseable {
 
     long mappedAddress() {
         return mappedAddress;
+    }
+
+    long deviceAddress() {
+        return deviceAddress;
     }
 
     /**
@@ -114,6 +119,19 @@ final class VulkanBuffer implements AutoCloseable {
                                        int size) {
         return create(device, context, new byte[size],
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    }
+
+    /** Dynamically resizable indirect command buffer for MDI draws. */
+    static VulkanBuffer createIndirect(VkDevice device, VulkanContext context, long initialCapacity) {
+        return createDynamic(device, context, org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, initialCapacity);
+    }
+
+    /** Dynamically resizable chunk data storage buffer accessible via BDA (Buffer Device Address). */
+    static VulkanBuffer createChunkData(VkDevice device, VulkanContext context, long initialCapacity) {
+        return createDynamic(device, context,
+                org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                        | org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                initialCapacity);
     }
 
     /** Ensures the buffer has at least {@code requiredSize} bytes capacity, growing exponentially if needed. */
@@ -169,11 +187,24 @@ final class VulkanBuffer implements AutoCloseable {
                         .sType$Default()
                         .allocationSize(allocationSize)
                         .memoryTypeIndex(memoryType(context, requirements.memoryTypeBits(), stack));
+                if ((usage & org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0) {
+                    org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo flagsInfo = org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo.calloc(stack)
+                            .sType$Default()
+                            .flags(org.lwjgl.vulkan.VK12.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+                    allocateInfo.pNext(flagsInfo.address());
+                }
                 LongBuffer memoryOut = stack.mallocLong(1);
                 VkCheck.check(vkAllocateMemory(device, allocateInfo, null, memoryOut), "vkAllocateMemory");
                 allocatedMem = memoryOut.get(0);
                 this.memory = allocatedMem;
                 VkCheck.check(vkBindBufferMemory(device, buffer, memory, 0L), "vkBindBufferMemory");
+
+                if ((usage & org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0) {
+                    org.lwjgl.vulkan.VkBufferDeviceAddressInfo addressInfo = org.lwjgl.vulkan.VkBufferDeviceAddressInfo.calloc(stack)
+                            .sType$Default()
+                            .buffer(buffer);
+                    this.deviceAddress = org.lwjgl.vulkan.VK12.vkGetBufferDeviceAddress(device, addressInfo);
+                }
 
                 org.lwjgl.PointerBuffer mapped = stack.mallocPointer(1);
                 VkCheck.check(org.lwjgl.vulkan.VK10.vkMapMemory(device, memory, 0L, allocationSize, 0, mapped),
@@ -207,6 +238,7 @@ final class VulkanBuffer implements AutoCloseable {
         }
         size = 0L;
         allocationSize = 0L;
+        deviceAddress = 0L;
     }
 
     private static int memoryType(VulkanContext context, int allowedBits, MemoryStack stack) {

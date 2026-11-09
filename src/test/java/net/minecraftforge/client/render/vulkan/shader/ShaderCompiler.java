@@ -45,6 +45,8 @@ public final class ShaderCompiler {
     private static final String[][] SHADERS = {
             {"terrain.vert", "vertex"},
             {"terrain.frag", "fragment"},
+            {"stream.vert", "vertex"},
+            {"stream.frag", "fragment"},
     };
 
     private ShaderCompiler() {}

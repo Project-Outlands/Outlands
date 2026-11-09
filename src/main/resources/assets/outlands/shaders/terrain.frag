@@ -1,4 +1,9 @@
 #version 450
+#extension GL_EXT_buffer_reference : enable
+
+layout(buffer_reference, std430) readonly buffer ChunkDataBuffer {
+    vec4 chunkOffsets[];
+};
 
 // The fragment stage samples whatever texture the draw was issued with, then multiplies by the vertex colour.
 //
@@ -29,6 +34,7 @@ layout(set = 1, binding = 0) uniform sampler2D lightmap;
 // wordmark sitting on a black rectangle.
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
+    ChunkDataBuffer chunkData;
     float alphaReference;
     float alphaTest;
     float flipU;

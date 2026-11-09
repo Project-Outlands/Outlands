@@ -81,12 +81,12 @@ final class VulkanPipeline implements AutoCloseable {
     static final int VERTEX_STRIDE = TerrainVertexFormat.STRIDE;
 
     /**
-     * What a draw hands its shaders: {@code mat4}, the alpha test's reference and enable flag, and the u-flip.
+     * Maximum push constant size across pipelines: 128 bytes (guaranteed minimum across all Vulkan devices).
      *
-     * <p>76 bytes, well inside the 128 every device guarantees. Named so the stream's writer and the pipeline's
-     * layout cannot drift apart, which they would as two separate literals.</p>
+     * <p>Terrain pipeline uses 88 bytes (64-byte mat4 MVP, 8-byte BDA pointer, alphaReference, alphaTest, flipU).
+     * Stream pipeline uses 76 bytes (64-byte mat4 MVP, alphaReference, alphaTest, flipU).</p>
      */
-    static final int PUSH_CONSTANT_BYTES = 16 * Float.BYTES + 3 * Float.BYTES;
+    static final int PUSH_CONSTANT_BYTES = 128;
 
     /**
      * The pipeline state that is not dynamic.

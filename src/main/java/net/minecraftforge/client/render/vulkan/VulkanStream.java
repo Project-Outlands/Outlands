@@ -132,8 +132,8 @@ final class VulkanStream implements AutoCloseable {
             this.indexBuffers[i] = VulkanBuffer.createDynamic(device, context,
                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 512 * 1024);
         }
-        this.vertex = VulkanShader.load(device, "/assets/outlands/shaders/terrain.vert.spv");
-        this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/terrain.frag.spv");
+        this.vertex = VulkanShader.load(device, "/assets/outlands/shaders/stream.vert.spv");
+        this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/stream.frag.spv");
         this.descriptors = descriptors;
         this.textures = textures;
         this.resolved.defaultReturnValue(0L);

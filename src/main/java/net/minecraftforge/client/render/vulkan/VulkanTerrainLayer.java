@@ -1,5 +1,6 @@
 package net.minecraftforge.client.render.vulkan;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import net.minecraftforge.client.render.ChunkMeshCapture;
 import net.minecraftforge.client.render.graph.RenderGraphContext;
 import net.minecraftforge.client.render.graph.RenderGraphNode;
@@ -7,10 +8,12 @@ import net.minecraftforge.client.render.graph.RenderPhases;
 
 import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
 
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +28,7 @@ import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
 import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
 import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
+import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexedIndirect;
 import static org.lwjgl.vulkan.VK10.vkCmdPushConstants;
 
 /**
@@ -50,6 +54,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final VulkanTextures textures;
     private final TerrainArenaPool arenaPool;
 
+    private static final int INITIAL_INDIRECT_CAPACITY = 4096;
+    private final VulkanBuffer[] indirectBuffers;
+    private final VulkanBuffer[] chunkOffsetBuffers;
+    private int indirectCapacity = INITIAL_INDIRECT_CAPACITY;
+    private int chunkCursor;
+    private int indirectCursor;
+    private IntArrayList[] slabBuckets;
+
     private final Map<ChunkMeshCapture.Key, TerrainSlice> activeSlices = new HashMap<>();
     @SuppressWarnings("unchecked")
     private final List<TerrainSlice>[] layerSlices = new List[net.minecraft.util.BlockRenderLayer.values().length];
@@ -70,7 +82,9 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
                                VulkanPipeline translucentPipeline,
                                VulkanDescriptors descriptors, VulkanTextures textures,
-                               TerrainArenaPool arenaPool) {
+                               TerrainArenaPool arenaPool,
+                               VulkanBuffer[] indirectBuffers,
+                               VulkanBuffer[] chunkOffsetBuffers) {
         this.device = device;
         this.context = context;
         this.pipeline = pipeline;
@@ -78,6 +92,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         this.descriptors = descriptors;
         this.textures = textures;
         this.arenaPool = arenaPool;
+        this.indirectBuffers = indirectBuffers;
+        this.chunkOffsetBuffers = chunkOffsetBuffers;
         for (int i = 0; i < layerSlices.length; i++) {
             layerSlices[i] = new ArrayList<>();
         }
@@ -128,7 +144,26 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             throw e;
         }
 
-        return new VulkanTerrainLayer(device, context, pipeline, translucentPipeline, descriptors, textures, arenaPool);
+        VulkanBuffer[] indirectBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        VulkanBuffer[] chunkOffsetBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        try {
+            for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
+                indirectBuffers[slot] = VulkanBuffer.createIndirect(device, context, (long) INITIAL_INDIRECT_CAPACITY * 20L);
+                chunkOffsetBuffers[slot] = VulkanBuffer.createChunkData(device, context, (long) INITIAL_INDIRECT_CAPACITY * 16L);
+            }
+        } catch (RuntimeException e) {
+            for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
+                if (indirectBuffers[slot] != null) indirectBuffers[slot].close();
+                if (chunkOffsetBuffers[slot] != null) chunkOffsetBuffers[slot].close();
+            }
+            arenaPool.close();
+            pipeline.close();
+            translucentPipeline.close();
+            throw e;
+        }
+
+        return new VulkanTerrainLayer(device, context, pipeline, translucentPipeline, descriptors, textures, arenaPool,
+                indirectBuffers, chunkOffsetBuffers);
     }
 
     /** The descriptor set for the atlas, resolved by the frame before the rendering instance opened. */
@@ -186,6 +221,28 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         slice.setLayerListIndex(-1);
     }
 
+    private void ensureIndirectCapacity(int requiredCount) {
+        int newCapacity = Math.max(requiredCount, indirectCapacity * 2);
+        for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
+            indirectBuffers[i].ensureCapacity((long) newCapacity * 20L);
+            chunkOffsetBuffers[i].ensureCapacity((long) newCapacity * 16L);
+        }
+        this.indirectCapacity = newCapacity;
+    }
+
+    private void ensureSlabBuckets(int count) {
+        if (slabBuckets == null || slabBuckets.length < count) {
+            IntArrayList[] newBuckets = new IntArrayList[count];
+            if (slabBuckets != null) {
+                System.arraycopy(slabBuckets, 0, newBuckets, 0, slabBuckets.length);
+            }
+            for (int i = slabBuckets == null ? 0 : slabBuckets.length; i < count; i++) {
+                newBuckets[i] = new IntArrayList();
+            }
+            slabBuckets = newBuckets;
+        }
+    }
+
     /**
      * Prepares terrain for the frame in flight. Called right after the fence for {@code slot} has signaled.
      *
@@ -193,6 +250,9 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      * chunk mesh updates and removals from worker threads.</p>
      */
     void prepareFrame(int slot) {
+        chunkCursor = 0;
+        indirectCursor = 0;
+        drawCount = 0;
         if (arenaPool == null) {
             return;
         }
@@ -261,8 +321,11 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         if (list.isEmpty()) {
             return;
         }
-        int drawn = 0;
         int layerSlicesCount = list.size();
+        if (indirectCursor + layerSlicesCount > indirectCapacity) {
+            ensureIndirectCapacity(indirectCursor + layerSlicesCount);
+        }
+        int drawn = 0;
         int culled = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VulkanPipeline activePipeline = layer == net.minecraft.util.BlockRenderLayer.TRANSLUCENT.ordinal()
@@ -286,37 +349,108 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
             extractFrustumPlanes(cameraMatrix);
 
-            int currentSlab = -1;
-            for (int i = 0; i < list.size(); i++) {
-                TerrainSlice slice = list.get(i);
-                // Frustum cull chunks outside the view cone: [origin - 1, origin + 17] covers the 16x16x16 chunk
-                // plus a 1-block margin for protruding geometry (torches, ladders, fences).
-                if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
-                        slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
-                    culled++;
-                    continue;
+            chunkMatrix.set(cameraScratch);
+            writeConstants(constants, chunkMatrix, chunkOffsetBuffers[slot].deviceAddress(), alphaTest);
+            vkCmdPushConstants(commandBuffer, activePipeline.layout(),
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
+
+            long indirectMapped = indirectBuffers[slot].mappedAddress();
+            long chunkOffsetMapped = chunkOffsetBuffers[slot].mappedAddress();
+            int slabCount = arenaPool.slabCount();
+
+            if (slabCount <= 1) {
+                // Fast path: All slices in slab 0 (typical case)
+                int startCmdIndex = indirectCursor;
+                for (int i = 0; i < layerSlicesCount; i++) {
+                    TerrainSlice slice = list.get(i);
+                    // Frustum cull chunks outside the view cone: [origin - 1, origin + 17] covers the 16x16x16 chunk
+                    // plus a 1-block margin for protruding geometry (torches, ladders, fences).
+                    if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
+                            slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
+                        culled++;
+                        continue;
+                    }
+
+                    int chunkId = chunkCursor++;
+                    long offsetAddr = chunkOffsetMapped + ((long) chunkId << 4);
+                    MemoryUtil.memPutFloat(offsetAddr, (float) slice.originX());
+                    MemoryUtil.memPutFloat(offsetAddr + 4, (float) slice.originY());
+                    MemoryUtil.memPutFloat(offsetAddr + 8, (float) slice.originZ());
+                    MemoryUtil.memPutFloat(offsetAddr + 12, 0.0f);
+
+                    int cmdIndex = indirectCursor++;
+                    long cmdAddr = indirectMapped + cmdIndex * 20L;
+                    MemoryUtil.memPutInt(cmdAddr, slice.indexCount());
+                    MemoryUtil.memPutInt(cmdAddr + 4, 1);
+                    MemoryUtil.memPutInt(cmdAddr + 8, 0);
+                    MemoryUtil.memPutInt(cmdAddr + 12, slice.vertexOffset());
+                    MemoryUtil.memPutInt(cmdAddr + 16, chunkId);
+
+                    drawn++;
                 }
 
-                // Rebind vertex buffer only if the slice belongs to a different slab
-                if (slice.slabIndex() != currentSlab) {
-                    currentSlab = slice.slabIndex();
+                if (drawn > 0) {
                     vkCmdBindVertexBuffers(commandBuffer, 0,
-                            stack.longs(arenaPool.slab(currentSlab).buffer().handle()),
+                            stack.longs(arenaPool.slab(0).buffer().handle()),
                             stack.mallocLong(1).put(0, 0L));
+                    vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
+                            startCmdIndex * 20L, drawn, 20);
+                }
+            } else {
+                // Multi-slab path: bucket visible slices by slabIndex
+                ensureSlabBuckets(slabCount);
+                for (int i = 0; i < layerSlicesCount; i++) {
+                    TerrainSlice slice = list.get(i);
+                    if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
+                            slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
+                        culled++;
+                        continue;
+                    }
+                    slabBuckets[slice.slabIndex()].add(i);
                 }
 
-                chunkMatrix.set(cameraScratch).translate(slice.originX(), slice.originY(), slice.originZ());
-                writeConstants(constants, chunkMatrix, alphaTest);
-                vkCmdPushConstants(commandBuffer, activePipeline.layout(),
-                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
-                vkCmdDrawIndexed(commandBuffer, slice.indexCount(), 1, 0, slice.vertexOffset(), 0);
-                drawn++;
+                for (int s = 0; s < slabCount; s++) {
+                    IntArrayList bucket = slabBuckets[s];
+                    if (bucket.isEmpty()) {
+                        continue;
+                    }
+                    int startCmdIndex = indirectCursor;
+                    int bucketSize = bucket.size();
+                    for (int k = 0; k < bucketSize; k++) {
+                        TerrainSlice slice = list.get(bucket.getInt(k));
+
+                        int chunkId = chunkCursor++;
+                        long offsetAddr = chunkOffsetMapped + ((long) chunkId << 4);
+                        MemoryUtil.memPutFloat(offsetAddr, (float) slice.originX());
+                        MemoryUtil.memPutFloat(offsetAddr + 4, (float) slice.originY());
+                        MemoryUtil.memPutFloat(offsetAddr + 8, (float) slice.originZ());
+                        MemoryUtil.memPutFloat(offsetAddr + 12, 0.0f);
+
+                        int cmdIndex = indirectCursor++;
+                        long cmdAddr = indirectMapped + cmdIndex * 20L;
+                        MemoryUtil.memPutInt(cmdAddr, slice.indexCount());
+                        MemoryUtil.memPutInt(cmdAddr + 4, 1);
+                        MemoryUtil.memPutInt(cmdAddr + 8, 0);
+                        MemoryUtil.memPutInt(cmdAddr + 12, slice.vertexOffset());
+                        MemoryUtil.memPutInt(cmdAddr + 16, chunkId);
+                    }
+                    bucket.clear();
+
+                    vkCmdBindVertexBuffers(commandBuffer, 0,
+                            stack.longs(arenaPool.slab(s).buffer().handle()),
+                            stack.mallocLong(1).put(0, 0L));
+                    vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
+                            startCmdIndex * 20L, bucketSize, 20);
+                    drawn += bucketSize;
+                }
             }
+
             if (++logFrameCounter % 300 == 1 && layerSlicesCount > 0) {
-                LOGGER.info("terrain layer {}: {} of {} slices drawn (frustum culled: {})", layer, drawn, layerSlicesCount, culled);
+                LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (frustum culled: {})",
+                        layer, drawn, layerSlicesCount, culled);
             }
         }
-        drawCount = drawn;
+        drawCount += drawn;
     }
 
     /**
@@ -387,18 +521,20 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         return isBoxInFrustum(frustumPlanes, minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    private static void writeConstants(ByteBuffer constants, Matrix4f matrix, boolean alphaTest) {
+    private static void writeConstants(ByteBuffer constants, Matrix4f matrix, long chunkDataAddress, boolean alphaTest) {
         constants.clear();
         matrix.get(constants);
-        java.nio.FloatBuffer floats = constants.asFloatBuffer();
+        FloatBuffer floats = constants.asFloatBuffer();
         for (int col = 0; col < 16; col += 4) {
             floats.put(col + 1, -floats.get(col + 1));
             floats.put(col + 2, 0.5F * (floats.get(col + 2) + floats.get(col + 3)));
         }
-        floats.put(16, 0.1F);
-        floats.put(17, alphaTest ? 1.0F : 0.0F);
-        floats.put(18, 0.0F);
+        constants.putLong(64, chunkDataAddress);
+        constants.putFloat(72, 0.1F);
+        constants.putFloat(76, alphaTest ? 1.0F : 0.0F);
+        constants.putFloat(80, 0.0F);
         constants.position(0);
+        constants.limit(88);
     }
 
     /** Legacy adapter for tests or manual captures. */
@@ -433,6 +569,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
     @Override
     public void close() {
+        for (int slot = 0; slot < VulkanSwapchain.FRAMES_IN_FLIGHT; slot++) {
+            if (indirectBuffers[slot] != null) {
+                indirectBuffers[slot].close();
+            }
+            if (chunkOffsetBuffers[slot] != null) {
+                chunkOffsetBuffers[slot].close();
+            }
+        }
         if (arenaPool != null) {
             arenaPool.close();
         }
