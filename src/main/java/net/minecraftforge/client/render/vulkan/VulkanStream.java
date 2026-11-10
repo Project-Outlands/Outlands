@@ -128,6 +128,7 @@ final class VulkanStream implements AutoCloseable {
     private float lastPushedFogEnd = -1.0F;
     private float lastPushedFogDensity = -1.0F;
     private final float[] lastPushedFogColor = new float[4];
+    private final float[] lastPushedOverlayColor = new float[4];
     private long lastPushedLayout = 0L;
 
     static final int STATIC_QUAD_CAPACITY = 65_536;
@@ -500,6 +501,7 @@ final class VulkanStream implements AutoCloseable {
                 float curFogEnd = ds.fogEnd();
                 float curFogDensity = ds.fogDensity();
                 float[] curFogColor = ds.fogColor();
+                float[] curOverlayColor = ds.overlayColor();
 
                 boolean needPush = curLayout != lastPushedLayout
                         || curAlphaRef != lastPushedAlphaRef
@@ -512,6 +514,10 @@ final class VulkanStream implements AutoCloseable {
                                 || curFogColor[1] != lastPushedFogColor[1]
                                 || curFogColor[2] != lastPushedFogColor[2]
                                 || curFogColor[3] != lastPushedFogColor[3]))
+                        || curOverlayColor[3] != lastPushedOverlayColor[3]
+                        || (curOverlayColor[3] > 0.0f && (curOverlayColor[0] != lastPushedOverlayColor[0]
+                                || curOverlayColor[1] != lastPushedOverlayColor[1]
+                                || curOverlayColor[2] != lastPushedOverlayColor[2]))
                         || !java.util.Arrays.equals(curMvp, lastPushedMvp);
                 if (needPush) {
                     push.position(0);
@@ -520,15 +526,20 @@ final class VulkanStream implements AutoCloseable {
                     push.put(17, curFogColor[1]);
                     push.put(18, curFogColor[2]);
                     push.put(19, curFogColor[3]);
-                    push.put(20, curAlphaRef);
-                    push.put(21, curAlphaTest);
-                    push.put(22, 0.0F); // flipU
-                    constants.putInt(92, curFogMode);
-                    push.put(24, curFogStart);
-                    push.put(25, curFogEnd);
-                    push.put(26, curFogDensity);
+                    push.put(20, curOverlayColor[0]);
+                    push.put(21, curOverlayColor[1]);
+                    push.put(22, curOverlayColor[2]);
+                    push.put(23, curOverlayColor[3]);
+                    push.put(24, curAlphaRef);
+                    push.put(25, curAlphaTest);
+                    push.put(26, 0.0F); // flipU
+                    constants.putInt(108, curFogMode);
+                    push.put(28, curFogStart);
+                    push.put(29, curFogEnd);
+                    push.put(30, curFogDensity);
+                    push.put(31, 0.0F); // pad
                     constants.position(0);
-                    constants.limit(108);
+                    constants.limit(128);
                     vkCmdPushConstants(commandBuffer, curLayout,
                             org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
                                     | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -541,6 +552,7 @@ final class VulkanStream implements AutoCloseable {
                     lastPushedFogEnd = curFogEnd;
                     lastPushedFogDensity = curFogDensity;
                     System.arraycopy(curFogColor, 0, lastPushedFogColor, 0, 4);
+                    System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
                     lastPushedLayout = curLayout;
                 }
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), viewportWidth, viewportHeight);

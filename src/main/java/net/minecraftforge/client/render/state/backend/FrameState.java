@@ -212,6 +212,14 @@ public interface FrameState {
 
     void colorMask(boolean red, boolean green, boolean blue, boolean alpha);
 
+    default void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {}
+
+    default void texEnvi(int target, int parameterName, int parameter) {}
+
+    default float[] overlayColor() {
+        return new float[] {0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
     /**
      * The channels a draw may write, in {@code red, green, blue, alpha} order.
      *

@@ -44,6 +44,7 @@ public final class DrawState {
     private float fogEnd;
     private float fogDensity;
     private final float[] fogColor = new float[4];
+    private final float[] overlayColor = new float[4];
 
     public DrawState() {}
 
@@ -157,6 +158,7 @@ public final class DrawState {
         this.fogEnd = other.fogEnd;
         this.fogDensity = other.fogDensity;
         System.arraycopy(other.fogColor, 0, this.fogColor, 0, 4);
+        System.arraycopy(other.overlayColor, 0, this.overlayColor, 0, 4);
     }
 
     public void captureFrom(net.minecraftforge.client.render.state.backend.FrameState state) {
@@ -242,6 +244,12 @@ public final class DrawState {
             this.fogDensity = 1.0f;
         }
 
+        float[] oc = state.overlayColor();
+        if (oc != null && oc.length >= 4) {
+            System.arraycopy(oc, 0, this.overlayColor, 0, 4);
+        } else {
+            this.overlayColor[3] = 0.0f;
+        }
     }
 
     private static final DrawState SCRATCH_CURRENT = new DrawState();
@@ -254,6 +262,8 @@ public final class DrawState {
         SCRATCH_CURRENT.captureFrom(state);
         return SCRATCH_CURRENT;
     }
+
+    public float[] overlayColor() { return overlayColor; }
 
     public float[] mvp() { return mvp; }
     public boolean depthTest() { return depthTest; }

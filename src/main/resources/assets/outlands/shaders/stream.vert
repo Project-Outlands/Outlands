@@ -11,6 +11,7 @@ layout(location = 3) in vec2 inLightmap;
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
     vec4 fogColor;
+    vec4 overlayColor;
     float alphaReference;
     float alphaTest;
     float flipU;
@@ -18,6 +19,7 @@ layout(push_constant) uniform PushConstants {
     float fogStart;
     float fogEnd;
     float fogDensity;
+    float pad;
 } pc;
 
 layout(location = 0) out vec4 outColor;

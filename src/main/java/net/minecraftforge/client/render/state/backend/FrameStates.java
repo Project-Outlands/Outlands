@@ -142,6 +142,20 @@ public final class FrameStates {
                 fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, visibleChunks);
     }
 
+    public static void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
+        FrameState state = forNonGl();
+        if (state != null) {
+            state.texEnv(target, parameterName, parameters);
+        }
+    }
+
+    public static void texEnvi(int target, int parameterName, int parameter) {
+        FrameState state = forNonGl();
+        if (state != null) {
+            state.texEnvi(target, parameterName, parameter);
+        }
+    }
+
     /**
      * Whether a GL call describing how vertex data is fed is this backend's to ignore.
      *

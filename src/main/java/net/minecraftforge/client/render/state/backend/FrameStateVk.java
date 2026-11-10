@@ -124,6 +124,9 @@ final class FrameStateVk implements FrameState {
     private int lightmapTexture;
     private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
     private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
+    private final float[] overlayColor = new float[4];
+    private final float[] texEnvColor = new float[4];
+    private int texCombineRgb = 8448; // GL_MODULATE
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -374,6 +377,39 @@ final class FrameStateVk implements FrameState {
         colorMask[1] = green;
         colorMask[2] = blue;
         colorMask[3] = alpha;
+    }
+
+    @Override
+    public void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
+        if (target == 8960 && parameterName == 8705 && parameters.remaining() >= 4) {
+            int pos = parameters.position();
+            texEnvColor[0] = parameters.get(pos);
+            texEnvColor[1] = parameters.get(pos + 1);
+            texEnvColor[2] = parameters.get(pos + 2);
+            texEnvColor[3] = parameters.get(pos + 3);
+            updateOverlayColor();
+        }
+    }
+
+    @Override
+    public void texEnvi(int target, int parameterName, int parameter) {
+        if (target == 8960 && (parameterName == 8704 || parameterName == 34160 || parameterName == 34161)) {
+            texCombineRgb = parameter;
+            updateOverlayColor();
+        }
+    }
+
+    private void updateOverlayColor() {
+        if (texCombineRgb == 34164) { // GL_INTERPOLATE
+            System.arraycopy(texEnvColor, 0, overlayColor, 0, 4);
+        } else {
+            overlayColor[3] = 0.0f;
+        }
+    }
+
+    @Override
+    public float[] overlayColor() {
+        return overlayColor;
     }
 
     @Override

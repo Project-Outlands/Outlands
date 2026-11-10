@@ -13,6 +13,7 @@ layout(set = 1, binding = 0) uniform sampler2D lightmap;
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
     vec4 fogColor;
+    vec4 overlayColor;
     float alphaReference;
     float alphaTest;
     float flipU;
@@ -20,6 +21,7 @@ layout(push_constant) uniform PushConstants {
     float fogStart;
     float fogEnd;
     float fogDensity;
+    float pad;
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -65,6 +67,9 @@ void main() {
     }
 
     vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
+    if (pc.overlayColor.a > 0.0) {
+        baseColor.rgb = mix(baseColor.rgb, pc.overlayColor.rgb, pc.overlayColor.a);
+    }
     if (pc.fogMode > 0) {
         float f = computeFogFactor(inEyeDist);
         outColor = vec4(mix(pc.fogColor.rgb, baseColor.rgb, f), baseColor.a);
