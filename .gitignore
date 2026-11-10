@@ -20,3 +20,6 @@ projects/*/crash-reports/
 
 # local notes and research write-ups stay out of the tree
 /docs/
+
+# editor and tool state: serena's language-server index is per checkout and machine
+/.serena/
