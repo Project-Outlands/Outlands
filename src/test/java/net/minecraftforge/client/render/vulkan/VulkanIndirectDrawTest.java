@@ -70,18 +70,53 @@ class VulkanIndirectDrawTest {
         ByteBuffer constants = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder());
         Matrix4f mvp = new Matrix4f().identity();
         long chunkDataAddress = 0xDEADBEEFCAFE0000L;
+        float[] fogColor = {0.8f, 0.9f, 1.0f, 1.0f};
 
         mvp.get(constants);
-        constants.putLong(64, chunkDataAddress);
-        constants.putFloat(72, 0.1f);
-        constants.putFloat(76, 1.0f);
-        constants.putFloat(80, 0.0f);
+        constants.putFloat(64, fogColor[0]);
+        constants.putFloat(68, fogColor[1]);
+        constants.putFloat(72, fogColor[2]);
+        constants.putFloat(76, fogColor[3]);
+        constants.putLong(80, chunkDataAddress);
+        constants.putFloat(88, 0.1f);
+        constants.putFloat(92, 1.0f);
+        constants.putFloat(96, 0.0f);
+        constants.putInt(100, 9729); // GL_LINEAR
+        constants.putFloat(104, 32.0f);
+        constants.putFloat(108, 128.0f);
+        constants.putFloat(112, 0.05f);
+        constants.putFloat(116, 10.5f);
+        constants.putFloat(120, 64.0f);
+        constants.putFloat(124, -20.5f);
 
-        assertEquals(chunkDataAddress, constants.getLong(64));
-        assertEquals(0.1f, constants.getFloat(72), 1e-6f);
-        assertEquals(1.0f, constants.getFloat(76), 1e-6f);
-        assertEquals(0.0f, constants.getFloat(80), 1e-6f);
-        assertTrue(VulkanPipeline.PUSH_CONSTANT_BYTES <= 128);
+        assertEquals(fogColor[0], constants.getFloat(64), 1e-6f);
+        assertEquals(fogColor[3], constants.getFloat(76), 1e-6f);
+        assertEquals(chunkDataAddress, constants.getLong(80));
+        assertEquals(0.1f, constants.getFloat(88), 1e-6f);
+        assertEquals(1.0f, constants.getFloat(92), 1e-6f);
+        assertEquals(0.0f, constants.getFloat(96), 1e-6f);
+        assertEquals(9729, constants.getInt(100));
+        assertEquals(32.0f, constants.getFloat(104), 1e-6f);
+        assertEquals(128.0f, constants.getFloat(108), 1e-6f);
+        assertEquals(0.05f, constants.getFloat(112), 1e-6f);
+        assertEquals(10.5f, constants.getFloat(116), 1e-6f);
+        assertEquals(64.0f, constants.getFloat(120), 1e-6f);
+        assertEquals(-20.5f, constants.getFloat(124), 1e-6f);
+        assertEquals(128, VulkanPipeline.PUSH_CONSTANT_BYTES);
+    }
+
+    @Test
+    void chunkPosKeyMatchesBlockPosToLong() {
+        int[] testCoords = {0, 0, 0, 16, 64, 32, -16, 128, -64, 1024, 255, -2048};
+        for (int i = 0; i < testCoords.length; i += 3) {
+            int x = testCoords[i];
+            int y = testCoords[i + 1];
+            int z = testCoords[i + 2];
+            net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(x, y, z);
+            long expected = pos.toLong();
+            long actual = VulkanTerrainLayer.chunkPosKey(x, y, z);
+            assertEquals(expected, actual, "chunkPosKey(" + x + ", " + y + ", " + z + ") must match BlockPos.toLong()");
+        }
     }
 
     @Test

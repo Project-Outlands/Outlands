@@ -101,6 +101,14 @@ public final class FrameStates {
         return recordTerrainLayer(layer, 0.0, 0.0, 0.0);
     }
 
+    private static final it.unimi.dsi.fastutil.longs.LongArrayList CHUNK_LIST =
+            new it.unimi.dsi.fastutil.longs.LongArrayList(2048);
+
+    public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList() {
+        CHUNK_LIST.clear();
+        return CHUNK_LIST;
+    }
+
     /**
      * Records one terrain render layer with the camera viewpoint offset in world space.
      *
@@ -110,6 +118,11 @@ public final class FrameStates {
      * world coordinates align with the camera and view frustum.</p>
      */
     public static boolean recordTerrainLayer(int layer, double viewX, double viewY, double viewZ) {
+        return recordTerrainLayer(layer, viewX, viewY, viewZ, null);
+    }
+
+    public static boolean recordTerrainLayer(int layer, double viewX, double viewY, double viewZ,
+                                             it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks) {
         FrameState state = forNonGl();
         if (state == null) {
             return false;
@@ -119,7 +132,13 @@ public final class FrameStates {
         org.joml.Matrix4f mvp = new org.joml.Matrix4f(state.projection()).mul(view);
         float[] values = new float[16];
         mvp.get(values);
-        return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(layer, values, viewX, viewY, viewZ);
+        boolean fogEnabled = state.isEnabled(Capability.FOG);
+        int fogMode = fogEnabled ? state.fogMode() : 0;
+        float[] fogColor = state.fogColor();
+        it.unimi.dsi.fastutil.longs.LongArrayList chunksCopy = visibleChunks != null ? visibleChunks.clone() : null;
+        return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(
+                layer, values, viewX, viewY, viewZ,
+                fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, chunksCopy);
     }
 
     /**

@@ -79,9 +79,23 @@ public final class FrameDraws {
     /**
      * One render layer of the captured terrain, at its place in the sequence.
      */
-    public record TerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) implements Operation {
+    public record TerrainLayer(
+            int layer,
+            float[] mvp,
+            double viewX, double viewY, double viewZ,
+            int fogMode,
+            float fogStart,
+            float fogEnd,
+            float fogDensity,
+            float[] fogColor,
+            it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks
+    ) implements Operation {
         public TerrainLayer(int layer, float[] mvp) {
-            this(layer, mvp, 0.0, 0.0, 0.0);
+            this(layer, mvp, 0.0, 0.0, 0.0, 0, 0.0f, 1.0f, 1.0f, null, null);
+        }
+
+        public TerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) {
+            this(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null);
         }
 
         public TerrainLayer {
@@ -225,11 +239,18 @@ public final class FrameDraws {
      * @return {@code false} when nothing is collecting, which means there is no frame to draw inside
      */
     public static boolean recordTerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) {
+        return recordTerrainLayer(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null);
+    }
+
+    public static boolean recordTerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ,
+                                             int fogMode, float fogStart, float fogEnd, float fogDensity, float[] fogColor,
+                                             it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks) {
         if (!collecting) {
             return false;
         }
         synchronized (LOCK) {
-            ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp, viewX, viewY, viewZ));
+            ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp, viewX, viewY, viewZ,
+                    fogMode, fogStart, fogEnd, fogDensity, fogColor, visibleChunks));
         }
         return true;
     }

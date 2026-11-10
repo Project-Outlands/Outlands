@@ -15,6 +15,7 @@ layout(buffer_reference, std430) readonly buffer ChunkDataBuffer {
 layout(location = 0) in vec4 inColor;      // vertex colour, already carrying vanilla's baked shade and AO
 layout(location = 1) in vec2 inUv;         // texture coordinate, the one the game wrote
 layout(location = 2) in vec2 inLightmap;   // block light, sky light, both 0..1
+layout(location = 3) in float inEyeDist;   // radial distance from camera
 
 // One texture per draw. The white 1x1 image stands in for "nothing bound", which makes the multiply a no-op for the
 // solid-colour quads vanilla draws without a texture.
@@ -26,21 +27,40 @@ layout(set = 0, binding = 0) uniform sampler2D atlas;
 // vision, the boss-colour modifier and the dimension's own overrides all arrive as texels.
 layout(set = 1, binding = 0) uniform sampler2D lightmap;
 
-// The fixed-function alpha test, as a discard.
-//
-// GL removed fragments whose alpha failed a comparison, and vanilla's GUI depends on it: a fully transparent texel
-// discarded here never writes anything, while without it the same texel writes its colour whenever blending happens
-// to be off. That is the difference between the main menu's wordmark floating over the panorama and the same
-// wordmark sitting on a black rectangle.
+// Push constants: matching terrain.vert exactly (128 bytes total).
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
+    vec4 fogColor;
     ChunkDataBuffer chunkData;
     float alphaReference;
     float alphaTest;
     float flipU;
+    int fogMode;
+    float fogStart;
+    float fogEnd;
+    float fogDensity;
+    float cameraX;
+    float cameraY;
+    float cameraZ;
 } pc;
 
 layout(location = 0) out vec4 outColor;
+
+float computeFogFactor(float dist) {
+    if (pc.fogMode == 9729) { // GL_LINEAR
+        float range = pc.fogEnd - pc.fogStart;
+        if (abs(range) > 0.0001) {
+            return clamp((pc.fogEnd - dist) / range, 0.0, 1.0);
+        }
+        return 0.0;
+    } else if (pc.fogMode == 2048) { // GL_EXP
+        return clamp(exp(-pc.fogDensity * dist), 0.0, 1.0);
+    } else if (pc.fogMode == 2049) { // GL_EXP2
+        float f = pc.fogDensity * dist;
+        return clamp(exp(-f * f), 0.0, 1.0);
+    }
+    return 1.0;
+}
 
 void main() {
     // A texture that was filled by a framebuffer copy is sampled with u reversed: the quad that reads it back places
@@ -80,5 +100,11 @@ void main() {
         light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
     }
 
-    outColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
+    vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
+    if (pc.fogMode > 0) {
+        float f = computeFogFactor(inEyeDist);
+        outColor = vec4(mix(pc.fogColor.rgb, baseColor.rgb, f), baseColor.a);
+    } else {
+        outColor = baseColor;
+    }
 }

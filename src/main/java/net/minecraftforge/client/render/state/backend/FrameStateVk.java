@@ -325,8 +325,31 @@ final class FrameStateVk implements FrameState {
         fogColor[1] = view.get();
         fogColor[2] = view.get();
         fogColor[3] = view.get();
-        // The term itself is not computed yet - see the note on these methods in FrameState.
-        FrameStates.reportSkippedOnce("fog", "world geometry is not faded towards the sky colour with distance");
+    }
+
+    @Override
+    public int fogMode() {
+        return fogMode;
+    }
+
+    @Override
+    public float[] fogColor() {
+        return fogColor;
+    }
+
+    @Override
+    public float fogDensity() {
+        return fogDensity;
+    }
+
+    @Override
+    public float fogStart() {
+        return fogStart;
+    }
+
+    @Override
+    public float fogEnd() {
+        return fogEnd;
     }
 
     @Override

@@ -123,6 +123,11 @@ final class VulkanStream implements AutoCloseable {
     private final float[] lastPushedMvp = new float[16];
     private float lastPushedAlphaRef = -1.0F;
     private float lastPushedAlphaTest = -1.0F;
+    private int lastPushedFogMode = -1;
+    private float lastPushedFogStart = -1.0F;
+    private float lastPushedFogEnd = -1.0F;
+    private float lastPushedFogDensity = -1.0F;
+    private final float[] lastPushedFogColor = new float[4];
     private long lastPushedLayout = 0L;
 
     static final int STATIC_QUAD_CAPACITY = 65_536;
@@ -360,7 +365,9 @@ final class VulkanStream implements AutoCloseable {
                 if (op instanceof FrameDraws.TerrainLayer terrainOp) {
                     if (terrain != null) {
                         terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer(),
-                                terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ());
+                                terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ(),
+                                terrainOp.fogMode(), terrainOp.fogStart(), terrainOp.fogEnd(),
+                                terrainOp.fogDensity(), terrainOp.fogColor(), terrainOp.visibleChunks());
                     }
                     // The terrain draw binds its own vertex buffer and descriptor set, so neither can be assumed by
                     // the next streamed draw: rebind the stream's buffer and forget the bound set.
@@ -484,16 +491,40 @@ final class VulkanStream implements AutoCloseable {
                             + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"
                             + " (516) only, which is the one vanilla sets");
                 }
+                int curFogMode = ds.fogMode();
+                float curFogStart = ds.fogStart();
+                float curFogEnd = ds.fogEnd();
+                float curFogDensity = ds.fogDensity();
+                float[] curFogColor = ds.fogColor();
+
                 boolean needPush = curLayout != lastPushedLayout
                         || curAlphaRef != lastPushedAlphaRef
                         || curAlphaTest != lastPushedAlphaTest
+                        || curFogMode != lastPushedFogMode
+                        || (curFogMode > 0 && (curFogStart != lastPushedFogStart
+                                || curFogEnd != lastPushedFogEnd
+                                || curFogDensity != lastPushedFogDensity
+                                || curFogColor[0] != lastPushedFogColor[0]
+                                || curFogColor[1] != lastPushedFogColor[1]
+                                || curFogColor[2] != lastPushedFogColor[2]
+                                || curFogColor[3] != lastPushedFogColor[3]))
                         || !java.util.Arrays.equals(curMvp, lastPushedMvp);
                 if (needPush) {
                     push.position(0);
                     writeMvp(push, curMvp);
-                    push.put(16, curAlphaRef);
-                    push.put(17, curAlphaTest);
-                    push.put(18, 0.0F);
+                    push.put(16, curFogColor[0]);
+                    push.put(17, curFogColor[1]);
+                    push.put(18, curFogColor[2]);
+                    push.put(19, curFogColor[3]);
+                    push.put(20, curAlphaRef);
+                    push.put(21, curAlphaTest);
+                    push.put(22, 0.0F); // flipU
+                    constants.putInt(92, curFogMode);
+                    push.put(24, curFogStart);
+                    push.put(25, curFogEnd);
+                    push.put(26, curFogDensity);
+                    constants.position(0);
+                    constants.limit(108);
                     vkCmdPushConstants(commandBuffer, curLayout,
                             org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
                                     | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -501,6 +532,11 @@ final class VulkanStream implements AutoCloseable {
                     System.arraycopy(curMvp, 0, lastPushedMvp, 0, 16);
                     lastPushedAlphaRef = curAlphaRef;
                     lastPushedAlphaTest = curAlphaTest;
+                    lastPushedFogMode = curFogMode;
+                    lastPushedFogStart = curFogStart;
+                    lastPushedFogEnd = curFogEnd;
+                    lastPushedFogDensity = curFogDensity;
+                    System.arraycopy(curFogColor, 0, lastPushedFogColor, 0, 4);
                     lastPushedLayout = curLayout;
                 }
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), viewportWidth, viewportHeight);

@@ -148,13 +148,18 @@ public interface FrameState {
      */
     void fog(int glPname, float value);
 
-    /**
-     * {@code glFog}: the same values from a buffer, which is how {@code GL_FOG_COLOR} (2918) is set.
+    /** {@code glFog}: the same values from a buffer, which is how {@code GL_FOG_COLOR} (2918) is set.
      *
      * <p>Vanilla fills a four-float buffer with the sky colour and hands it over once per frame, so this is the call
      * that decides what the world fades into.</p>
      */
     void fog(int glPname, java.nio.FloatBuffer param);
+
+    int fogMode();
+    float[] fogColor();
+    float fogDensity();
+    float fogStart();
+    float fogEnd();
 
     /**
      * {@code glMultiTexCoord2f} on the lightmap unit: the light that geometry without a lightmap attribute gets.

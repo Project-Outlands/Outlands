@@ -38,6 +38,12 @@ public final class DrawState {
     private float[] light1;
     private final float[] textureMatrix = new float[16];
     private boolean hasTextureMatrix;
+    private boolean fogEnabled;
+    private int fogMode;
+    private float fogStart;
+    private float fogEnd;
+    private float fogDensity;
+    private final float[] fogColor = new float[4];
 
     public DrawState() {}
 
@@ -145,6 +151,12 @@ public final class DrawState {
         if (this.hasTextureMatrix) {
             System.arraycopy(other.textureMatrix, 0, this.textureMatrix, 0, 16);
         }
+        this.fogEnabled = other.fogEnabled;
+        this.fogMode = other.fogMode;
+        this.fogStart = other.fogStart;
+        this.fogEnd = other.fogEnd;
+        this.fogDensity = other.fogDensity;
+        System.arraycopy(other.fogColor, 0, this.fogColor, 0, 4);
     }
 
     public void captureFrom(net.minecraftforge.client.render.state.backend.FrameState state) {
@@ -212,6 +224,23 @@ public final class DrawState {
         } else {
             this.hasTextureMatrix = false;
         }
+
+        this.fogEnabled = state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.FOG);
+        if (this.fogEnabled) {
+            this.fogMode = state.fogMode();
+            this.fogStart = state.fogStart();
+            this.fogEnd = state.fogEnd();
+            this.fogDensity = state.fogDensity();
+            float[] fc = state.fogColor();
+            if (fc != null && fc.length >= 4) {
+                System.arraycopy(fc, 0, this.fogColor, 0, 4);
+            }
+        } else {
+            this.fogMode = 0;
+            this.fogStart = 0.0f;
+            this.fogEnd = 1.0f;
+            this.fogDensity = 1.0f;
+        }
     }
 
     public static DrawState current() {
@@ -250,6 +279,12 @@ public final class DrawState {
     public float[] light0() { return light0; }
     public float[] light1() { return light1; }
     public float[] textureMatrix() { return hasTextureMatrix ? textureMatrix : null; }
+    public boolean fogEnabled() { return fogEnabled; }
+    public int fogMode() { return fogMode; }
+    public float fogStart() { return fogStart; }
+    public float fogEnd() { return fogEnd; }
+    public float fogDensity() { return fogDensity; }
+    public float[] fogColor() { return fogColor; }
 
     public boolean hasViewport() {
         return viewport[2] > 0 && viewport[3] > 0;
