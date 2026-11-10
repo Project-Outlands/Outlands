@@ -57,12 +57,37 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final VulkanTextures textures;
     private final TerrainArenaPool arenaPool;
 
+    static final int NUM_LAYERS = net.minecraft.util.BlockRenderLayer.values().length;
     static final int MAX_INDIRECT_CAPACITY = 65_536;
+    static final int LAYER_CAPACITY = MAX_INDIRECT_CAPACITY / NUM_LAYERS; // 16,384 per layer
+    static final int MAX_BATCHES_PER_LAYER = 32;
+
     private final VulkanBuffer[] indirectBuffers;
     private final VulkanBuffer[] chunkOffsetBuffers;
-    private int chunkCursor;
-    private int indirectCursor;
     private IntArrayList[] slabBuckets;
+
+    // Temporal cache management
+    private final long[] geometryVersion = new long[NUM_LAYERS];
+
+    // Tier 1: Per-slot GPU buffer cache (direct dispatch without memory touching)
+    private final boolean[][] slotCacheValid = new boolean[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
+    private final long[][] slotGeometryVersion = new long[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
+    private final long[][] slotVisibilityHash = new long[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
+    private final int[][] slotDrawnTotal = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
+    private final int[][] slotBatchCount = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
+    private final int[][][] slotBatchSlab = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final int[][][] slotBatchFirstCmd = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final int[][][] slotBatchCmdCount = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+
+    // Tier 2: Shared host staging buffer cache (fast memcpy across slots without map lookups or formatting)
+    private final boolean[] stagingCacheValid = new boolean[NUM_LAYERS];
+    private final long[] stagingGeometryVersion = new long[NUM_LAYERS];
+    private final long[] stagingVisibilityHash = new long[NUM_LAYERS];
+    private final int[] stagingDrawnTotal = new int[NUM_LAYERS];
+    private final int[] stagingBatchCount = new int[NUM_LAYERS];
+    private final int[][] stagingBatchSlab = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final int[][] stagingBatchFirstCmd = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final int[][] stagingBatchCmdCount = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
 
     private final Map<ChunkMeshCapture.Key, TerrainSlice> activeSlices = new HashMap<>();
     @SuppressWarnings("unchecked")
@@ -72,6 +97,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             new Long2ObjectOpenHashMap[net.minecraft.util.BlockRenderLayer.values().length];
     private final ByteBuffer hostChunkOffsetStaging;
     private final ByteBuffer hostIndirectStaging;
+    private final long hostOffsetStagingAddr;
+    private final long hostIndirectStagingAddr;
 
     /** Where the current buffers came from: null while no chunks are loaded. */
     private String source;
@@ -124,6 +151,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 .order(java.nio.ByteOrder.nativeOrder());
         this.hostIndirectStaging = ByteBuffer.allocateDirect(MAX_INDIRECT_CAPACITY * 20)
                 .order(java.nio.ByteOrder.nativeOrder());
+        this.hostOffsetStagingAddr = MemoryUtil.memAddress(hostChunkOffsetStaging);
+        this.hostIndirectStagingAddr = MemoryUtil.memAddress(hostIndirectStaging);
         this.source = "none";
     }
 
@@ -153,9 +182,9 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         VulkanPipeline pipeline;
         VulkanPipeline translucentPipeline;
         try {
-            pipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+            pipeline = VulkanPipeline.createTerrain(device, vertex, fragment, colorFormat, depthFormat,
                     descriptors.pipelineLayout(), descriptors.layout(), VulkanPipeline.PipelineState.terrain());
-            translucentPipeline = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+            translucentPipeline = VulkanPipeline.createTerrain(device, vertex, fragment, colorFormat, depthFormat,
                     descriptors.pipelineLayout(), descriptors.layout(), VulkanPipeline.PipelineState.translucentTerrain());
         } finally {
             vertex.close();
@@ -227,6 +256,55 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         return ((long) (x & 0x3FFFFFF) << 38) | ((long) (y & 0xFFF) << 26) | (long) (z & 0x3FFFFFF);
     }
 
+    private void invalidateLayerCache(int layer) {
+        if (layer >= 0 && layer < NUM_LAYERS) {
+            geometryVersion[layer]++;
+            stagingCacheValid[layer] = false;
+            for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
+                slotCacheValid[s][layer] = false;
+            }
+        }
+    }
+
+    private void invalidateAllCaches() {
+        for (int l = 0; l < NUM_LAYERS; l++) {
+            geometryVersion[l]++;
+            stagingCacheValid[l] = false;
+            for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
+                slotCacheValid[s][l] = false;
+            }
+        }
+    }
+
+    static long hashVisibleChunks(LongArrayList list) {
+        if (list == null || list.isEmpty()) {
+            return 0L;
+        }
+        int size = list.size();
+        long[] elements = list.elements();
+        long h = 0xcbf29ce484222325L;
+        for (int i = 0; i < size; i++) {
+            h ^= elements[i];
+            h *= 1099511628211L;
+        }
+        return h;
+    }
+
+    static long hashFrustum(float[] planes, double vx, double vy, double vz) {
+        long h = 0xcbf29ce484222325L;
+        for (float f : planes) {
+            h ^= Float.floatToIntBits(f);
+            h *= 1099511628211L;
+        }
+        h ^= (long) (vx * 10.0);
+        h *= 1099511628211L;
+        h ^= (long) (vy * 10.0);
+        h *= 1099511628211L;
+        h ^= (long) (vz * 10.0);
+        h *= 1099511628211L;
+        return h;
+    }
+
     private void addSlice(TerrainSlice slice) {
         List<TerrainSlice> list = layerSlices[slice.layer()];
         slice.setLayerListIndex(list.size());
@@ -234,6 +312,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         activeSlices.put(new ChunkMeshCapture.Key(slice.originX(), slice.originY(), slice.originZ(),
                 net.minecraft.util.BlockRenderLayer.values()[slice.layer()]), slice);
         layerSliceMaps[slice.layer()].put(chunkPosKey(slice.originX(), slice.originY(), slice.originZ()), slice);
+        invalidateLayerCache(slice.layer());
     }
 
     private void removeSlice(TerrainSlice slice) {
@@ -252,6 +331,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         }
         slice.setLayerListIndex(-1);
         layerSliceMaps[slice.layer()].remove(chunkPosKey(slice.originX(), slice.originY(), slice.originZ()));
+        invalidateLayerCache(slice.layer());
     }
 
     private void ensureSlabBuckets(int count) {
@@ -274,8 +354,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      * chunk mesh updates and removals from worker threads.</p>
      */
     void prepareFrame(int slot) {
-        chunkCursor = 0;
-        indirectCursor = 0;
         drawCount = 0;
         if (arenaPool == null) {
             return;
@@ -300,6 +378,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     for (Long2ObjectOpenHashMap<TerrainSlice> map : layerSliceMaps) {
                         map.clear();
                     }
+                    invalidateAllCaches();
                 }
                 case REMOVE -> {
                     TerrainSlice old = activeSlices.remove(event.key());
@@ -316,13 +395,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     }
                     ChunkMeshCapture.Captured cap = event.capture();
                     if (cap != null && cap.quadCount() > 0) {
-                        int byteSize = cap.quadCount() * TerrainVertexFormat.VERTICES_PER_QUAD * TerrainVertexFormat.STRIDE;
+                        int byteSize = cap.quadCount() * TerrainVertexFormat.COMPACT_QUAD_SIZE;
                         TerrainArenaPool.Allocation alloc = arenaPool.allocate(byteSize);
-                        arenaPool.upload(alloc, cap.vertices(), byteSize);
+                        if (cap.vertices().length == byteSize) {
+                            arenaPool.upload(alloc, cap.vertices(), byteSize);
+                        } else {
+                            arenaPool.uploadCompact(alloc, cap.vertices(), cap.quadCount());
+                        }
                         TerrainSlice slice = new TerrainSlice(
                                 alloc.slabIndex(),
                                 alloc.offset(),
-                                alloc.offset() / TerrainVertexFormat.STRIDE,
+                                alloc.offset() / TerrainVertexFormat.COMPACT_STRIDE,
                                 cap.quadCount(),
                                 cap.quadCount() * 6,
                                 cap.chunkX(), cap.chunkY(), cap.chunkZ(),
@@ -334,6 +417,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 }
             }
         }
+        events.clear();
         source = activeSlices.size() + " active chunk layers across " + arenaPool.slabCount() + " slabs";
     }
 
@@ -396,12 +480,83 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             vkCmdPushConstants(commandBuffer, activePipeline.layout(),
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
 
+            int layerBaseCmd = layer * LAYER_CAPACITY;
+            int layerBaseChunk = layer * LAYER_CAPACITY;
+
+            long visHash = (visibleChunks != null)
+                    ? hashVisibleChunks(visibleChunks)
+                    : hashFrustum(frustumPlanes, viewX, viewY, viewZ);
+
+            // Tier 1 Check: Current slot already has the exact GPU buffer!
+            if (slotCacheValid[slot][layer]
+                    && slotGeometryVersion[slot][layer] == geometryVersion[layer]
+                    && slotVisibilityHash[slot][layer] == visHash) {
+                int batchCount = slotBatchCount[slot][layer];
+                for (int b = 0; b < batchCount; b++) {
+                    int slab = slotBatchSlab[slot][layer][b];
+                    int firstCmd = slotBatchFirstCmd[slot][layer][b];
+                    int count = slotBatchCmdCount[slot][layer][b];
+                    vkCmdBindVertexBuffers(commandBuffer, 0,
+                            stack.longs(arenaPool.slab(slab).buffer().handle()),
+                            stack.mallocLong(1).put(0, 0L));
+                    vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
+                            (long) firstCmd * 20L, count, 20);
+                }
+                drawn = slotDrawnTotal[slot][layer];
+                drawCount += drawn;
+                if (++logFrameCounter % 300 == 1 && list.size() > 0) {
+                    LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: TIER 1 GPU HIT)",
+                            layer, drawn, list.size());
+                }
+                return;
+            }
+
             long indirectMapped = indirectBuffers[slot].mappedAddress();
             long chunkOffsetMapped = chunkOffsetBuffers[slot].mappedAddress();
-            long hostOffsetBase = MemoryUtil.memAddress(hostChunkOffsetStaging);
-            long hostIndirectBase = MemoryUtil.memAddress(hostIndirectStaging);
-            int slabCount = arenaPool.slabCount();
 
+            // Tier 2 Check: Shared host staging buffer already has the exact data!
+            if (stagingCacheValid[layer]
+                    && stagingGeometryVersion[layer] == geometryVersion[layer]
+                    && stagingVisibilityHash[layer] == visHash) {
+                int totalDrawn = stagingDrawnTotal[layer];
+                if (totalDrawn > 0) {
+                    long hostOffsetBase = hostOffsetStagingAddr + ((long) layerBaseChunk << 4);
+                    long hostIndirectBase = hostIndirectStagingAddr + (long) layerBaseCmd * 20L;
+                    long gpuOffsetBase = chunkOffsetMapped + ((long) layerBaseChunk << 4);
+                    long gpuIndirectBase = indirectMapped + (long) layerBaseCmd * 20L;
+                    MemoryUtil.memCopy(hostOffsetBase, gpuOffsetBase, (long) totalDrawn << 4);
+                    MemoryUtil.memCopy(hostIndirectBase, gpuIndirectBase, (long) totalDrawn * 20L);
+                }
+                int batchCount = stagingBatchCount[layer];
+                slotBatchCount[slot][layer] = batchCount;
+                for (int b = 0; b < batchCount; b++) {
+                    slotBatchSlab[slot][layer][b] = stagingBatchSlab[layer][b];
+                    slotBatchFirstCmd[slot][layer][b] = stagingBatchFirstCmd[layer][b];
+                    slotBatchCmdCount[slot][layer][b] = stagingBatchCmdCount[layer][b];
+                    int slab = stagingBatchSlab[layer][b];
+                    int firstCmd = stagingBatchFirstCmd[layer][b];
+                    int count = stagingBatchCmdCount[layer][b];
+                    vkCmdBindVertexBuffers(commandBuffer, 0,
+                            stack.longs(arenaPool.slab(slab).buffer().handle()),
+                            stack.mallocLong(1).put(0, 0L));
+                    vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
+                            (long) firstCmd * 20L, count, 20);
+                }
+                slotDrawnTotal[slot][layer] = totalDrawn;
+                slotGeometryVersion[slot][layer] = geometryVersion[layer];
+                slotVisibilityHash[slot][layer] = visHash;
+                slotCacheValid[slot][layer] = true;
+                drawn = totalDrawn;
+                drawCount += drawn;
+                if (++logFrameCounter % 300 == 1 && list.size() > 0) {
+                    LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: TIER 2 STAGING HIT)",
+                            layer, drawn, list.size());
+                }
+                return;
+            }
+
+            // Tier 3: Cache Miss (Full Rebuild into Staging + Copy to Slot)
+            int slabCount = arenaPool.slabCount();
             List<TerrainSlice> renderSlices;
             int renderSlicesCount;
             boolean bypassFrustum = false;
@@ -415,6 +570,12 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     if (slice != null) {
                         translucentSortedList.add(slice);
                     }
+                }
+                if (isTranslucent) {
+                    this.cameraX = viewX;
+                    this.cameraY = viewY;
+                    this.cameraZ = viewZ;
+                    translucentSortedList.sort(translucentComparator);
                 }
                 renderSlices = translucentSortedList;
                 renderSlicesCount = renderSlices.size();
@@ -442,10 +603,13 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 renderSlicesCount = list.size();
             }
 
+            long hostOffsetBase = hostOffsetStagingAddr + ((long) layerBaseChunk << 4);
+            long hostIndirectBase = hostIndirectStagingAddr + (long) layerBaseCmd * 20L;
+            int batchCount = 0;
+
             if (slabCount <= 1) {
                 // Fast path: All slices in slab 0 (typical case)
-                int startCmdIndex = indirectCursor;
-                int startChunkId = chunkCursor;
+                int layerDrawn = 0;
                 for (int i = 0; i < renderSlicesCount; i++) {
                     TerrainSlice slice = renderSlices.get(i);
                     if (!bypassFrustum && !isTranslucent) {
@@ -458,42 +622,47 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                         }
                     }
 
-                    if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
-                        LOGGER.warn("Indirect draw buffer capacity ({}) reached in layer {}; skipping remaining slices",
-                                MAX_INDIRECT_CAPACITY, layer);
+                    if (layerDrawn >= LAYER_CAPACITY) {
+                        LOGGER.warn("Layer indirect buffer capacity ({}) reached in layer {}; skipping remaining slices",
+                                LAYER_CAPACITY, layer);
                         break;
                     }
 
-                    int chunkId = chunkCursor++;
-                    long offsetAddr = hostOffsetBase + ((long) chunkId << 4);
+                    int chunkId = layerBaseChunk + layerDrawn;
+                    long offsetAddr = hostOffsetBase + ((long) layerDrawn << 4);
                     MemoryUtil.memPutFloat(offsetAddr, (float) slice.originX());
                     MemoryUtil.memPutFloat(offsetAddr + 4, (float) slice.originY());
                     MemoryUtil.memPutFloat(offsetAddr + 8, (float) slice.originZ());
                     MemoryUtil.memPutFloat(offsetAddr + 12, 0.0f);
 
-                    int cmdIndex = indirectCursor++;
-                    long cmdAddr = hostIndirectBase + (long) cmdIndex * 20L;
+                    long cmdAddr = hostIndirectBase + (long) layerDrawn * 20L;
                     MemoryUtil.memPutInt(cmdAddr, slice.indexCount());
                     MemoryUtil.memPutInt(cmdAddr + 4, 1);
                     MemoryUtil.memPutInt(cmdAddr + 8, 0);
                     MemoryUtil.memPutInt(cmdAddr + 12, slice.vertexOffset());
                     MemoryUtil.memPutInt(cmdAddr + 16, chunkId);
 
-                    drawn++;
+                    layerDrawn++;
                 }
 
-                if (drawn > 0) {
-                    MemoryUtil.memCopy(hostOffsetBase + ((long) startChunkId << 4),
-                            chunkOffsetMapped + ((long) startChunkId << 4), (long) drawn << 4);
-                    MemoryUtil.memCopy(hostIndirectBase + (long) startCmdIndex * 20L,
-                            indirectMapped + (long) startCmdIndex * 20L, (long) drawn * 20L);
+                if (layerDrawn > 0) {
+                    stagingBatchSlab[layer][0] = 0;
+                    stagingBatchFirstCmd[layer][0] = layerBaseCmd;
+                    stagingBatchCmdCount[layer][0] = layerDrawn;
+                    batchCount = 1;
+
+                    long gpuOffsetBase = chunkOffsetMapped + ((long) layerBaseChunk << 4);
+                    long gpuIndirectBase = indirectMapped + (long) layerBaseCmd * 20L;
+                    MemoryUtil.memCopy(hostOffsetBase, gpuOffsetBase, (long) layerDrawn << 4);
+                    MemoryUtil.memCopy(hostIndirectBase, gpuIndirectBase, (long) layerDrawn * 20L);
 
                     vkCmdBindVertexBuffers(commandBuffer, 0,
                             stack.longs(arenaPool.slab(0).buffer().handle()),
                             stack.mallocLong(1).put(0, 0L));
                     vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
-                            startCmdIndex * 20L, drawn, 20);
+                            (long) layerBaseCmd * 20L, layerDrawn, 20);
                 }
+                drawn = layerDrawn;
             } else {
                 // Multi-slab path: bucket visible slices by slabIndex
                 ensureSlabBuckets(slabCount);
@@ -509,69 +678,96 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     slabBuckets[slice.slabIndex()].add(i);
                 }
 
+                int layerDrawn = 0;
                 for (int s = 0; s < slabCount; s++) {
                     IntArrayList bucket = slabBuckets[s];
                     if (bucket.isEmpty()) {
                         continue;
                     }
-                    int startCmdIndex = indirectCursor;
-                    int startChunkId = chunkCursor;
+                    int startCmdIndex = layerBaseCmd + layerDrawn;
+                    int startChunkId = layerBaseChunk + layerDrawn;
                     int bucketSize = bucket.size();
                     int slabDrawn = 0;
                     for (int k = 0; k < bucketSize; k++) {
-                        if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
-                            LOGGER.warn("Indirect draw buffer capacity ({}) reached in layer {}; skipping remaining slices",
-                                    MAX_INDIRECT_CAPACITY, layer);
+                        if (layerDrawn >= LAYER_CAPACITY) {
+                            LOGGER.warn("Layer indirect buffer capacity ({}) reached in layer {}; skipping remaining slices",
+                                    LAYER_CAPACITY, layer);
                             break;
                         }
                         TerrainSlice slice = renderSlices.get(bucket.getInt(k));
 
-                        int chunkId = chunkCursor++;
-                        long offsetAddr = hostOffsetBase + ((long) chunkId << 4);
+                        int chunkId = startChunkId + slabDrawn;
+                        long offsetAddr = hostOffsetBase + ((long) layerDrawn << 4);
                         MemoryUtil.memPutFloat(offsetAddr, (float) slice.originX());
                         MemoryUtil.memPutFloat(offsetAddr + 4, (float) slice.originY());
                         MemoryUtil.memPutFloat(offsetAddr + 8, (float) slice.originZ());
                         MemoryUtil.memPutFloat(offsetAddr + 12, 0.0f);
 
-                        int cmdIndex = indirectCursor++;
-                        long cmdAddr = hostIndirectBase + (long) cmdIndex * 20L;
+                        long cmdAddr = hostIndirectBase + (long) layerDrawn * 20L;
                         MemoryUtil.memPutInt(cmdAddr, slice.indexCount());
                         MemoryUtil.memPutInt(cmdAddr + 4, 1);
                         MemoryUtil.memPutInt(cmdAddr + 8, 0);
                         MemoryUtil.memPutInt(cmdAddr + 12, slice.vertexOffset());
                         MemoryUtil.memPutInt(cmdAddr + 16, chunkId);
                         slabDrawn++;
+                        layerDrawn++;
                     }
                     bucket.clear();
 
                     if (slabDrawn > 0) {
-                        MemoryUtil.memCopy(hostOffsetBase + ((long) startChunkId << 4),
-                                chunkOffsetMapped + ((long) startChunkId << 4), (long) slabDrawn << 4);
-                        MemoryUtil.memCopy(hostIndirectBase + (long) startCmdIndex * 20L,
-                                indirectMapped + (long) startCmdIndex * 20L, (long) slabDrawn * 20L);
+                        if (batchCount < MAX_BATCHES_PER_LAYER) {
+                            stagingBatchSlab[layer][batchCount] = s;
+                            stagingBatchFirstCmd[layer][batchCount] = startCmdIndex;
+                            stagingBatchCmdCount[layer][batchCount] = slabDrawn;
+                            batchCount++;
+                        }
+                        long gpuOffsetBase = chunkOffsetMapped + ((long) startChunkId << 4);
+                        long gpuIndirectBase = indirectMapped + (long) startCmdIndex * 20L;
+                        long srcOffset = (long) (startChunkId - layerBaseChunk) << 4;
+                        long srcIndirect = (long) (startCmdIndex - layerBaseCmd) * 20L;
+                        MemoryUtil.memCopy(hostOffsetBase + srcOffset, gpuOffsetBase, (long) slabDrawn << 4);
+                        MemoryUtil.memCopy(hostIndirectBase + srcIndirect, gpuIndirectBase, (long) slabDrawn * 20L);
 
                         vkCmdBindVertexBuffers(commandBuffer, 0,
                                 stack.longs(arenaPool.slab(s).buffer().handle()),
                                 stack.mallocLong(1).put(0, 0L));
                         vkCmdDrawIndexedIndirect(commandBuffer, indirectBuffers[slot].handle(),
-                                startCmdIndex * 20L, slabDrawn, 20);
-                        drawn += slabDrawn;
+                                (long) startCmdIndex * 20L, slabDrawn, 20);
                     }
-                    if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
+                    if (layerDrawn >= LAYER_CAPACITY) {
                         for (int remaining = s + 1; remaining < slabCount; remaining++) {
                             slabBuckets[remaining].clear();
                         }
                         break;
                     }
                 }
+                drawn = layerDrawn;
             }
 
+            // Update both Tier 2 and Tier 1 caches
+            stagingBatchCount[layer] = batchCount;
+            stagingDrawnTotal[layer] = drawn;
+            stagingGeometryVersion[layer] = geometryVersion[layer];
+            stagingVisibilityHash[layer] = visHash;
+            stagingCacheValid[layer] = true;
+
+            slotBatchCount[slot][layer] = batchCount;
+            for (int b = 0; b < batchCount; b++) {
+                slotBatchSlab[slot][layer][b] = stagingBatchSlab[layer][b];
+                slotBatchFirstCmd[slot][layer][b] = stagingBatchFirstCmd[layer][b];
+                slotBatchCmdCount[slot][layer][b] = stagingBatchCmdCount[layer][b];
+            }
+            slotDrawnTotal[slot][layer] = drawn;
+            slotGeometryVersion[slot][layer] = geometryVersion[layer];
+            slotVisibilityHash[slot][layer] = visHash;
+            slotCacheValid[slot][layer] = true;
+
+            drawCount += drawn;
             if (++logFrameCounter % 300 == 1 && list.size() > 0) {
-                LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (culled: {})",
+                LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: REBUILD MISS, culled: {})",
                         layer, drawn, list.size(), culled);
             }
         }
-        drawCount += drawn;
     }
 
     /**
@@ -681,13 +877,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 arenaPool.retire(old.allocation(), 0);
             }
             if (chunk.quadCount() > 0) {
-                int byteSize = chunk.quadCount() * TerrainVertexFormat.VERTICES_PER_QUAD * TerrainVertexFormat.STRIDE;
+                int byteSize = chunk.quadCount() * TerrainVertexFormat.COMPACT_QUAD_SIZE;
                 TerrainArenaPool.Allocation alloc = arenaPool.allocate(byteSize);
-                arenaPool.upload(alloc, chunk.vertices(), byteSize);
+                if (chunk.vertices().length == byteSize) {
+                    arenaPool.upload(alloc, chunk.vertices(), byteSize);
+                } else {
+                    arenaPool.uploadCompact(alloc, chunk.vertices(), chunk.quadCount());
+                }
                 TerrainSlice slice = new TerrainSlice(
                         alloc.slabIndex(),
                         alloc.offset(),
-                        alloc.offset() / TerrainVertexFormat.STRIDE,
+                        alloc.offset() / TerrainVertexFormat.COMPACT_STRIDE,
                         chunk.quadCount(),
                         chunk.quadCount() * 6,
                         chunk.chunkX(), chunk.chunkY(), chunk.chunkZ(),
@@ -698,6 +898,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             }
         }
         arenaPool.releaseSlot(0);
+        invalidateAllCaches();
         source = activeSlices.size() + " chunk layers";
     }
 

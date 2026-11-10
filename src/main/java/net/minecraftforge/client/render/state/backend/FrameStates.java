@@ -101,12 +101,45 @@ public final class FrameStates {
         return recordTerrainLayer(layer, 0.0, 0.0, 0.0);
     }
 
-    private static final it.unimi.dsi.fastutil.longs.LongArrayList CHUNK_LIST =
-            new it.unimi.dsi.fastutil.longs.LongArrayList(2048);
+    private static final it.unimi.dsi.fastutil.longs.LongArrayList[] LAYER_CHUNK_LISTS = new it.unimi.dsi.fastutil.longs.LongArrayList[] {
+            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
+            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
+            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
+            new it.unimi.dsi.fastutil.longs.LongArrayList(4096)
+    };
+    private static int nextLayerListIdx = 0;
+
+    public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList(int layer) {
+        if (layer >= 0 && layer < LAYER_CHUNK_LISTS.length) {
+            it.unimi.dsi.fastutil.longs.LongArrayList list = LAYER_CHUNK_LISTS[layer];
+            list.clear();
+            return list;
+        }
+        return beginLayerChunkList();
+    }
 
     public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList() {
-        CHUNK_LIST.clear();
-        return CHUNK_LIST;
+        it.unimi.dsi.fastutil.longs.LongArrayList list = LAYER_CHUNK_LISTS[nextLayerListIdx];
+        nextLayerListIdx = (nextLayerListIdx + 1) & 3;
+        list.clear();
+        return list;
+    }
+
+    public static it.unimi.dsi.fastutil.longs.LongArrayList[] getLayerChunkLists() {
+        return LAYER_CHUNK_LISTS;
+    }
+
+    public static it.unimi.dsi.fastutil.longs.LongArrayList getLayerChunkList(int layer) {
+        if (layer >= 0 && layer < LAYER_CHUNK_LISTS.length) {
+            return LAYER_CHUNK_LISTS[layer];
+        }
+        return null;
+    }
+
+    public static void clearLayerChunkLists() {
+        for (int l = 0; l < LAYER_CHUNK_LISTS.length; l++) {
+            LAYER_CHUNK_LISTS[l].clear();
+        }
     }
 
     /**

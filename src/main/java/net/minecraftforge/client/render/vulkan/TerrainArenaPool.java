@@ -27,7 +27,7 @@ import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 public final class TerrainArenaPool implements AutoCloseable {
 
     public static final int DEFAULT_SLAB_CAPACITY = 128 * 1024 * 1024; // 128 MB per slab
-    public static final int QUAD_ALIGNMENT = TerrainVertexFormat.VERTICES_PER_QUAD * TerrainVertexFormat.STRIDE; // 112 bytes
+    public static final int QUAD_ALIGNMENT = TerrainVertexFormat.COMPACT_QUAD_SIZE; // 64 bytes (16 bytes per vertex)
     public static final int MAX_STATIC_QUADS = 131_072; // 131,072 quads (524,288 vertices), supports any chunk layer
 
     public record Allocation(int slabIndex, BlockAllocator.Block block) {
@@ -154,12 +154,21 @@ public final class TerrainArenaPool implements AutoCloseable {
     }
 
     /**
-     * Copies vertex bytes into the allocated slab slot.
+     * Copies raw vertex bytes into the allocated slab slot without conversion.
      */
     public void upload(Allocation alloc, byte[] vertices, int length) {
         Slab slab = slabs.get(alloc.slabIndex());
         ByteBuffer dest = MemoryUtil.memByteBuffer(slab.buffer().mappedAddress() + alloc.offset(), length);
         dest.put(vertices, 0, length);
+    }
+
+    /**
+     * Compacts raw 28-byte vertices into the 16-byte GPU layout directly inside the mapped slab memory.
+     */
+    public void uploadCompact(Allocation alloc, byte[] rawVertices, int quadCount) {
+        Slab slab = slabs.get(alloc.slabIndex());
+        long targetAddress = slab.buffer().mappedAddress() + alloc.offset();
+        TerrainVertexFormat.compact(rawVertices, quadCount, targetAddress);
     }
 
     /**

@@ -42,6 +42,7 @@ import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
 import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_BACK_BIT;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_SINT;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32B32_SFLOAT;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32_SFLOAT;
@@ -204,12 +205,26 @@ final class VulkanPipeline implements AutoCloseable {
     }
 
     /**
+     * Builds a terrain pipeline with the compact 16-byte vertex layout.
+     */
+    static VulkanPipeline createTerrain(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                        int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state) {
+        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state, true);
+    }
+
+    /**
      * Builds a pipeline against an existing pipeline layout.
      *
      * @param pipelineLayout the shared layout, or {@code VK_NULL_HANDLE} to create a private one
      */
     static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
                                  int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state) {
+        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state, false);
+    }
+
+    private static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                         int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state,
+                                         boolean isTerrain) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             boolean ownsLayout = pipelineLayout == VK_NULL_HANDLE;
             long layout = pipelineLayout;
@@ -232,7 +247,7 @@ final class VulkanPipeline implements AutoCloseable {
 
             long pipeline = 0L;
             try {
-                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, stack);
+                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, isTerrain, stack);
                 return new VulkanPipeline(device, layout, ownsLayout, pipeline);
             } catch (RuntimeException e) {
                 if (pipeline != 0L) {
@@ -247,7 +262,8 @@ final class VulkanPipeline implements AutoCloseable {
     }
 
     private static long createPipeline(VkDevice device, long layout, VulkanShader vertex, VulkanShader fragment,
-                                       int colorFormat, int depthFormat, PipelineState state, MemoryStack stack) {
+                                       int colorFormat, int depthFormat, PipelineState state, boolean isTerrain,
+                                       MemoryStack stack) {
         VkPipelineShaderStageCreateInfo.Buffer stages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
         stages.get(0)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
@@ -261,19 +277,34 @@ final class VulkanPipeline implements AutoCloseable {
                 .pName(stack.UTF8("main"));
 
         VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(1, stack);
-        binding.get(0).binding(0).stride(VERTEX_STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+        binding.get(0).binding(0).stride(isTerrain ? TerrainVertexFormat.COMPACT_STRIDE : VERTEX_STRIDE)
+                .inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
-        // The offsets are TerrainVertexFormat's, which are the ones VboRenderList.setupArrayPointers gives GL.
-        // R16G16_UNORM for the lightmap means the shader sees 0..1 without the CPU touching the shorts.
-        VkVertexInputAttributeDescription.Buffer attributes = VkVertexInputAttributeDescription.calloc(4, stack);
-        attributes.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT)
-                .offset(TerrainVertexFormat.POSITION_OFFSET);
-        attributes.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
-                .offset(TerrainVertexFormat.COLOR_OFFSET);
-        attributes.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT)
-                .offset(TerrainVertexFormat.UV_OFFSET);
-        attributes.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_UNORM)
-                .offset(TerrainVertexFormat.LIGHTMAP_OFFSET);
+        VkVertexInputAttributeDescription.Buffer attributes;
+        if (isTerrain) {
+            // Compact 16-byte terrain format:
+            // 0: inPosAndLight (3x s16 pos, 2x u8 light) -> R16G16B16A16_SINT (offset 0)
+            // 1: inUv (2x u16 unorm) -> R16G16_UNORM (offset 8)
+            // 2: inColor (4x u8 unorm) -> R8G8B8A8_UNORM (offset 12)
+            attributes = VkVertexInputAttributeDescription.calloc(3, stack);
+            attributes.get(0).location(0).binding(0).format(VK_FORMAT_R16G16B16A16_SINT)
+                    .offset(TerrainVertexFormat.COMPACT_POSITION_LIGHT_OFFSET);
+            attributes.get(1).location(1).binding(0).format(VK_FORMAT_R16G16_UNORM)
+                    .offset(TerrainVertexFormat.COMPACT_UV_OFFSET);
+            attributes.get(2).location(2).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
+                    .offset(TerrainVertexFormat.COMPACT_COLOR_OFFSET);
+        } else {
+            // Raw 28-byte format (stream draws)
+            attributes = VkVertexInputAttributeDescription.calloc(4, stack);
+            attributes.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT)
+                    .offset(TerrainVertexFormat.POSITION_OFFSET);
+            attributes.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
+                    .offset(TerrainVertexFormat.COLOR_OFFSET);
+            attributes.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT)
+                    .offset(TerrainVertexFormat.UV_OFFSET);
+            attributes.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_UNORM)
+                    .offset(TerrainVertexFormat.LIGHTMAP_OFFSET);
+        }
 
         VkPipelineVertexInputStateCreateInfo vertexInput = VkPipelineVertexInputStateCreateInfo.calloc(stack)
                 .sType$Default()

@@ -88,17 +88,9 @@ void main() {
     // short and skyLight to the second, which is the opposite of the argument order of that method.
     //
     // Vanilla's lightmap coordinates are in 0..240 (blockLight * 16, skyLight * 16).
-    // The vertex attribute format is R16G16_UNORM, so the raw 16-bit value is scaled to 0..1 by dividing by 65535.
     // In GL, the lightmap matrix mapped coord -> (coord + 8.0) / 256.0 to land in the center of 16x16 texels.
-    // Geometry without lightmap (e.g. GUI, text) arrives with 0xFFFF (UNORM 1.0), which gets full brightness.
-    vec3 light;
-    if (inLightmap.x > 0.5 || inLightmap.y > 0.5) {
-        light = vec3(1.0);
-    } else {
-        vec2 rawCoord = inLightmap * 65535.0;
-        vec2 lightUv = (rawCoord + 8.0) / 256.0;
-        light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
-    }
+    vec2 lightUv = (inLightmap + 8.0) / 256.0;
+    vec3 light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
 
     vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
     if (pc.fogMode > 0) {

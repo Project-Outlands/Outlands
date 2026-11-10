@@ -57,8 +57,8 @@ public final class ChunkMeshCapture {
     /** Whether captures are being kept. */
     private static volatile boolean enabled;
 
-    /** Latest capture per (chunk, layer). */
-    private static final Map<Key, Captured> CURRENT = new ConcurrentHashMap<>();
+    /** Active chunk layer keys on the GPU backend (does NOT retain heavy vertex bytes in heap). */
+    private static final java.util.Set<Key> ACTIVE_KEYS = ConcurrentHashMap.newKeySet();
 
     /** Incremental capture event queue consumed by the render thread. */
     private static final Queue<CaptureEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<>();
@@ -91,7 +91,7 @@ public final class ChunkMeshCapture {
     public static void disable() {
         enabled = false;
         ChunkLifecycle.unregister(LIFECYCLE_LISTENER);
-        CURRENT.clear();
+        ACTIVE_KEYS.clear();
         PENDING_EVENTS.clear();
     }
 
@@ -101,7 +101,7 @@ public final class ChunkMeshCapture {
 
     /** Clears all current meshes and notifies the backend to reset its arena allocations. */
     public static void clear() {
-        CURRENT.clear();
+        ACTIVE_KEYS.clear();
         PENDING_EVENTS.clear();
         if (enabled) {
             PENDING_EVENTS.add(CaptureEvent.clear());
@@ -133,7 +133,7 @@ public final class ChunkMeshCapture {
         }
         for (BlockRenderLayer layer : BlockRenderLayer.values()) {
             Key key = new Key(x, y, z, layer);
-            if (CURRENT.remove(key) != null) {
+            if (ACTIVE_KEYS.remove(key)) {
                 PENDING_EVENTS.add(CaptureEvent.remove(key));
             }
         }
@@ -154,9 +154,12 @@ public final class ChunkMeshCapture {
         }
     }
 
-    /** Every capture that is still current, one per chunk and layer. Read by the render thread. */
+    /**
+     * @deprecated Meshes are streamed incrementally to the GPU backend and not retained in heap.
+     */
+    @Deprecated
     public static java.util.List<Captured> current() {
-        return java.util.List.copyOf(CURRENT.values());
+        return java.util.List.of();
     }
 
     /** How many captures have ever been taken. */
@@ -182,7 +185,7 @@ public final class ChunkMeshCapture {
             Key key = new Key(chunkX, chunkY, chunkZ, layer);
 
             if (quadCount == 0) {
-                if (CURRENT.remove(key) != null) {
+                if (ACTIVE_KEYS.remove(key)) {
                     PENDING_EVENTS.add(CaptureEvent.remove(key));
                     captured.incrementAndGet();
                 }
@@ -191,12 +194,10 @@ public final class ChunkMeshCapture {
 
             java.nio.ByteBuffer source = buffer.getByteBuffer();
             source.position(0);
-            byte[] vertices = new byte[source.remaining()];
-            source.get(vertices);
-            source.position(0);
+            byte[] compactVertices = net.minecraftforge.client.render.vulkan.TerrainVertexFormat.compact(source, quadCount);
 
-            Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, vertices, quadCount);
-            CURRENT.put(key, capture);
+            Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, compactVertices, quadCount);
+            ACTIVE_KEYS.add(key);
             PENDING_EVENTS.add(CaptureEvent.update(key, capture));
             captured.incrementAndGet();
 
@@ -205,7 +206,7 @@ public final class ChunkMeshCapture {
                 for (BlockRenderLayer l : BlockRenderLayer.values()) {
                     if (l != layer && compiled.isLayerEmpty(l)) {
                         Key emptyKey = new Key(chunkX, chunkY, chunkZ, l);
-                        if (CURRENT.remove(emptyKey) != null) {
+                        if (ACTIVE_KEYS.remove(emptyKey)) {
                             PENDING_EVENTS.add(CaptureEvent.remove(emptyKey));
                         }
                     }
@@ -221,7 +222,15 @@ public final class ChunkMeshCapture {
 
     /** Diagnostics: how many captures were taken, and how many failed. */
     public static String statistics() {
-        return "captured=" + captured.get() + " failed=" + dropped.get() + " current=" + CURRENT.size()
+        return "captured=" + captured.get() + " failed=" + dropped.get() + " active=" + ACTIVE_KEYS.size()
                 + " pending=" + PENDING_EVENTS.size();
+    }
+
+    static void markLayerActiveForTest(int x, int y, int z, BlockRenderLayer layer) {
+        ACTIVE_KEYS.add(new Key(x, y, z, layer));
+    }
+
+    static boolean isLayerActive(int x, int y, int z, BlockRenderLayer layer) {
+        return ACTIVE_KEYS.contains(new Key(x, y, z, layer));
     }
 }

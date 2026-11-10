@@ -9,6 +9,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VulkanIndirectDrawTest {
@@ -159,6 +163,97 @@ class VulkanIndirectDrawTest {
         assertEquals(far, list.get(0), "furthest translucent slice must be drawn first");
         assertEquals(mid, list.get(1), "middle translucent slice must be drawn second");
         assertEquals(near, list.get(2), "nearest translucent slice must be drawn last");
+    }
+
+    @Test
+    void layerPartitioningAndCapacities() {
+        assertEquals(4, VulkanTerrainLayer.NUM_LAYERS);
+        assertEquals(16_384, VulkanTerrainLayer.LAYER_CAPACITY);
+        assertEquals(VulkanTerrainLayer.MAX_INDIRECT_CAPACITY,
+                VulkanTerrainLayer.NUM_LAYERS * VulkanTerrainLayer.LAYER_CAPACITY);
+
+        for (int layer = 0; layer < VulkanTerrainLayer.NUM_LAYERS; layer++) {
+            long layerOffsetByte = (long) (layer * VulkanTerrainLayer.LAYER_CAPACITY) * 16L;
+            long layerIndirectByte = (long) (layer * VulkanTerrainLayer.LAYER_CAPACITY) * 20L;
+            // std430 vec4 alignment is 16 bytes
+            assertEquals(0, layerOffsetByte % 16, "layer " + layer + " offset base must be 16-byte aligned");
+            // indirect command alignment is 4 bytes
+            assertEquals(0, layerIndirectByte % 4, "layer " + layer + " indirect base must be 4-byte aligned");
+        }
+    }
+
+    @Test
+    void visibilityHashingProducesDeterministicAndDistinctHashes() {
+        it.unimi.dsi.fastutil.longs.LongArrayList listA = new it.unimi.dsi.fastutil.longs.LongArrayList();
+        listA.add(VulkanTerrainLayer.chunkPosKey(0, 0, 0));
+        listA.add(VulkanTerrainLayer.chunkPosKey(16, 0, 0));
+        listA.add(VulkanTerrainLayer.chunkPosKey(32, 0, 0));
+
+        it.unimi.dsi.fastutil.longs.LongArrayList listB = new it.unimi.dsi.fastutil.longs.LongArrayList();
+        listB.add(VulkanTerrainLayer.chunkPosKey(0, 0, 0));
+        listB.add(VulkanTerrainLayer.chunkPosKey(16, 0, 0));
+        listB.add(VulkanTerrainLayer.chunkPosKey(32, 0, 0));
+
+        it.unimi.dsi.fastutil.longs.LongArrayList listDifferentOrder = new it.unimi.dsi.fastutil.longs.LongArrayList();
+        listDifferentOrder.add(VulkanTerrainLayer.chunkPosKey(32, 0, 0));
+        listDifferentOrder.add(VulkanTerrainLayer.chunkPosKey(16, 0, 0));
+        listDifferentOrder.add(VulkanTerrainLayer.chunkPosKey(0, 0, 0));
+
+        long hashA = VulkanTerrainLayer.hashVisibleChunks(listA);
+        long hashB = VulkanTerrainLayer.hashVisibleChunks(listB);
+        long hashOrder = VulkanTerrainLayer.hashVisibleChunks(listDifferentOrder);
+        long hashEmpty = VulkanTerrainLayer.hashVisibleChunks(new it.unimi.dsi.fastutil.longs.LongArrayList());
+        long hashNull = VulkanTerrainLayer.hashVisibleChunks(null);
+
+        assertEquals(hashA, hashB, "Identical chunk lists must produce identical hash");
+        assertNotEquals(hashA, hashOrder, "Chunk lists with different order must produce different hash (order matters for translucent/MDI)");
+        assertEquals(0L, hashEmpty);
+        assertEquals(0L, hashNull);
+        assertNotEquals(0L, hashA);
+    }
+
+    @Test
+    void frustumHashingDetectsCameraMovement() {
+        float[] planes = new float[24];
+        java.util.Arrays.fill(planes, 1.0f);
+
+        long h1 = VulkanTerrainLayer.hashFrustum(planes, 10.0, 64.0, 10.0);
+        long h2 = VulkanTerrainLayer.hashFrustum(planes, 10.0, 64.0, 10.0);
+        long h3 = VulkanTerrainLayer.hashFrustum(planes, 10.5, 64.0, 10.0);
+        long h4 = VulkanTerrainLayer.hashFrustum(planes, 10.0, 64.0, 10.1);
+
+        assertEquals(h1, h2, "Same camera position and planes must produce identical hash");
+        assertNotEquals(h1, h3, "Movement > 0.1 block must change hash");
+        assertNotEquals(h1, h4, "Movement in Z must change hash");
+    }
+
+    @Test
+    void frameStatesPerLayerChunkListsAreIsolatedAndPooled() {
+        it.unimi.dsi.fastutil.longs.LongArrayList[] lists = new it.unimi.dsi.fastutil.longs.LongArrayList[4];
+        for (int layer = 0; layer < 4; layer++) {
+            lists[layer] = net.minecraftforge.client.render.state.backend.FrameStates.beginLayerChunkList(layer);
+            assertNotNull(lists[layer]);
+            assertTrue(lists[layer].isEmpty());
+            lists[layer].add(VulkanTerrainLayer.chunkPosKey(layer * 16, 0, 0));
+        }
+
+        // Verify each layer holds distinct instance and its own entry without clobbering
+        for (int layer = 0; layer < 4; layer++) {
+            assertEquals(1, lists[layer].size());
+            assertEquals(VulkanTerrainLayer.chunkPosKey(layer * 16, 0, 0), lists[layer].getLong(0));
+            for (int other = layer + 1; other < 4; other++) {
+                assertNotSame(lists[layer], lists[other]);
+            }
+        }
+
+        // Calling beginLayerChunkList clears the requested list and returns the exact same pooled instance
+        var list1Again = net.minecraftforge.client.render.state.backend.FrameStates.beginLayerChunkList(1);
+        assertSame(lists[1], list1Again);
+        assertTrue(list1Again.isEmpty());
+        // Other layers remain untouched
+        assertEquals(1, lists[0].size());
+        assertEquals(1, lists[2].size());
+        assertEquals(1, lists[3].size());
     }
 
     private static double cameraY(double y) {
