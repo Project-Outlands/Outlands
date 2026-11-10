@@ -241,16 +241,18 @@ public final class DrawState {
             this.fogEnd = 1.0f;
             this.fogDensity = 1.0f;
         }
+
     }
+
+    private static final DrawState SCRATCH_CURRENT = new DrawState();
 
     public static DrawState current() {
         var state = net.minecraftforge.client.render.state.backend.FrameStates.instance();
         if (state == null) {
             throw new IllegalStateException("no frame state installed: draws are being captured on the GL path");
         }
-        DrawState ds = new DrawState();
-        ds.captureFrom(state);
-        return ds;
+        SCRATCH_CURRENT.captureFrom(state);
+        return SCRATCH_CURRENT;
     }
 
     public float[] mvp() { return mvp; }

@@ -121,24 +121,25 @@ public final class FrameStates {
         return recordTerrainLayer(layer, viewX, viewY, viewZ, null);
     }
 
+    private static final org.joml.Matrix4f SCRATCH_VIEW = new org.joml.Matrix4f();
+    private static final org.joml.Matrix4f SCRATCH_MVP = new org.joml.Matrix4f();
+
     public static boolean recordTerrainLayer(int layer, double viewX, double viewY, double viewZ,
                                              it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks) {
         FrameState state = forNonGl();
         if (state == null) {
             return false;
         }
-        org.joml.Matrix4f view = new org.joml.Matrix4f(state.modelView())
-                .translate((float) -viewX, (float) -viewY, (float) -viewZ);
-        org.joml.Matrix4f mvp = new org.joml.Matrix4f(state.projection()).mul(view);
+        SCRATCH_VIEW.set(state.modelView()).translate((float) -viewX, (float) -viewY, (float) -viewZ);
+        SCRATCH_MVP.set(state.projection()).mul(SCRATCH_VIEW);
         float[] values = new float[16];
-        mvp.get(values);
+        SCRATCH_MVP.get(values);
         boolean fogEnabled = state.isEnabled(Capability.FOG);
         int fogMode = fogEnabled ? state.fogMode() : 0;
         float[] fogColor = state.fogColor();
-        it.unimi.dsi.fastutil.longs.LongArrayList chunksCopy = visibleChunks != null ? visibleChunks.clone() : null;
         return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(
                 layer, values, viewX, viewY, viewZ,
-                fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, chunksCopy);
+                fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, visibleChunks);
     }
 
     /**

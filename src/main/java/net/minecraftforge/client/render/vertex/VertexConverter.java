@@ -116,10 +116,12 @@ public final class VertexConverter {
                     + " vertices at stride " + inStride + ", the array has " + (source.length - sourceOffset));
         }
 
-        List<VertexLayout.Attribute> attributes = layout.attributes();
+        VertexLayout.Attribute[] attributes = layout.attributesArray();
+        int attrCount = attributes.length;
         VertexLayout.Attribute normalAttr = null;
         VertexLayout.Attribute colorAttr = null;
-        for (VertexLayout.Attribute attr : attributes) {
+        for (int i = 0; i < attrCount; i++) {
+            VertexLayout.Attribute attr = attributes[i];
             if (attr.usage() == VertexFormatElement.EnumUsage.NORMAL) {
                 normalAttr = attr;
             } else if (attr.usage() == VertexFormatElement.EnumUsage.COLOR) {
@@ -149,7 +151,8 @@ public final class VertexConverter {
             target.putFloat(base + UV_OFFSET + 4, 0.0F);
             target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
 
-            for (VertexLayout.Attribute attribute : attributes) {
+            for (int i = 0; i < attrCount; i++) {
+                VertexLayout.Attribute attribute = attributes[i];
                 int at = sourceBase + attribute.offset();
                 switch (attribute.usage()) {
                     case POSITION -> copyPosition(source, at, target, base, attribute);
@@ -231,10 +234,12 @@ public final class VertexConverter {
         }
 
         ByteBuffer in = source.duplicate().order(ByteOrder.nativeOrder());
-        List<VertexLayout.Attribute> attributes = layout.attributes();
+        VertexLayout.Attribute[] attributes = layout.attributesArray();
+        int attrCount = attributes.length;
         VertexLayout.Attribute normalAttr = null;
         VertexLayout.Attribute colorAttr = null;
-        for (VertexLayout.Attribute attr : attributes) {
+        for (int i = 0; i < attrCount; i++) {
+            VertexLayout.Attribute attr = attributes[i];
             if (attr.usage() == VertexFormatElement.EnumUsage.NORMAL) {
                 normalAttr = attr;
             } else if (attr.usage() == VertexFormatElement.EnumUsage.COLOR) {
@@ -270,7 +275,8 @@ public final class VertexConverter {
             target.putFloat(base + UV_OFFSET + 4, 0.0F);
             target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
 
-            for (VertexLayout.Attribute attribute : attributes) {
+            for (int i = 0; i < attrCount; i++) {
+                VertexLayout.Attribute attribute = attributes[i];
                 int at = sourceBase + attribute.offset();
                 switch (attribute.usage()) {
                     case POSITION -> copyPosition(in, at, target, base, attribute);

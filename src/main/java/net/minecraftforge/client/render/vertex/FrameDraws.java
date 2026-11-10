@@ -40,6 +40,7 @@ public final class FrameDraws {
         private int mode;
         private int vertexCount;
         private byte[] vertices;
+        private byte[] ownedBuffer;
         private final DrawState state;
 
         public Draw() {
@@ -60,6 +61,21 @@ public final class FrameDraws {
             this.mode = mode;
             this.vertexCount = vertexCount;
             this.vertices = vertices;
+            this.state.copyFrom(stateSource);
+        }
+
+        public void set(VertexLayout layout, int mode, int vertexCount, ByteBuffer data, int bytes, DrawState stateSource) {
+            this.layout = layout;
+            this.mode = mode;
+            this.vertexCount = vertexCount;
+            if (this.ownedBuffer == null || this.ownedBuffer.length < bytes) {
+                this.ownedBuffer = new byte[Math.max(bytes, this.ownedBuffer == null ? 256 : this.ownedBuffer.length * 2)];
+            }
+            int oldPos = data.position();
+            data.position(0);
+            data.get(this.ownedBuffer, 0, bytes);
+            data.position(oldPos);
+            this.vertices = this.ownedBuffer;
             this.state.copyFrom(stateSource);
         }
 
@@ -178,13 +194,9 @@ public final class FrameDraws {
             throw new IllegalArgumentException("a draw of " + vertexCount + " vertices at stride " + layout.stride()
                     + " needs " + bytes + " bytes, the buffer has " + data.limit());
         }
-        byte[] copy = new byte[bytes];
-        ByteBuffer view = data.duplicate();
-        view.position(0);
-        view.get(copy, 0, bytes);
         synchronized (LOCK) {
             Draw draw = obtainDraw();
-            draw.set(layout, mode, vertexCount, copy, state);
+            draw.set(layout, mode, vertexCount, data, bytes, state);
             ACTIVE_DRAWS.add(draw);
         }
         return true;

@@ -118,11 +118,13 @@ public final class VertexLayout {
     private final VertexFormat source;
     private final int stride;
     private final List<Attribute> attributes;
+    private final Attribute[] attributesArray;
 
     private VertexLayout(VertexFormat source, int stride, List<Attribute> attributes) {
         this.source = source;
         this.stride = stride;
         this.attributes = List.copyOf(attributes);
+        this.attributesArray = this.attributes.toArray(new Attribute[0]);
     }
 
     private static final Map<VertexFormat, VertexLayout> CACHE = new ConcurrentHashMap<>();
@@ -182,6 +184,11 @@ public final class VertexLayout {
     /** Every element, including padding, in declaration order. */
     public List<Attribute> attributes() {
         return attributes;
+    }
+
+    /** Every element as a pre-allocated array for zero-allocation indexed iteration. */
+    public Attribute[] attributesArray() {
+        return attributesArray;
     }
 
     /** Only the elements a shader receives. */

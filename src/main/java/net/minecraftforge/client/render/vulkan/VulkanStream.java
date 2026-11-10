@@ -177,7 +177,9 @@ final class VulkanStream implements AutoCloseable {
         if (lightmapTexture != 0) {
             resolve(lightmapTexture, commandBuffer, slot);
         }
-        for (FrameDraws.Operation op : ops) {
+        int opsSize = ops.size();
+        for (int i = 0; i < opsSize; i++) {
+            FrameDraws.Operation op = ops.get(i);
             if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
                 resolve(draw.state().texture(), commandBuffer, slot);
             } else if (op instanceof FrameDraws.FramebufferCopy copy) {
@@ -305,14 +307,16 @@ final class VulkanStream implements AutoCloseable {
         }
 
         if (totalVertexBytes > 0) {
+            hostVboStaging.position(0);
             org.lwjgl.system.MemoryUtil.memCopy(
-                    org.lwjgl.system.MemoryUtil.memAddress(hostVboStaging),
+                    org.lwjgl.system.MemoryUtil.memAddress0(hostVboStaging),
                     vertexBuffers[slot].mappedAddress(),
                     totalVertexBytes);
         }
         if (totalIndexBytes > 0) {
+            hostIboStaging.position(0);
             org.lwjgl.system.MemoryUtil.memCopy(
-                    org.lwjgl.system.MemoryUtil.memAddress(hostIboStaging),
+                    org.lwjgl.system.MemoryUtil.memAddress0(hostIboStaging),
                     indexBuffers[slot].mappedAddress(),
                     totalIndexBytes);
         }
