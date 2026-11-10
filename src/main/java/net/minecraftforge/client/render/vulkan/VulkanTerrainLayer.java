@@ -77,6 +77,21 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
     /** Scratch for the 6 frustum planes (6 planes * 4 components = 24 floats). */
     private final float[] frustumPlanes = new float[24];
+    private final List<TerrainSlice> translucentSortedList = new ArrayList<>();
+    private double cameraX, cameraY, cameraZ;
+    private final java.util.Comparator<TerrainSlice> translucentComparator = (a, b) -> {
+        double dxA = a.originX() + 8.0 - cameraX;
+        double dyA = a.originY() + 8.0 - cameraY;
+        double dzA = a.originZ() + 8.0 - cameraZ;
+        double distA = dxA * dxA + dyA * dyA + dzA * dzA;
+
+        double dxB = b.originX() + 8.0 - cameraX;
+        double dyB = b.originY() + 8.0 - cameraY;
+        double dzB = b.originZ() + 8.0 - cameraZ;
+        double distB = dxB * dxB + dyB * dyB + dzB * dzB;
+
+        return Double.compare(distB, distA);
+    };
 
     private VulkanTerrainLayer(VkDevice device, VulkanContext context, VulkanPipeline pipeline,
                                VulkanPipeline translucentPipeline,
@@ -304,6 +319,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      * Records one render layer's chunks, at the point in the frame where the game asked for that layer.
      */
     void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer) {
+        recordLayer(commandBuffer, slot, cameraMatrix, layer, 0.0, 0.0, 0.0);
+    }
+
+    /**
+     * Records one render layer's chunks with camera viewpoint coordinates.
+     */
+    void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer,
+                     double viewX, double viewY, double viewZ) {
         if (arenaPool == null || layer < 0 || layer >= layerSlices.length) {
             return;
         }
@@ -315,8 +338,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         int drawn = 0;
         int culled = 0;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VulkanPipeline activePipeline = layer == net.minecraft.util.BlockRenderLayer.TRANSLUCENT.ordinal()
-                    ? translucentPipeline : pipeline;
+            boolean isTranslucent = layer == net.minecraft.util.BlockRenderLayer.TRANSLUCENT.ordinal();
+            VulkanPipeline activePipeline = isTranslucent ? translucentPipeline : pipeline;
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline.handle());
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline.layout(), 0,
                     stack.longs(resolvedTexture, descriptors.lightmapSet(slot)), null);
@@ -345,17 +368,44 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             long chunkOffsetMapped = chunkOffsetBuffers[slot].mappedAddress();
             int slabCount = arenaPool.slabCount();
 
-            if (slabCount <= 1) {
-                // Fast path: All slices in slab 0 (typical case)
-                int startCmdIndex = indirectCursor;
+            List<TerrainSlice> renderSlices;
+            int renderSlicesCount;
+
+            if (isTranslucent) {
+                this.cameraX = viewX;
+                this.cameraY = viewY;
+                this.cameraZ = viewZ;
+                translucentSortedList.clear();
                 for (int i = 0; i < layerSlicesCount; i++) {
                     TerrainSlice slice = list.get(i);
-                    // Frustum cull chunks outside the view cone: [origin - 1, origin + 17] covers the 16x16x16 chunk
-                    // plus a 1-block margin for protruding geometry (torches, ladders, fences).
                     if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
                             slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
                         culled++;
                         continue;
+                    }
+                    translucentSortedList.add(slice);
+                }
+                translucentSortedList.sort(translucentComparator);
+                renderSlices = translucentSortedList;
+                renderSlicesCount = translucentSortedList.size();
+            } else {
+                renderSlices = list;
+                renderSlicesCount = layerSlicesCount;
+            }
+
+            if (slabCount <= 1) {
+                // Fast path: All slices in slab 0 (typical case)
+                int startCmdIndex = indirectCursor;
+                for (int i = 0; i < renderSlicesCount; i++) {
+                    TerrainSlice slice = renderSlices.get(i);
+                    if (!isTranslucent) {
+                        // Frustum cull chunks outside the view cone: [origin - 1, origin + 17] covers the 16x16x16 chunk
+                        // plus a 1-block margin for protruding geometry (torches, ladders, fences).
+                        if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
+                                slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
+                            culled++;
+                            continue;
+                        }
                     }
 
                     if (indirectCursor >= MAX_INDIRECT_CAPACITY) {
@@ -392,12 +442,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             } else {
                 // Multi-slab path: bucket visible slices by slabIndex
                 ensureSlabBuckets(slabCount);
-                for (int i = 0; i < layerSlicesCount; i++) {
-                    TerrainSlice slice = list.get(i);
-                    if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
-                            slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
-                        culled++;
-                        continue;
+                for (int i = 0; i < renderSlicesCount; i++) {
+                    TerrainSlice slice = renderSlices.get(i);
+                    if (!isTranslucent) {
+                        if (!isBoxInFrustum(slice.originX() - 1.0f, slice.originY() - 1.0f, slice.originZ() - 1.0f,
+                                slice.originX() + 17.0f, slice.originY() + 17.0f, slice.originZ() + 17.0f)) {
+                            culled++;
+                            continue;
+                        }
                     }
                     slabBuckets[slice.slabIndex()].add(i);
                 }
@@ -416,7 +468,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                                     MAX_INDIRECT_CAPACITY, layer);
                             break;
                         }
-                        TerrainSlice slice = list.get(bucket.getInt(k));
+                        TerrainSlice slice = renderSlices.get(bucket.getInt(k));
 
                         int chunkId = chunkCursor++;
                         long offsetAddr = chunkOffsetMapped + ((long) chunkId << 4);

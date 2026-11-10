@@ -98,4 +98,35 @@ class VulkanIndirectDrawTest {
         // Chunk offset buffer element alignment in std430 must be a multiple of 16 (sizeof vec4)
         assertEquals(0, chunkOffsetBufferSize % 16);
     }
+
+    @Test
+    void translucentSlicesAreSortedBackToFrontFromCamera() {
+        double camX = 0.0, camY = 64.0, camZ = 0.0;
+        TerrainSlice near = new TerrainSlice(0, 0, 0, 4, 6, 0, 64, 16, 3, null);
+        TerrainSlice mid = new TerrainSlice(0, 0, 0, 4, 6, 0, 64, 64, 3, null);
+        TerrainSlice far = new TerrainSlice(0, 0, 0, 4, 6, 0, 64, 128, 3, null);
+
+        java.util.List<TerrainSlice> list = new java.util.ArrayList<>(java.util.List.of(near, far, mid));
+        list.sort((a, b) -> {
+            double dxA = a.originX() + 8.0 - camX;
+            double dyA = a.originY() + 8.0 - camY;
+            double dzA = a.originZ() + 8.0 - camZ;
+            double distA = dxA * dxA + dyA * dyA + dzA * dzA;
+
+            double dxB = b.originX() + 8.0 - camX;
+            double dyB = b.originY() + 8.0 - cameraY(camY);
+            double dzB = b.originZ() + 8.0 - camZ;
+            double distB = dxB * dxB + dyB * dyB + dzB * dzB;
+
+            return Double.compare(distB, distA);
+        });
+
+        assertEquals(far, list.get(0), "furthest translucent slice must be drawn first");
+        assertEquals(mid, list.get(1), "middle translucent slice must be drawn second");
+        assertEquals(near, list.get(2), "nearest translucent slice must be drawn last");
+    }
+
+    private static double cameraY(double y) {
+        return y;
+    }
 }

@@ -74,6 +74,12 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
 
     private DynamicTexture COLOR_TEX = null;
 
+    private byte[] baseBytes;
+    private ByteBuffer workingBuffer;
+    private float lastCloudR = -1.0F;
+    private float lastCloudG = -1.0F;
+    private float lastCloudB = -1.0F;
+
     private int texW;
     private int texH;
 
@@ -232,6 +238,11 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             GLAllocation.deleteDisplayLists(displayList);
             displayList = -1;
         }
+        baseBytes = null;
+        workingBuffer = null;
+        lastCloudR = -1.0F;
+        lastCloudG = -1.0F;
+        lastCloudB = -1.0F;
     }
 
     private void build()
@@ -250,13 +261,48 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
         {
             buffer.finishDrawing();
             buffer.reset();
-            vbo.bufferData(buffer.getByteBuffer());
+            ByteBuffer byteBuf = buffer.getByteBuffer();
+            if (!RenderBackendSelection.glPath())
+            {
+                baseBytes = new byte[byteBuf.limit()];
+                ByteBuffer slice = byteBuf.duplicate();
+                slice.position(0);
+                slice.get(baseBytes);
+                workingBuffer = GLAllocation.createDirectByteBuffer(baseBytes.length);
+                workingBuffer.put(baseBytes);
+                workingBuffer.flip();
+                lastCloudR = -1.0F;
+                lastCloudG = -1.0F;
+                lastCloudB = -1.0F;
+            }
+            vbo.bufferData(byteBuf);
         }
         else
         {
             tess.draw();
             GlStateManager.glEndList();
         }
+    }
+
+    private void updateCloudColors(float r, float g, float b)
+    {
+        if (baseBytes == null || workingBuffer == null || vbo == null)
+            return;
+        int stride = FORMAT.getSize();
+        int totalVertices = baseBytes.length / stride;
+        for (int i = 0; i < totalVertices; i++)
+        {
+            int base = i * stride;
+            int rawR = baseBytes[base + 20] & 0xFF;
+            int rawG = baseBytes[base + 21] & 0xFF;
+            int rawB = baseBytes[base + 22] & 0xFF;
+            workingBuffer.put(base + 20, (byte) (int) (rawR * r));
+            workingBuffer.put(base + 21, (byte) (int) (rawG * g));
+            workingBuffer.put(base + 22, (byte) (int) (rawB * b));
+        }
+        workingBuffer.position(0);
+        workingBuffer.limit(baseBytes.length);
+        vbo.bufferData(workingBuffer);
     }
 
     private int fullCoord(double coord, int scale)
@@ -371,6 +417,16 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             GlStateManager.bindTexture(COLOR_TEX.getGlTextureId());
             GlStateManager.enableTexture2D();
         }
+        else
+        {
+            if (r != lastCloudR || g != lastCloudG || b != lastCloudB)
+            {
+                updateCloudColors(r, g, b);
+                lastCloudR = r;
+                lastCloudG = g;
+                lastCloudB = b;
+            }
+        }
 
         // Bind the clouds texture last so the shader's sampler2D is correct.
         GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
@@ -399,15 +455,12 @@ public class CloudRenderer implements ISelectiveResourceReloadListener
             buffer.position(0);
         }
 
-        if (RenderBackendSelection.glPath())
-        {
-            // Depth pass to prevent insides rendering from the outside.
-            GlStateManager.colorMask(false, false, false, false);
-            if (OpenGlHelper.useVbo())
-                vbo.drawArrays(GL11.GL_QUADS);
-            else
-                GlStateManager.callList(displayList);
-        }
+        // Depth pass to prevent insides rendering from the outside.
+        GlStateManager.colorMask(false, false, false, false);
+        if (OpenGlHelper.useVbo())
+            vbo.drawArrays(GL11.GL_QUADS);
+        else
+            GlStateManager.callList(displayList);
 
         // Full render.
         if (!mc.gameSettings.anaglyph)

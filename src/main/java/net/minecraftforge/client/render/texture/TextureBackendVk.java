@@ -247,9 +247,13 @@ final class TextureBackendVk implements TextureBackend {
             return;
         }
         int[] copy = new int[width * height];
-        IntBuffer view = pixels.duplicate();
-        view.rewind();
-        view.get(copy, 0, Math.min(copy.length, view.remaining()));
+        if (pixels.hasArray()) {
+            System.arraycopy(pixels.array(), pixels.arrayOffset() + pixels.position(), copy, 0,
+                    Math.min(copy.length, pixels.remaining()));
+        } else {
+            IntBuffer view = pixels.duplicate();
+            view.get(copy, 0, Math.min(copy.length, view.remaining()));
+        }
         Level stored = new Level(width, height, copy);
         stored.hasData = true;
         texture.levels.put(level, stored);
@@ -269,11 +273,24 @@ final class TextureBackendVk implements TextureBackend {
                     + yOffset + " does not fit texture " + id + " level " + level + " (" + target.width + "x"
                     + target.height + ")");
         }
-        IntBuffer view = pixels.duplicate();
-        view.rewind();
-        for (int row = 0; row < height; row++) {
-            view.position(row * width);
-            view.get(target.pixels, (yOffset + row) * target.width + xOffset, width);
+        if (pixels.hasArray()) {
+            int[] src = pixels.array();
+            int baseSrcOffset = pixels.arrayOffset() + pixels.position();
+            if (width == target.width && xOffset == 0) {
+                System.arraycopy(src, baseSrcOffset, target.pixels, yOffset * target.width, width * height);
+            } else {
+                for (int row = 0; row < height; row++) {
+                    System.arraycopy(src, baseSrcOffset + row * width, target.pixels,
+                            (yOffset + row) * target.width + xOffset, width);
+                }
+            }
+        } else {
+            IntBuffer view = pixels.duplicate();
+            int pos = view.position();
+            for (int row = 0; row < height; row++) {
+                view.position(pos + row * width);
+                view.get(target.pixels, (yOffset + row) * target.width + xOffset, width);
+            }
         }
         target.hasData = true;
         if (level == 0) {

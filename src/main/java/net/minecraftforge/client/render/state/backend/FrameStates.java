@@ -119,7 +119,7 @@ public final class FrameStates {
         org.joml.Matrix4f mvp = new org.joml.Matrix4f(state.projection()).mul(view);
         float[] values = new float[16];
         mvp.get(values);
-        return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(layer, values);
+        return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(layer, values, viewX, viewY, viewZ);
     }
 
     /**

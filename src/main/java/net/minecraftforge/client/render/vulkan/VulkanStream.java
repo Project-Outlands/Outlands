@@ -118,6 +118,13 @@ final class VulkanStream implements AutoCloseable {
     private int cachedChannels;
     private VulkanPipeline cachedPipeline;
 
+    private ByteBuffer hostVboStaging;
+    private java.nio.IntBuffer hostIboStaging;
+    private final float[] lastPushedMvp = new float[16];
+    private float lastPushedAlphaRef = -1.0F;
+    private float lastPushedAlphaTest = -1.0F;
+    private long lastPushedLayout = 0L;
+
     static final int STATIC_QUAD_CAPACITY = 65_536;
     static final int STATIC_QUAD_INDEX_COUNT = STATIC_QUAD_CAPACITY * 6;
     private final VulkanBuffer staticQuadIndexBuffer;
@@ -233,17 +240,31 @@ final class VulkanStream implements AutoCloseable {
 
         if (totalVertexBytes > 0) {
             vertexBuffers[slot].ensureCapacity(totalVertexBytes);
+            if (hostVboStaging == null || hostVboStaging.capacity() < totalVertexBytes) {
+                if (hostVboStaging != null) {
+                    org.lwjgl.system.MemoryUtil.memFree(hostVboStaging);
+                }
+                int newCap = Math.max(totalVertexBytes, 1024 * 1024);
+                hostVboStaging = org.lwjgl.system.MemoryUtil.memAlloc(newCap).order(java.nio.ByteOrder.nativeOrder());
+            }
+            hostVboStaging.position(0);
+            hostVboStaging.limit(totalVertexBytes);
         }
         if (totalIndexBytes > 0) {
             indexBuffers[slot].ensureCapacity(totalIndexBytes);
+            if (hostIboStaging == null || hostIboStaging.capacity() < totalIndices) {
+                if (hostIboStaging != null) {
+                    org.lwjgl.system.MemoryUtil.memFree(hostIboStaging);
+                }
+                int newCap = Math.max(totalIndices, 256 * 1024);
+                hostIboStaging = org.lwjgl.system.MemoryUtil.memAllocInt(newCap);
+            }
+            hostIboStaging.position(0);
+            hostIboStaging.limit(totalIndices);
         }
 
-        ByteBuffer targetVbo = totalVertexBytes > 0
-                ? org.lwjgl.system.MemoryUtil.memByteBuffer(vertexBuffers[slot].mappedAddress(), totalVertexBytes)
-                : null;
-        java.nio.IntBuffer targetIbo = totalIndexBytes > 0
-                ? org.lwjgl.system.MemoryUtil.memIntBuffer(indexBuffers[slot].mappedAddress(), totalIndices)
-                : null;
+        ByteBuffer targetVbo = hostVboStaging;
+        java.nio.IntBuffer targetIbo = hostIboStaging;
 
         int currentVertexOffset = 0;
         int currentIndexOffset = 0;
@@ -278,6 +299,19 @@ final class VulkanStream implements AutoCloseable {
             }
         }
 
+        if (totalVertexBytes > 0) {
+            org.lwjgl.system.MemoryUtil.memCopy(
+                    org.lwjgl.system.MemoryUtil.memAddress(hostVboStaging),
+                    vertexBuffers[slot].mappedAddress(),
+                    totalVertexBytes);
+        }
+        if (totalIndexBytes > 0) {
+            org.lwjgl.system.MemoryUtil.memCopy(
+                    org.lwjgl.system.MemoryUtil.memAddress(hostIboStaging),
+                    indexBuffers[slot].mappedAddress(),
+                    totalIndexBytes);
+        }
+
         for (int i = 0; i < draws.size(); i++) {
             DrawState state = draws.get(i).state();
             // A draw with texturing disabled samples nothing: GL replaces the sample with white and takes the colour
@@ -306,6 +340,7 @@ final class VulkanStream implements AutoCloseable {
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
 
             int indexOfOp = -1;
+            lastPushedLayout = 0L;
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
@@ -319,11 +354,13 @@ final class VulkanStream implements AutoCloseable {
                     // assuming the hardware state is still what it was before the copy.
                     appliedViewport[0] = Integer.MIN_VALUE;
                     appliedScissor[0] = Integer.MIN_VALUE;
+                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.TerrainLayer terrainOp) {
                     if (terrain != null) {
-                        terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer());
+                        terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer(),
+                                terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ());
                     }
                     // The terrain draw binds its own vertex buffer and descriptor set, so neither can be assumed by
                     // the next streamed draw: rebind the stream's buffer and forget the bound set.
@@ -333,9 +370,11 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = 0L;
                     boundPipeline = 0L;
                     boundIndexBuffer = 0L;
+                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.Clear clearOp) {
+                    lastPushedLayout = 0L;
                     int mask = clearOp.mask();
                     boolean clearColor = (mask & 0x4000) != 0;
                     boolean clearDepth = (mask & 0x100) != 0;
@@ -436,22 +475,34 @@ final class VulkanStream implements AutoCloseable {
                     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
                     boundPipeline = pipeline.handle();
                 }
-                push.position(0);
-                writeMvp(push, draw.state().mvp());
-                push.put(16, draw.state().alphaReference());
-                // GL_GREATER is the only comparison vanilla uses; anything else is rejected rather than approximated.
-                push.put(17, draw.state().alphaTest() ? 1.0F : 0.0F);
-                // flipU in terrain shader (0.0F: sampled as given).
-                push.put(18, 0.0F);
+                float[] curMvp = draw.state().mvp();
+                float curAlphaRef = draw.state().alphaReference();
+                float curAlphaTest = draw.state().alphaTest() ? 1.0F : 0.0F;
+                long curLayout = pipeline.layout();
                 if (draw.state().alphaTest() && draw.state().alphaComparison() != GL_GREATER) {
                     throw new UnsupportedOperationException("alpha test comparison "
                             + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"
                             + " (516) only, which is the one vanilla sets");
                 }
-                vkCmdPushConstants(commandBuffer, pipeline.layout(),
-                        org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
-                                | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
-                        0, constants);
+                boolean needPush = curLayout != lastPushedLayout
+                        || curAlphaRef != lastPushedAlphaRef
+                        || curAlphaTest != lastPushedAlphaTest
+                        || !java.util.Arrays.equals(curMvp, lastPushedMvp);
+                if (needPush) {
+                    push.position(0);
+                    writeMvp(push, curMvp);
+                    push.put(16, curAlphaRef);
+                    push.put(17, curAlphaTest);
+                    push.put(18, 0.0F);
+                    vkCmdPushConstants(commandBuffer, curLayout,
+                            org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
+                                    | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
+                            0, constants);
+                    System.arraycopy(curMvp, 0, lastPushedMvp, 0, 16);
+                    lastPushedAlphaRef = curAlphaRef;
+                    lastPushedAlphaTest = curAlphaTest;
+                    lastPushedLayout = curLayout;
+                }
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), viewportWidth, viewportHeight);
                 applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
                 if (textureSets[indexOfOp] != boundSet) {
@@ -659,6 +710,14 @@ final class VulkanStream implements AutoCloseable {
 
     @Override
     public void close() {
+        if (hostVboStaging != null) {
+            org.lwjgl.system.MemoryUtil.memFree(hostVboStaging);
+            hostVboStaging = null;
+        }
+        if (hostIboStaging != null) {
+            org.lwjgl.system.MemoryUtil.memFree(hostIboStaging);
+            hostIboStaging = null;
+        }
         if (staticQuadIndexBuffer != null) {
             staticQuadIndexBuffer.close();
         }

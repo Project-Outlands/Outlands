@@ -79,7 +79,11 @@ public final class FrameDraws {
     /**
      * One render layer of the captured terrain, at its place in the sequence.
      */
-    public record TerrainLayer(int layer, float[] mvp) implements Operation {
+    public record TerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) implements Operation {
+        public TerrainLayer(int layer, float[] mvp) {
+            this(layer, mvp, 0.0, 0.0, 0.0);
+        }
+
         public TerrainLayer {
             if (mvp.length != 16) {
                 throw new IllegalArgumentException("an mvp matrix has 16 values, got " + mvp.length);
@@ -212,11 +216,20 @@ public final class FrameDraws {
      * @return {@code false} when nothing is collecting, which means there is no frame to draw inside
      */
     public static boolean recordTerrainLayer(int layer, float[] mvp) {
+        return recordTerrainLayer(layer, mvp, 0.0, 0.0, 0.0);
+    }
+
+    /**
+     * Adds one terrain layer draw at this point in the sequence with camera viewpoint coordinates.
+     *
+     * @return {@code false} when nothing is collecting, which means there is no frame to draw inside
+     */
+    public static boolean recordTerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) {
         if (!collecting) {
             return false;
         }
         synchronized (LOCK) {
-            ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp));
+            ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp, viewX, viewY, viewZ));
         }
         return true;
     }

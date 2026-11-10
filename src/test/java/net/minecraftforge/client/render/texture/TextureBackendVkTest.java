@@ -148,4 +148,39 @@ class TextureBackendVkTest {
         org.junit.jupiter.api.Assertions.assertTrue(backend.drainSubUpdates(id).isEmpty(),
                 "drainSubUpdates must clear pending updates after draining");
     }
+
+    @Test
+    void subUploadAppliesDataForBothHeapAndDirectBuffers() {
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 4, 4, null); // 4x4 blank
+
+        // 1. Heap buffer with sub-rectangle 2x2 at (1, 1)
+        IntBuffer heapBuf = IntBuffer.allocate(4);
+        heapBuf.put(new int[] { 0x11111111, 0x22222222, 0x33333333, 0x44444444 });
+        heapBuf.flip();
+        backend.subUpload(id, 0, 1, 1, 2, 2, heapBuf);
+
+        int[] argb = backend.image(id).argb();
+        assertEquals(0x11111111, argb[1 * 4 + 1]);
+        assertEquals(0x22222222, argb[1 * 4 + 2]);
+        assertEquals(0x33333333, argb[2 * 4 + 1]);
+        assertEquals(0x44444444, argb[2 * 4 + 2]);
+        assertEquals(0, argb[0]); // Untouched
+
+        // 2. Direct buffer with full contiguous row overwrite 4x1 at (0, 0)
+        java.nio.ByteBuffer directBytes = java.nio.ByteBuffer.allocateDirect(16)
+                .order(java.nio.ByteOrder.nativeOrder());
+        IntBuffer directBuf = directBytes.asIntBuffer();
+        directBuf.put(new int[] { 0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC, 0xDDDDDDDD });
+        directBuf.flip();
+        backend.subUpload(id, 0, 0, 0, 4, 1, directBuf);
+
+        argb = backend.image(id).argb();
+        assertEquals(0xAAAAAAAA, argb[0]);
+        assertEquals(0xBBBBBBBB, argb[1]);
+        assertEquals(0xCCCCCCCC, argb[2]);
+        assertEquals(0xDDDDDDDD, argb[3]);
+        assertEquals(0x11111111, argb[1 * 4 + 1]); // Previous subUpload still intact
+    }
 }
