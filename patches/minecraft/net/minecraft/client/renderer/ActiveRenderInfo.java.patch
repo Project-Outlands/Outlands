@@ -1,6 +1,18 @@
 --- before/net/minecraft/client/renderer/ActiveRenderInfo.java
 +++ after/net/minecraft/client/renderer/ActiveRenderInfo.java
-@@ -30,6 +30,11 @@
+@@ -22,6 +22,11 @@
+     private static final FloatBuffer PROJECTION = GLAllocation.createDirectFloatBuffer(16);
+     private static final FloatBuffer OBJECTCOORDS = GLAllocation.createDirectFloatBuffer(3);
+     private static Vec3d position = new Vec3d(0.0, 0.0, 0.0);
++
++    public static Vec3d getPosition()
++    {
++        return position;
++    }
+     private static float rotationX;
+     private static float rotationXZ;
+     private static float rotationZ;
+@@ -30,6 +35,11 @@
  
      public static void updateRenderInfo(EntityPlayer entityplayerIn, boolean p_74583_1_)
      {
@@ -12,7 +24,7 @@
          GlStateManager.getFloat(2982, MODELVIEW);
          GlStateManager.getFloat(2983, PROJECTION);
          GlStateManager.glGetInteger(2978, VIEWPORT);
-@@ -81,7 +86,7 @@
+@@ -81,7 +91,7 @@
              }
          }
  
@@ -21,7 +33,7 @@
      }
  
      public static float getRotationX()
-@@ -107,5 +112,15 @@
+@@ -107,5 +117,15 @@
      public static float getRotationXY()
      {
          return rotationXY;

@@ -1,0 +1,26 @@
+--- before/net/minecraft/client/renderer/chunk/CompiledChunk.java
++++ after/net/minecraft/client/renderer/chunk/CompiledChunk.java
+@@ -36,6 +36,7 @@
+     private final List<TileEntity> tileEntities = Lists.newArrayList();
+     private SetVisibility setVisibility = new SetVisibility();
+     private BufferBuilder.State state;
++    private int[] occluderData;
+ 
+     public boolean isEmpty()
+     {
+@@ -91,5 +92,15 @@
+     public void setState(BufferBuilder.State stateIn)
+     {
+         this.state = stateIn;
++    }
++
++    public int[] getOccluderData()
++    {
++        return this.occluderData;
++    }
++
++    public void setOccluderData(int[] occluderDataIn)
++    {
++        this.occluderData = occluderDataIn;
+     }
+ }

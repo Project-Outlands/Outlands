@@ -1,0 +1,60 @@
+--- before/net/minecraft/client/renderer/chunk/VisGraph.java
++++ after/net/minecraft/client/renderer/chunk/VisGraph.java
+@@ -51,11 +51,12 @@
+         }
+         else
+         {
++            BitSet visited = (BitSet) this.bitSet.clone();
+             for (int i : INDEX_OF_EDGES)
+             {
+-                if (!this.bitSet.get(i))
++                if (!visited.get(i))
+                 {
+-                    setvisibility.setManyVisible(this.floodFill(i));
++                    setvisibility.setManyVisible(this.floodFill(i, visited));
+                 }
+             }
+         }
+@@ -65,15 +66,25 @@
+ 
+     public Set<EnumFacing> getVisibleFacings(BlockPos pos)
+     {
+-        return this.floodFill(getIndex(pos));
+-    }
+-
+-    private Set<EnumFacing> floodFill(int pos)
++        return this.floodFill(getIndex(pos), (BitSet) this.bitSet.clone());
++    }
++
++    public long[] getOpaqueBits()
++    {
++        return this.bitSet.toLongArray();
++    }
++
++    public int getEmpty()
++    {
++        return this.empty;
++    }
++
++    private Set<EnumFacing> floodFill(int pos, BitSet visited)
+     {
+         Set<EnumFacing> set = EnumSet.noneOf(EnumFacing.class);
+         Queue<Integer> queue = Queues.newArrayDeque();
+         queue.add(IntegerCache.getInteger(pos));
+-        this.bitSet.set(pos, true);
++        visited.set(pos, true);
+ 
+         while (!queue.isEmpty())
+         {
+@@ -84,9 +95,9 @@
+             {
+                 int j = this.getNeighborIndexAtFace(i, enumfacing);
+ 
+-                if (j >= 0 && !this.bitSet.get(j))
++                if (j >= 0 && !visited.get(j))
+                 {
+-                    this.bitSet.set(j, true);
++                    visited.set(j, true);
+                     queue.add(IntegerCache.getInteger(j));
+                 }
+             }

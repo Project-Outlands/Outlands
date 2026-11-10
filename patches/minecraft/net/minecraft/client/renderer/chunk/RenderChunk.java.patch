@@ -1,14 +1,49 @@
 --- before/net/minecraft/client/renderer/chunk/RenderChunk.java
 +++ after/net/minecraft/client/renderer/chunk/RenderChunk.java
-@@ -98,6 +98,7 @@
+@@ -53,6 +53,9 @@
+     private final BlockPos.MutableBlockPos[] mapEnumFacing = new BlockPos.MutableBlockPos[6];
+     private boolean needsImmediateUpdate;
+     private ChunkCache worldView;
++    private int regionX;
++    private int regionY;
++    private int regionZ;
+ 
+     public RenderChunk(World worldIn, RenderGlobal renderGlobalIn, int indexIn)
+     {
+@@ -87,6 +90,11 @@
+         }
+     }
+ 
++    public int getFrameIndex()
++    {
++        return this.frameIndex;
++    }
++
+     public VertexBuffer getVertexBufferByLayer(int layer)
+     {
+         return this.vertexBuffers[layer];
+@@ -98,8 +106,12 @@
                  || y != this.position.getY()
                  || z != this.position.getZ())
          {
 +            net.minecraftforge.client.render.ChunkMeshCapture.invalidateChunk(this.position.getX(), this.position.getY(), this.position.getZ());
              this.stopCompileTask();
              this.position.setPos(x, y, z);
++            this.regionX = x >> 7;
++            this.regionY = y >> 6;
++            this.regionZ = z >> 7;
              this.boundingBox = new AxisAlignedBB(x, y, z, x + 16, y + 16, z + 16);
-@@ -171,7 +172,7 @@
+ 
+             for (EnumFacing enumfacing : EnumFacing.values())
+@@ -154,6 +166,7 @@
+ 
+         VisGraph lvt_9_1_ = new VisGraph();
+         HashSet lvt_10_1_ = Sets.newHashSet();
++        net.minecraftforge.client.render.culling.geometry.RenderableBounds renderableBounds = new net.minecraftforge.client.render.culling.geometry.RenderableBounds();
+ 
+         if (!this.worldView.isEmpty())
+         {
+@@ -171,27 +184,30 @@
                      lvt_9_1_.setOpaqueCube(blockpos$mutableblockpos);
                  }
  
@@ -17,7 +52,10 @@
                  {
                      TileEntity tileentity = this.worldView.getTileEntity(blockpos$mutableblockpos, Chunk.EnumCreateEntityType.CHECK);
  
-@@ -181,17 +182,19 @@
+                     if (tileentity != null)
+                     {
++                        renderableBounds.mark(blockpos$mutableblockpos.getX() & 15, blockpos$mutableblockpos.getY() & 15, blockpos$mutableblockpos.getZ() & 15);
+                         TileEntitySpecialRenderer<TileEntity> tileentityspecialrenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
  
                          if (tileentityspecialrenderer != null)
                          {
@@ -39,16 +77,55 @@
                  int j = blockrenderlayer1.ordinal();
  
                  if (block.getDefaultState().getRenderType() != EnumBlockRenderType.INVISIBLE)
-@@ -206,6 +209,8 @@
+@@ -204,8 +220,14 @@
+                         this.preRenderBlocks(bufferbuilder, blockpos);
+                     }
  
-                     aboolean[j] |= blockrendererdispatcher.renderBlock(iblockstate, blockpos$mutableblockpos, this.worldView, bufferbuilder);
-                 }
+-                    aboolean[j] |= blockrendererdispatcher.renderBlock(iblockstate, blockpos$mutableblockpos, this.worldView, bufferbuilder);
+-                }
++                    if (blockrendererdispatcher.renderBlock(iblockstate, blockpos$mutableblockpos, this.worldView, bufferbuilder))
++                    {
++                        aboolean[j] = true;
++                        renderableBounds.mark(blockpos$mutableblockpos.getX() & 15, blockpos$mutableblockpos.getY() & 15, blockpos$mutableblockpos.getZ() & 15);
++                    }
++                }
 +                }
 +                net.minecraftforge.client.ForgeHooksClient.setRenderLayer(null);
              }
  
              for (BlockRenderLayer blockrenderlayer : BlockRenderLayer.values())
-@@ -269,38 +274,40 @@
+@@ -224,6 +246,30 @@
+             }
+         }
+ 
++        int emptyCount = lvt_9_1_.getEmpty();
++        if (emptyCount == 0)
++        {
++            compiledchunk.setOccluderData(new int[] { grondag.bitraster.PackedBox.FULL_BOX, grondag.bitraster.PackedBox.FULL_BOX });
++        }
++        else if (emptyCount < 4096)
++        {
++            long[] words = lvt_9_1_.getOpaqueBits();
++            int[] boxes = net.minecraftforge.client.render.culling.geometry.OccluderBoxes.from(words);
++            int count = boxes == null ? 0 : boxes.length;
++            int bounds = renderableBounds.packed();
++            int[] data = new int[count + 1];
++            data[0] = bounds;
++            if (boxes != null)
++            {
++                System.arraycopy(boxes, 0, data, 1, count);
++            }
++            compiledchunk.setOccluderData(data);
++        }
++        else if (!renderableBounds.isEmpty())
++        {
++            compiledchunk.setOccluderData(new int[] { renderableBounds.packed() });
++        }
++
+         compiledchunk.setVisibility(lvt_9_1_.computeVisibility());
+         this.lockCompileTask.lock();
+ 
+@@ -269,38 +315,40 @@
      public ChunkCompileTaskGenerator makeCompileTaskChunk()
      {
          this.lockCompileTask.lock();
@@ -96,7 +173,7 @@
              {
                  if (this.compileTask != null && this.compileTask.getStatus() != ChunkCompileTaskGenerator.Status.DONE)
                  {
-@@ -312,11 +319,15 @@
+@@ -312,11 +360,15 @@
                  this.compileTask.setCompiledChunk(this.compiledChunk);
                  return this.compileTask;
              }
@@ -112,7 +189,7 @@
      }
  
      protected double getDistanceSq()
-@@ -393,6 +404,7 @@
+@@ -393,6 +445,7 @@
      {
          this.stopCompileTask();
          this.world = null;
@@ -120,7 +197,34 @@
  
          for (int i = 0; i < BlockRenderLayer.values().length; i++)
          {
-@@ -434,6 +446,26 @@
+@@ -408,6 +461,26 @@
+         return this.position;
+     }
+ 
++    public int getRegionX()
++    {
++        return this.regionX;
++    }
++
++    public int getRegionY()
++    {
++        return this.regionY;
++    }
++
++    public int getRegionZ()
++    {
++        return this.regionZ;
++    }
++
++    public int[] getOccluderData()
++    {
++        return this.compiledChunk.getOccluderData();
++    }
++
+     public void setNeedsUpdate(boolean immediate)
+     {
+         if (this.needsUpdate)
+@@ -434,6 +507,26 @@
      {
          return this.needsUpdate && this.needsImmediateUpdate;
      }

@@ -1,0 +1,33 @@
+--- before/net/minecraft/client/renderer/culling/Frustum.java
++++ after/net/minecraft/client/renderer/culling/Frustum.java
+@@ -43,6 +43,19 @@
+                );
+     }
+ 
++    public int intersectBox(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
++    {
++        return this.clippingHelper
++               .intersectBox(
++                   minX - this.x,
++                   minY - this.y,
++                   minZ - this.z,
++                   maxX - this.x,
++                   maxY - this.y,
++                   maxZ - this.z
++               );
++    }
++
+     @Override
+     public boolean isBoundingBoxInFrustum(AxisAlignedBB p_78546_1_)
+     {
+@@ -54,5 +67,10 @@
+                    p_78546_1_.maxY,
+                    p_78546_1_.maxZ
+                );
++    }
++
++    public org.joml.Matrix4f getVpMatrix()
++    {
++        return this.clippingHelper != null ? this.clippingHelper.getVpMatrix() : null;
+     }
+ }

@@ -1,6 +1,125 @@
 --- before/net/minecraft/client/renderer/RenderGlobal.java
 +++ after/net/minecraft/client/renderer/RenderGlobal.java
-@@ -428,13 +428,11 @@
+@@ -105,6 +105,118 @@
+     private WorldClient world;
+     private Set<RenderChunk> chunksToUpdate = Sets.newLinkedHashSet();
+     private List<RenderGlobal.ContainerLocalRenderInformation> renderInfos = Lists.newArrayListWithCapacity(69696);
++    private final java.util.ArrayDeque<RenderGlobal.ContainerLocalRenderInformation> renderInfoPool = new java.util.ArrayDeque<>();
++    private final java.util.ArrayDeque<RenderGlobal.ContainerLocalRenderInformation> renderInfoQueue = new java.util.ArrayDeque<>();
++    private int lastTerrainFrameCount = -1;
++
++    private void classifyVisibleLayers()
++    {
++        if (net.minecraftforge.client.render.RenderBackendSelection.glPath())
++        {
++            return;
++        }
++
++        it.unimi.dsi.fastutil.longs.LongArrayList[] layerLists = net.minecraftforge.client.render.state.backend.FrameStates.getLayerChunkLists();
++        for (int l = 0; l < 4; l++)
++        {
++            layerLists[l].clear();
++        }
++
++        int size = this.renderInfos.size();
++        for (int i = 0; i < size; i++)
++        {
++            RenderChunk renderchunk = this.renderInfos.get(i).renderChunk;
++            CompiledChunk compiled = renderchunk.getCompiledChunk();
++            if (compiled.isEmpty())
++            {
++                continue;
++            }
++
++            long pos = renderchunk.getPosition().toLong();
++            if (!compiled.isLayerEmpty(BlockRenderLayer.SOLID))
++            {
++                layerLists[0].add(pos);
++            }
++            if (!compiled.isLayerEmpty(BlockRenderLayer.CUTOUT_MIPPED))
++            {
++                layerLists[1].add(pos);
++            }
++            if (!compiled.isLayerEmpty(BlockRenderLayer.CUTOUT))
++            {
++                layerLists[2].add(pos);
++            }
++            if (!compiled.isLayerEmpty(BlockRenderLayer.TRANSLUCENT))
++            {
++                layerLists[3].add(pos);
++            }
++        }
++    }
++
++    private RenderGlobal.ContainerLocalRenderInformation allocateRenderInfo(RenderChunk renderChunkIn, @Nullable EnumFacing facingIn, int counterIn)
++    {
++        RenderGlobal.ContainerLocalRenderInformation info = this.renderInfoPool.poll();
++        if (info != null)
++        {
++            info.init(renderChunkIn, facingIn, counterIn);
++            return info;
++        }
++        return new RenderGlobal.ContainerLocalRenderInformation(renderChunkIn, facingIn, counterIn);
++    }
++
++    private final List<Entity> outlineEntityList = Lists.newArrayList();
++    private final List<Entity> multipassEntityList = Lists.newArrayList();
++    private final BlockPos.MutableBlockPos entityCheckPos = new BlockPos.MutableBlockPos();
++    private final BlockPos.MutableBlockPos chunkCheckPos = new BlockPos.MutableBlockPos();
++    private final Set<RenderChunk> chunksToUpdateTemp = Sets.newLinkedHashSet();
++    private final net.minecraftforge.client.render.culling.RegionCullCache regionCullCache = new net.minecraftforge.client.render.culling.RegionCullCache();
++    private final net.minecraftforge.client.render.culling.RasterOcclusionCuller rasterOccluder = new net.minecraftforge.client.render.culling.RasterOcclusionCuller();
++
++    private boolean isEntityChunkVisible(Entity entity, double camX, double camY, double camZ)
++    {
++        double dx = entity.posX - camX;
++        double dy = entity.posY - camY;
++        double dz = entity.posZ - camZ;
++        if (dx * dx + dy * dy + dz * dz < 1024.0)
++        {
++            return true;
++        }
++
++        if (entity.isGlowing() || entity.getAlwaysRenderNameTagForRender())
++        {
++            return true;
++        }
++
++        AxisAlignedBB bb = entity.getEntityBoundingBox();
++        if (bb == null || bb.minY <= 0.0 || bb.maxY >= 256.0)
++        {
++            return true;
++        }
++
++        int chunkX = MathHelper.floor(entity.posX) >> 4;
++        int chunkZ = MathHelper.floor(entity.posZ) >> 4;
++        int minSubY = MathHelper.clamp(MathHelper.floor(bb.minY) >> 4, 0, 15);
++        int maxSubY = MathHelper.clamp(MathHelper.floor(bb.maxY) >> 4, 0, 15);
++
++        for (int subY = minSubY; subY <= maxSubY; subY++)
++        {
++            this.entityCheckPos.setPos(chunkX << 4, subY << 4, chunkZ << 4);
++            RenderChunk rc = this.viewFrustum.getRenderChunk(this.entityCheckPos);
++            if (rc != null && rc.getFrameIndex() == this.lastTerrainFrameCount)
++            {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    private static boolean isBoxInFrustum(ICamera camera, double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
++    {
++        if (camera instanceof Frustum)
++        {
++            return ((Frustum) camera).isBoxInFrustum(minX, minY, minZ, maxX, maxY, maxZ);
++        }
++        return camera.isBoundingBoxInFrustum(new AxisAlignedBB(minX, minY, minZ, maxX, maxY, maxZ));
++    }
+     private final Set<TileEntity> setTileEntities = Sets.newHashSet();
+     private ViewFrustum viewFrustum;
+     private int starGLCallList = -1;
+@@ -428,13 +540,11 @@
                      double d20 = 0.0;
                      double d21 = d18 * d16 - d19 * d15;
                      double d22 = d19 * d16 + d18 * d15;
@@ -19,7 +138,26 @@
                  }
              }
          }
-@@ -562,8 +560,10 @@
+@@ -464,7 +574,10 @@
+         else
+         {
+             this.chunksToUpdate.clear();
++            this.chunksToUpdateTemp.clear();
+             this.renderInfos.clear();
++            this.renderInfoPool.clear();
++            net.minecraftforge.client.render.state.backend.FrameStates.clearLayerChunkLists();
+ 
+             if (this.viewFrustum != null)
+             {
+@@ -546,6 +659,7 @@
+     protected void stopChunkUpdates()
+     {
+         this.chunksToUpdate.clear();
++        this.chunksToUpdateTemp.clear();
+         this.renderDispatcher.stopChunkUpdates();
+     }
+ 
+@@ -562,8 +676,10 @@
  
      public void renderEntities(Entity renderViewEntity, ICamera camera, float partialTicks)
      {
@@ -30,7 +168,7 @@
              this.renderEntitiesStartupCounter--;
          }
          else
-@@ -590,9 +590,12 @@
+@@ -590,9 +706,12 @@
                  this.mc.gameSettings,
                  partialTicks
              );
@@ -43,7 +181,7 @@
              Entity entity = this.mc.getRenderViewEntity();
              double d3 = entity.lastTickPosX + (entity.posX - entity.lastTickPosX) * partialTicks;
              double d4 = entity.lastTickPosY + (entity.posY - entity.lastTickPosY) * partialTicks;
-@@ -604,11 +607,15 @@
+@@ -604,11 +723,15 @@
              this.mc.entityRenderer.enableLightmap();
              this.world.profiler.endStartSection("global");
              List<Entity> list = this.world.getLoadedEntityList();
@@ -59,15 +197,150 @@
                  this.countEntitiesRendered++;
  
                  if (entity1.isInRangeToRender3d(d0, d1, d2))
-@@ -634,6 +641,7 @@
-                 {
-                     for (Entity entity2 : classinheritancemultimap)
-                     {
-+                        if(!entity2.shouldRenderInPass(pass)) continue;
-                         boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
+@@ -618,48 +741,102 @@
+             }
  
-                         if (flag)
-@@ -677,6 +685,7 @@
+             this.world.profiler.endStartSection("entities");
+-            List<Entity> list1 = Lists.newArrayList();
+-            List<Entity> list2 = Lists.newArrayList();
++            this.outlineEntityList.clear();
++            this.multipassEntityList.clear();
++            List<Entity> list1 = this.outlineEntityList;
++            List<Entity> list2 = this.multipassEntityList;
+             BlockPos.PooledMutableBlockPos blockpos$pooledmutableblockpos = BlockPos.PooledMutableBlockPos.retain();
+ 
+-            for (RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation : this.renderInfos)
++            if (list.size() < (this.renderInfos.size() << 1))
+             {
+-                Chunk chunk = this.world.getChunk(renderglobal$containerlocalrenderinformation.renderChunk.getPosition());
+-                ClassInheritanceMultiMap<Entity> classinheritancemultimap = chunk.getEntityLists()[renderglobal$containerlocalrenderinformation.renderChunk
+-                        .getPosition()
+-                        .getY()
+-                        / 16];
+-
+-                if (!classinheritancemultimap.isEmpty())
++                int entityCount = list.size();
++                for (int eIdx = 0; eIdx < entityCount; eIdx++)
+                 {
+-                    for (Entity entity2 : classinheritancemultimap)
++                    Entity entity2 = list.get(eIdx);
++                    if (!entity2.shouldRenderInPass(pass)) continue;
++                    boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
++
++                    if (flag)
+                     {
+-                        boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
++                        boolean flag1 = this.mc.getRenderViewEntity() instanceof EntityLivingBase
++                                        ? ((EntityLivingBase)this.mc.getRenderViewEntity()).isPlayerSleeping()
++                                        : false;
+ 
+-                        if (flag)
++                        if ((entity2 != this.mc.getRenderViewEntity() || this.mc.gameSettings.thirdPersonView != 0 || flag1)
++                                && (
++                                    !(entity2.posY >= 0.0)
++                                    || !(entity2.posY < 256.0)
++                                    || this.world.isBlockLoaded(blockpos$pooledmutableblockpos.setPos(entity2))
++                                ))
+                         {
+-                            boolean flag1 = this.mc.getRenderViewEntity() instanceof EntityLivingBase
+-                                            ? ((EntityLivingBase)this.mc.getRenderViewEntity()).isPlayerSleeping()
+-                                            : false;
+-
+-                            if ((entity2 != this.mc.getRenderViewEntity() || this.mc.gameSettings.thirdPersonView != 0 || flag1)
+-                                    && (
+-                                        !(entity2.posY >= 0.0)
+-                                        || !(entity2.posY < 256.0)
+-                                        || this.world.isBlockLoaded(blockpos$pooledmutableblockpos.setPos(entity2))
+-                                    ))
++                            if (this.mc.renderChunksMany && !entity2.isRidingOrBeingRiddenBy(this.mc.player))
+                             {
+-                                this.countEntitiesRendered++;
+-                                this.renderManager.renderEntityStatic(entity2, partialTicks, false);
+-
+-                                if (this.isOutlineActive(entity2, entity, camera))
++                                if (!this.isEntityChunkVisible(entity2, d0, d1, d2))
+                                 {
+-                                    list1.add(entity2);
++                                    continue;
+                                 }
+-
+-                                if (this.renderManager.isRenderMultipass(entity2))
++                            }
++
++                            this.countEntitiesRendered++;
++                            this.renderManager.renderEntityStatic(entity2, partialTicks, false);
++
++                            if (this.isOutlineActive(entity2, entity, camera))
++                            {
++                                list1.add(entity2);
++                            }
++
++                            if (this.renderManager.isRenderMultipass(entity2))
++                            {
++                                list2.add(entity2);
++                            }
++                        }
++                    }
++                }
++            }
++            else
++            {
++                int infoCount = this.renderInfos.size();
++                for (int i = 0; i < infoCount; i++)
++                {
++                    RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = this.renderInfos.get(i);
++                    Chunk chunk = this.world.getChunk(renderglobal$containerlocalrenderinformation.renderChunk.getPosition());
++                    ClassInheritanceMultiMap<Entity> classinheritancemultimap = chunk.getEntityLists()[renderglobal$containerlocalrenderinformation.renderChunk
++                            .getPosition()
++                            .getY()
++                            / 16];
++
++                    if (!classinheritancemultimap.isEmpty())
++                    {
++                        for (Entity entity2 : classinheritancemultimap)
++                        {
++                            if(!entity2.shouldRenderInPass(pass)) continue;
++                            boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
++
++                            if (flag)
++                            {
++                                boolean flag1 = this.mc.getRenderViewEntity() instanceof EntityLivingBase
++                                                ? ((EntityLivingBase)this.mc.getRenderViewEntity()).isPlayerSleeping()
++                                                : false;
++
++                                if ((entity2 != this.mc.getRenderViewEntity() || this.mc.gameSettings.thirdPersonView != 0 || flag1)
++                                        && (
++                                            !(entity2.posY >= 0.0)
++                                            || !(entity2.posY < 256.0)
++                                            || this.world.isBlockLoaded(blockpos$pooledmutableblockpos.setPos(entity2))
++                                        ))
+                                 {
+-                                    list2.add(entity2);
++                                    this.countEntitiesRendered++;
++                                    this.renderManager.renderEntityStatic(entity2, partialTicks, false);
++
++                                    if (this.isOutlineActive(entity2, entity, camera))
++                                    {
++                                        list1.add(entity2);
++                                    }
++
++                                    if (this.renderManager.isRenderMultipass(entity2))
++                                    {
++                                        list2.add(entity2);
++                                    }
+                                 }
+                             }
+                         }
+@@ -671,12 +848,14 @@
+ 
+             if (!list2.isEmpty())
+             {
+-                for (Entity entity3 : list2)
++                int mpCount = list2.size();
++                for (int i = 0; i < mpCount; i++)
+                 {
+-                    this.renderManager.renderMultipass(entity3, partialTicks);
++                    this.renderManager.renderMultipass(list2.get(i), partialTicks);
                  }
              }
  
@@ -75,23 +348,31 @@
              if (this.isRenderEntityOutlines() && (!list1.isEmpty() || this.entityOutlinesRendered))
              {
                  this.world.profiler.endStartSection("entityOutlines");
-@@ -716,6 +725,7 @@
+@@ -716,14 +895,19 @@
              this.world.profiler.endStartSection("blockentities");
              RenderHelper.enableStandardItemLighting();
  
+-            for (RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation1 : this.renderInfos)
 +            TileEntityRendererDispatcher.instance.preDrawBatch();
-             for (RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation1 : this.renderInfos)
++            int infoCount = this.renderInfos.size();
++            for (int i = 0; i < infoCount; i++)
              {
-                 List<TileEntity> list3 = renderglobal$containerlocalrenderinformation1.renderChunk.getCompiledChunk().getTileEntities();
-@@ -724,6 +734,7 @@
+-                List<TileEntity> list3 = renderglobal$containerlocalrenderinformation1.renderChunk.getCompiledChunk().getTileEntities();
++                List<TileEntity> list3 = this.renderInfos.get(i).renderChunk.getCompiledChunk().getTileEntities();
+ 
+-                if (!list3.isEmpty())
++                int teCount = list3.size();
++                if (teCount > 0)
                  {
-                     for (TileEntity tileentity2 : list3)
+-                    for (TileEntity tileentity2 : list3)
++                    for (int j = 0; j < teCount; j++)
                      {
++                        TileEntity tileentity2 = list3.get(j);
 +                        if (!tileentity2.shouldRenderInPass(pass) || !camera.isBoundingBoxInFrustum(tileentity2.getRenderBoundingBox())) continue;
                          TileEntityRendererDispatcher.instance.render(tileentity2, partialTicks, -1);
                      }
                  }
-@@ -733,9 +744,11 @@
+@@ -733,9 +917,11 @@
              {
                  for (TileEntity tileentity : this.setTileEntities)
                  {
@@ -103,49 +384,286 @@
  
              this.preRenderDamagedBlocks();
  
-@@ -953,7 +966,7 @@
+@@ -903,15 +1089,44 @@
+         if (!flag && this.displayListEntitiesDirty)
+         {
+             this.displayListEntitiesDirty = false;
+-            this.renderInfos = Lists.newArrayList();
+-            Queue<RenderGlobal.ContainerLocalRenderInformation> queue = Queues.newArrayDeque();
++            this.lastTerrainFrameCount = frameCount;
++            this.regionCullCache.begin(frameCount);
++            boolean rasterActive = false;
++            int camChunkX = 0, camChunkY = 0, camChunkZ = 0;
++            org.joml.Matrix4f vpMatrix = null;
++            if (camera instanceof Frustum)
++            {
++                vpMatrix = ((Frustum) camera).getVpMatrix();
++            }
++            if (vpMatrix != null)
++            {
++                double camX = d3;
++                double camY = d4 + viewEntity.getEyeHeight();
++                double camZ = d5;
++                net.minecraft.util.math.Vec3d camOffset = ActiveRenderInfo.getPosition();
++                if (camOffset != null)
++                {
++                    camX = d3 + camOffset.x;
++                    camY = d4 + camOffset.y;
++                    camZ = d5 + camOffset.z;
++                }
++                this.rasterOccluder.prepareScene(frameCount, camX, camY, camZ, vpMatrix, this.renderDistanceChunks * 16.0f);
++                camChunkX = MathHelper.floor(camX / 16.0);
++                camChunkY = MathHelper.floor(camY / 16.0);
++                camChunkZ = MathHelper.floor(camZ / 16.0);
++                rasterActive = true;
++            }
++            this.renderInfoPool.addAll(this.renderInfos);
++            this.renderInfos.clear();
++            this.renderInfoQueue.clear();
++            Queue<RenderGlobal.ContainerLocalRenderInformation> queue = this.renderInfoQueue;
+             Entity.setRenderDistanceWeight(MathHelper.clamp(this.mc.gameSettings.renderDistanceChunks / 8.0, 1.0, 2.5));
+             boolean flag1 = this.mc.renderChunksMany;
+ 
+             if (renderchunk != null)
+             {
+                 boolean flag2 = false;
+-                RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation3 = new RenderGlobal.ContainerLocalRenderInformation(
++                RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation3 = this.allocateRenderInfo(
+                     renderchunk, null, 0
+                 );
+                 Set<EnumFacing> set1 = this.getVisibleFacings(blockpos1);
+@@ -946,17 +1161,32 @@
+             else
+             {
+                 int i = blockpos1.getY() > 0 ? 248 : 8;
++                double extraY = blockpos1.getY() > 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+ 
+                 for (int j = -this.renderDistanceChunks; j <= this.renderDistanceChunks; j++)
+                 {
+                     for (int k = -this.renderDistanceChunks; k <= this.renderDistanceChunks; k++)
                      {
-                         RenderChunk renderchunk1 = this.viewFrustum.getRenderChunk(new BlockPos((j << 4) + 8, i, (k << 4) + 8));
+-                        RenderChunk renderchunk1 = this.viewFrustum.getRenderChunk(new BlockPos((j << 4) + 8, i, (k << 4) + 8));
++                        this.chunkCheckPos.setPos((j << 4) + 8, i, (k << 4) + 8);
++                        RenderChunk renderchunk1 = this.viewFrustum.getRenderChunk(this.chunkCheckPos);
  
 -                        if (renderchunk1 != null && camera.isBoundingBoxInFrustum(renderchunk1.boundingBox))
-+                        if (renderchunk1 != null && camera.isBoundingBoxInFrustum(renderchunk1.boundingBox.expand(0.0, blockpos1.getY() > 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY, 0.0))) // Forge: fix MC-73139
++                        if (renderchunk1 != null)
                          {
-                             renderchunk1.setFrameIndex(frameCount);
-                             queue.add(new RenderGlobal.ContainerLocalRenderInformation(renderchunk1, null, 0));
-@@ -1015,7 +1028,7 @@
-                 BlockPos blockpos2 = renderchunk4.getPosition().add(8, 8, 8);
-                 boolean flag3 = blockpos2.distanceSq(blockpos1) < 768.0;
+-                            renderchunk1.setFrameIndex(frameCount);
+-                            queue.add(new RenderGlobal.ContainerLocalRenderInformation(renderchunk1, null, 0));
++                            int regionState = this.regionCullCache.classify(
++                                renderchunk1.getRegionX(), renderchunk1.getRegionY(), renderchunk1.getRegionZ(), camera
++                            );
++                            if (regionState != net.minecraftforge.client.render.culling.RegionCullCache.OUTSIDE)
++                            {
++                                AxisAlignedBB bb = renderchunk1.boundingBox;
++                                double minY = extraY < 0.0 ? Double.NEGATIVE_INFINITY : bb.minY;
++                                double maxY = extraY > 0.0 ? Double.POSITIVE_INFINITY : bb.maxY;
++                                if (regionState == net.minecraftforge.client.render.culling.RegionCullCache.FULLY_INSIDE
++                                        || isBoxInFrustum(camera, bb.minX, minY, bb.minZ, bb.maxX, maxY, bb.maxZ))
++                                {
++                                    renderchunk1.setFrameIndex(frameCount);
++                                    queue.add(this.allocateRenderInfo(renderchunk1, null, 0));
++                                }
++                            }
+                         }
+                     }
+                 }
+@@ -969,28 +1199,92 @@
+                 RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation1 = queue.poll();
+                 RenderChunk renderchunk3 = renderglobal$containerlocalrenderinformation1.renderChunk;
+                 EnumFacing enumfacing2 = renderglobal$containerlocalrenderinformation1.facing;
+-                this.renderInfos.add(renderglobal$containerlocalrenderinformation1);
+-
+-                for (EnumFacing enumfacing1 : EnumFacing.values())
++
++                boolean shouldRender = true;
++                boolean shouldTraverse = true;
++
++                if (rasterActive)
+                 {
+-                    RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
++                    BlockPos pos = renderchunk3.getPosition();
++                    int cx = pos.getX() >> 4;
++                    int cy = pos.getY() >> 4;
++                    int cz = pos.getZ() >> 4;
++                    int dx = cx - camChunkX;
++                    int dy = cy - camChunkY;
++                    int dz = cz - camChunkZ;
++                    int squaredChunkDist = dx * dx + dy * dy + dz * dz;
+ 
+-                    if ((!flag1 || !renderglobal$containerlocalrenderinformation1.hasDirection(enumfacing1.getOpposite()))
+-                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1))
+-                            && renderchunk2 != null
+-                            && renderchunk2.setFrameIndex(frameCount)
+-                            && camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
++                    int[] occluderData = renderchunk3.getCompiledChunk().getOccluderData();
++                    if (occluderData != null)
+                     {
+-                        RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = new RenderGlobal.ContainerLocalRenderInformation(
+-                            renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
++                        int bounds = occluderData[0];
++                        net.minecraftforge.client.render.culling.RasterOcclusionCuller.SectionVisibility vis = this.rasterOccluder.testSection(
++                            pos.getX(), pos.getY(), pos.getZ(), squaredChunkDist, bounds
+                         );
+-                        renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
+-                        queue.add(renderglobal$containerlocalrenderinformation);
++                        if (vis == net.minecraftforge.client.render.culling.RasterOcclusionCuller.SectionVisibility.VISIBLE)
++                        {
++                            if (occluderData.length > 1)
++                            {
++                                this.rasterOccluder.occludeSection(occluderData);
++                            }
++                        }
++                        else if (vis == net.minecraftforge.client.render.culling.RasterOcclusionCuller.SectionVisibility.TRAVERSABLE)
++                        {
++                            shouldRender = false;
++                        }
++                        else // HIDDEN
++                        {
++                            shouldRender = false;
++                            shouldTraverse = false;
++                        }
++                    }
++                }
++
++                if (shouldRender)
++                {
++                    this.renderInfos.add(renderglobal$containerlocalrenderinformation1);
++                }
++                else
++                {
++                    this.renderInfoPool.add(renderglobal$containerlocalrenderinformation1);
++                }
++
++                if (!shouldTraverse)
++                {
++                    continue;
++                }
++
++                for (EnumFacing enumfacing1 : EnumFacing.VALUES)
++                {
++                    if ((!flag1 || !renderglobal$containerlocalrenderinformation1.hasDirection(enumfacing1.getOpposite()))
++                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1)))
++                    {
++                        RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
++
++                        if (renderchunk2 != null && renderchunk2.setFrameIndex(frameCount))
++                        {
++                            int regionState = this.regionCullCache.classify(
++                                renderchunk2.getRegionX(), renderchunk2.getRegionY(), renderchunk2.getRegionZ(), camera
++                            );
++                            if (regionState != net.minecraftforge.client.render.culling.RegionCullCache.OUTSIDE)
++                            {
++                                if (regionState == net.minecraftforge.client.render.culling.RegionCullCache.FULLY_INSIDE
++                                        || camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
++                                {
++                                    RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = this.allocateRenderInfo(
++                                        renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
++                                    );
++                                    renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
++                                    queue.add(renderglobal$containerlocalrenderinformation);
++                                }
++                            }
++                        }
+                     }
+                 }
+             }
+ 
+             this.mc.profiler.endSection();
++            this.classifyVisibleLayers();
+         }
+ 
+         this.mc.profiler.endStartSection("captureFrustum");
+@@ -1002,34 +1296,42 @@
+         }
+ 
+         this.mc.profiler.endStartSection("rebuildNear");
+-        Set<RenderChunk> set = this.chunksToUpdate;
+-        this.chunksToUpdate = Sets.newLinkedHashSet();
++        this.chunksToUpdateTemp.clear();
++        this.chunksToUpdateTemp.addAll(this.chunksToUpdate);
++        this.chunksToUpdate.clear();
+ 
+-        for (RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation2 : this.renderInfos)
++        int renderInfoSize = this.renderInfos.size();
++        for (int i = 0; i < renderInfoSize; i++)
+         {
+-            RenderChunk renderchunk4 = renderglobal$containerlocalrenderinformation2.renderChunk;
++            RenderChunk renderchunk4 = this.renderInfos.get(i).renderChunk;
+ 
+-            if (renderchunk4.needsUpdate() || set.contains(renderchunk4))
++            if (renderchunk4.needsUpdate() || this.chunksToUpdateTemp.contains(renderchunk4))
+             {
+                 this.displayListEntitiesDirty = true;
+-                BlockPos blockpos2 = renderchunk4.getPosition().add(8, 8, 8);
+-                boolean flag3 = blockpos2.distanceSq(blockpos1) < 768.0;
++                BlockPos rPos = renderchunk4.getPosition();
++                double rdx = (rPos.getX() + 8) - blockpos1.getX();
++                double rdy = (rPos.getY() + 8) - blockpos1.getY();
++                double rdz = (rPos.getZ() + 8) - blockpos1.getZ();
++                boolean flag3 = (rdx * rdx + rdy * rdy + rdz * rdz) < 768.0;
  
 -                if (!renderchunk4.needsImmediateUpdate() && !flag3)
 +                if (net.minecraftforge.common.ForgeModContainer.alwaysSetupTerrainOffThread || (!renderchunk4.needsImmediateUpdate() && !flag3))
                  {
                      this.chunksToUpdate.add(renderchunk4);
++                    this.chunksToUpdateTemp.remove(renderchunk4);
                  }
-@@ -1158,6 +1171,12 @@
-         int i = flag ? -1 : this.renderInfos.size();
-         int j1 = flag ? -1 : 1;
+                 else
+                 {
+                     this.mc.profiler.startSection("build near");
+                     this.renderDispatcher.updateChunkNow(renderchunk4);
+                     renderchunk4.clearNeedsUpdate();
++                    this.chunksToUpdateTemp.remove(renderchunk4);
+                     this.mc.profiler.endSection();
+                 }
+             }
+         }
  
+-        this.chunksToUpdate.addAll(set);
++        this.chunksToUpdate.addAll(this.chunksToUpdateTemp);
++        this.chunksToUpdateTemp.clear();
+         this.mc.profiler.endSection();
+     }
+ 
+@@ -1153,24 +1455,36 @@
+ 
+         this.mc.profiler.startSection("filterempty");
+         int l = 0;
+-        boolean flag = blockLayerIn == BlockRenderLayer.TRANSLUCENT;
+-        int i1 = flag ? this.renderInfos.size() - 1 : 0;
+-        int i = flag ? -1 : this.renderInfos.size();
+-        int j1 = flag ? -1 : 1;
+-
+-        for (int j = i1; j != i; j += j1)
+-        {
+-            RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
+-
+-            if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
 +        it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks = null;
 +        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
 +        {
-+            visibleChunks = net.minecraftforge.client.render.state.backend.FrameStates.beginLayerChunkList();
++            visibleChunks = net.minecraftforge.client.render.state.backend.FrameStates.getLayerChunkList(blockLayerIn.ordinal());
++            l = visibleChunks != null ? visibleChunks.size() : 0;
 +        }
++        else
++        {
++            boolean flag = blockLayerIn == BlockRenderLayer.TRANSLUCENT;
++            int i1 = flag ? this.renderInfos.size() - 1 : 0;
++            int i = flag ? -1 : this.renderInfos.size();
++            int j1 = flag ? -1 : 1;
 +
-         for (int j = i1; j != i; j += j1)
-         {
-             RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
-@@ -1165,12 +1184,22 @@
-             if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
++            for (int j = i1; j != i; j += j1)
              {
-                 l++;
+-                l++;
 -                this.renderContainer.addRenderChunk(renderchunk, blockLayerIn);
-+                if (net.minecraftforge.client.render.RenderBackendSelection.glPath())
++                RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
++
++                if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
 +                {
++                    l++;
 +                    this.renderContainer.addRenderChunk(renderchunk, blockLayerIn);
-+                }
-+                else
-+                {
-+                    visibleChunks.add(renderchunk.getPosition().toLong());
 +                }
              }
          }
@@ -159,7 +677,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1207,18 @@
+@@ -1178,6 +1492,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -178,7 +696,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1232,14 @@
+@@ -1191,7 +1517,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -194,7 +712,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1366,13 @@
+@@ -1318,6 +1651,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -208,7 +726,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1555,21 @@
+@@ -1500,22 +1840,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -239,7 +757,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1599,7 @@
+@@ -1545,6 +1884,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -247,7 +765,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1639,13 @@
+@@ -1584,14 +1924,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -265,7 +783,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2014,8 @@
+@@ -1960,8 +2299,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -276,7 +794,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2049,8 @@
+@@ -1995,8 +2334,8 @@
                  }
              }
  
@@ -287,7 +805,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2104,7 @@
+@@ -2050,7 +2389,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -296,7 +814,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2144,13 @@
+@@ -2090,8 +2429,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -311,7 +829,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2410,11 @@
+@@ -2351,9 +2695,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -326,7 +844,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +2883,7 @@
+@@ -2822,7 +3168,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -335,3 +853,29 @@
                      this.world
                      .playSound(
                          blockPosIn,
+@@ -3038,16 +3384,22 @@
+     @SideOnly(Side.CLIENT)
+     class ContainerLocalRenderInformation
+     {
+-        final RenderChunk renderChunk;
+-        final EnumFacing facing;
++        RenderChunk renderChunk;
++        EnumFacing facing;
+         byte setFacing;
+-        final int counter;
++        int counter;
+ 
+         private ContainerLocalRenderInformation(RenderChunk renderChunkIn, @Nullable EnumFacing facingIn, int counterIn)
+         {
++            this.init(renderChunkIn, facingIn, counterIn);
++        }
++
++        public void init(RenderChunk renderChunkIn, @Nullable EnumFacing facingIn, int counterIn)
++        {
+             this.renderChunk = renderChunkIn;
+             this.facing = facingIn;
+             this.counter = counterIn;
++            this.setFacing = 0;
+         }
+ 
+         public void setDirection(byte p_189561_1_, EnumFacing p_189561_2_)

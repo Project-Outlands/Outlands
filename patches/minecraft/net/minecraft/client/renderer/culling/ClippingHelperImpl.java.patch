@@ -1,0 +1,29 @@
+--- before/net/minecraft/client/renderer/culling/ClippingHelperImpl.java
++++ after/net/minecraft/client/renderer/culling/ClippingHelperImpl.java
+@@ -15,6 +15,9 @@
+     private final FloatBuffer projectionMatrixBuffer = GLAllocation.createDirectFloatBuffer(16);
+     private final FloatBuffer modelviewMatrixBuffer = GLAllocation.createDirectFloatBuffer(16);
+     private final FloatBuffer floatBuffer16 = GLAllocation.createDirectFloatBuffer(16);
++    private final org.joml.Matrix4f vpMatrix = new org.joml.Matrix4f();
++    private final org.joml.Matrix4f jomlProjection = new org.joml.Matrix4f();
++    private final org.joml.Matrix4f jomlModelview = new org.joml.Matrix4f();
+ 
+     public static ClippingHelper getInstance()
+     {
+@@ -96,5 +99,16 @@
+         afloat7[2] = this.clippingMatrix[11] + this.clippingMatrix[10];
+         afloat7[3] = this.clippingMatrix[15] + this.clippingMatrix[14];
+         this.normalize(afloat7);
++
++        this.jomlProjection.set(afloat);
++        this.jomlModelview.set(afloat1);
++        this.jomlModelview.m30(0.0f).m31(0.0f).m32(0.0f);
++        this.vpMatrix.set(this.jomlProjection).mul(this.jomlModelview);
++    }
++
++    @Override
++    public org.joml.Matrix4f getVpMatrix()
++    {
++        return this.vpMatrix;
+     }
+ }
