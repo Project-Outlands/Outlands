@@ -180,6 +180,10 @@ public final class GlShaders {
         if (existing == null) {
             return;
         }
+        if (existing.compiled()) {
+            // A module was attached for this shader: a precompiled one next to the source. Nothing to do.
+            return;
+        }
         GlslCompiler.Stage stage = existing.glType() == VERTEX_SHADER
                 ? GlslCompiler.Stage.VERTEX : GlslCompiler.Stage.FRAGMENT;
         try {
@@ -210,6 +214,35 @@ public final class GlShaders {
     public static String shaderLog(int shader) {
         Shader existing = SHADERS.get(shader);
         return existing == null ? "" : existing.log();
+    }
+
+    /**
+     * Gives a shader object a module that was found beside its source, so {@link #compileShader} adopts it instead of
+     * compiling anything.
+     *
+     * <p>This is what a precompiled module is for: the source is never touched, and the shipped module is what runs.</p>
+     */
+    public static void attachModule(int shader, byte[] spirv) {
+        Shader existing = SHADERS.get(shader);
+        if (existing == null || spirv == null) {
+            return;
+        }
+        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), spirv, ""));
+    }
+
+    /**
+     * Fails a shader with a reason, without compiling anything.
+     *
+     * <p>Used when a shipped module turns out to be unusable: the shader reports a compile failure carrying the
+     * reason, which is what the game reads and prints. Compiling the GLSL instead would silently override the choice
+     * the module's author made.</p>
+     */
+    public static void failShader(int shader, String reason) {
+        Shader existing = SHADERS.get(shader);
+        if (existing == null) {
+            return;
+        }
+        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, reason));
     }
 
     public static void deleteShader(int shader) {

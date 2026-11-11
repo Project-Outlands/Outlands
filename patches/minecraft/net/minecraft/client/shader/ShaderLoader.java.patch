@@ -1,12 +1,11 @@
 --- before/net/minecraft/client/shader/ShaderLoader.java
 +++ after/net/minecraft/client/shader/ShaderLoader.java
-@@ -60,7 +60,8 @@
- 
-         if (shaderloader == null)
-         {
--            ResourceLocation resourcelocation = new ResourceLocation("shaders/program/" + filename + type.getShaderExtension());
-+            String[] rl = ResourceLocation.splitObjectName(filename);
-+            ResourceLocation resourcelocation = new ResourceLocation(rl[0], "shaders/program/" + rl[1] + type.getShaderExtension());
-             IResource iresource = resourceManager.getResource(resourcelocation);
- 
-             try
+@@ -72,3 +72,8 @@
+                 int i = OpenGlHelper.glCreateShader(type.getShaderMode());
+                 OpenGlHelper.glShaderSource(i, bytebuffer);
++                // A module shipped beside the source, if any: the resource system reports which pack each one
++                // came from, which is what decides whether a module still describes this source.
++                net.minecraftforge.client.render.shader.SpirvResources.attach(
++                    i, resourceManager, resourcelocation, type.getShaderMode(), iresource.getResourcePackName()
++                );
+                 OpenGlHelper.glCompileShader(i);

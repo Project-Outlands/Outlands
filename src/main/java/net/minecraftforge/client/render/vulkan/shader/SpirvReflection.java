@@ -24,6 +24,7 @@ public final class SpirvReflection {
 
     // Instruction opcodes, from the SPIR-V specification.
     private static final int OP_NAME = 5;
+    private static final int OP_ENTRY_POINT = 15;
     private static final int OP_MEMBER_NAME = 6;
     private static final int OP_TYPE_BOOL = 20;
     private static final int OP_TYPE_INT = 21;
@@ -52,6 +53,10 @@ public final class SpirvReflection {
     // Storage classes.
     private static final int STORAGE_UNIFORM_CONSTANT = 0;
     private static final int STORAGE_UNIFORM = 2;
+
+    /** Execution models, from the SPIR-V specification: the stage a module is written for. */
+    public static final int EXECUTION_VERTEX = 0;
+    public static final int EXECUTION_FRAGMENT = 4;
 
     /** One sampled texture the shader reads. */
     public record Sampler(String name, int set, int binding) {}
@@ -104,6 +109,35 @@ public final class SpirvReflection {
     }
 
     private SpirvReflection() {}
+
+    /**
+     * The stage a module declares, from its {@code OpEntryPoint}.
+     *
+     * <p>Used to reject a module that was shipped next to a shader of the other stage: a vertex shader fed a fragment
+     * module compiles, links and then draws nothing, which is far harder to diagnose than refusing it here.</p>
+     *
+     * @return the execution model, or -1 when the module has no entry point
+     */
+    public static int executionModel(byte[] spirv) {
+        int[] words = toWords(spirv);
+        if (words.length < 5 || words[0] != MAGIC) {
+            return -1;
+        }
+        int index = 5;
+        while (index < words.length) {
+            int head = words[index];
+            int opcode = head & 0xFFFF;
+            int count = head >>> 16;
+            if (count == 0 || index + count > words.length) {
+                break;
+            }
+            if (opcode == OP_ENTRY_POINT && count >= 3) {
+                return words[index + 1];
+            }
+            index += count;
+        }
+        return -1;
+    }
 
     /**
      * Reads a module's interface.
