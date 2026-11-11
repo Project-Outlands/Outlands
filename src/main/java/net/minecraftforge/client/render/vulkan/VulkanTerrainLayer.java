@@ -60,7 +60,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     static final int NUM_LAYERS = net.minecraft.util.BlockRenderLayer.values().length;
     static final int MAX_INDIRECT_CAPACITY = 65_536;
     static final int LAYER_CAPACITY = MAX_INDIRECT_CAPACITY / NUM_LAYERS; // 16,384 per layer
-    static final int MAX_BATCHES_PER_LAYER = 32;
 
     private final VulkanBuffer[] indirectBuffers;
     private final VulkanBuffer[] chunkOffsetBuffers;
@@ -74,20 +73,63 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private final long[][] slotGeometryVersion = new long[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
     private final long[][] slotVisibilityHash = new long[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
     private final int[][] slotDrawnTotal = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
-    private final int[][] slotBatchCount = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
-    private final int[][][] slotBatchSlab = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
-    private final int[][][] slotBatchFirstCmd = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
-    private final int[][][] slotBatchCmdCount = new int[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final Batches[][] slotBatches = new Batches[VulkanSwapchain.FRAMES_IN_FLIGHT][NUM_LAYERS];
 
     // Tier 2: Shared host staging buffer cache (fast memcpy across slots without map lookups or formatting)
     private final boolean[] stagingCacheValid = new boolean[NUM_LAYERS];
     private final long[] stagingGeometryVersion = new long[NUM_LAYERS];
     private final long[] stagingVisibilityHash = new long[NUM_LAYERS];
     private final int[] stagingDrawnTotal = new int[NUM_LAYERS];
-    private final int[] stagingBatchCount = new int[NUM_LAYERS];
-    private final int[][] stagingBatchSlab = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
-    private final int[][] stagingBatchFirstCmd = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
-    private final int[][] stagingBatchCmdCount = new int[NUM_LAYERS][MAX_BATCHES_PER_LAYER];
+    private final Batches[] stagingBatches = new Batches[NUM_LAYERS];
+
+    /**
+     * One layer's GPU draw batches: each entry is one {@code vkCmdDrawIndexedIndirect} over one arena slab.
+     *
+     * <p>Grown on demand rather than sized to a constant. The previous fixed ceiling was 32, and a layer that needed
+     * more silently kept the first 32 batches - the draws for the remaining slabs were issued while the frame was
+     * built and then forgotten, so they disappeared on the next cache hit. A fragmented arena is exactly when this
+     * happens, which made it look like whole chunks flickering away.</p>
+     */
+    private static final class Batches {
+        private final IntArrayList slab = new IntArrayList();
+        private final IntArrayList firstCommand = new IntArrayList();
+        private final IntArrayList commandCount = new IntArrayList();
+
+        void clear() {
+            slab.clear();
+            firstCommand.clear();
+            commandCount.clear();
+        }
+
+        void add(int slabIndex, int first, int count) {
+            slab.add(slabIndex);
+            firstCommand.add(first);
+            commandCount.add(count);
+        }
+
+        int size() {
+            return slab.size();
+        }
+
+        int slab(int i) {
+            return slab.getInt(i);
+        }
+
+        int firstCommand(int i) {
+            return firstCommand.getInt(i);
+        }
+
+        int commandCount(int i) {
+            return commandCount.getInt(i);
+        }
+
+        void copyFrom(Batches other) {
+            clear();
+            slab.addAll(other.slab);
+            firstCommand.addAll(other.firstCommand);
+            commandCount.addAll(other.commandCount);
+        }
+    }
 
     private final Map<ChunkMeshCapture.Key, TerrainSlice> activeSlices = new HashMap<>();
     @SuppressWarnings("unchecked")
@@ -146,6 +188,10 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         for (int i = 0; i < layerSlices.length; i++) {
             layerSlices[i] = new ArrayList<>();
             layerSliceMaps[i] = new Long2ObjectOpenHashMap<>();
+            stagingBatches[i] = new Batches();
+            for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
+                slotBatches[s][i] = new Batches();
+            }
         }
         this.hostChunkOffsetStaging = ByteBuffer.allocateDirect(MAX_INDIRECT_CAPACITY * 16)
                 .order(java.nio.ByteOrder.nativeOrder());
@@ -259,20 +305,23 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     private void invalidateLayerCache(int layer) {
         if (layer >= 0 && layer < NUM_LAYERS) {
             geometryVersion[layer]++;
-            stagingCacheValid[layer] = false;
-            for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
-                slotCacheValid[s][layer] = false;
-            }
+            invalidateCacheEntries(layer);
+        }
+    }
+
+    private void invalidateCacheEntries(int layer) {
+        stagingCacheValid[layer] = false;
+        stagingBatches[layer].clear();
+        for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
+            slotCacheValid[s][layer] = false;
+            slotBatches[s][layer].clear();
         }
     }
 
     private void invalidateAllCaches() {
         for (int l = 0; l < NUM_LAYERS; l++) {
             geometryVersion[l]++;
-            stagingCacheValid[l] = false;
-            for (int s = 0; s < VulkanSwapchain.FRAMES_IN_FLIGHT; s++) {
-                slotCacheValid[s][l] = false;
-            }
+            invalidateCacheEntries(l);
         }
     }
 
@@ -296,11 +345,11 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             h ^= Float.floatToIntBits(f);
             h *= 1099511628211L;
         }
-        h ^= (long) (vx * 10.0);
+        h ^= Double.doubleToLongBits(vx);
         h *= 1099511628211L;
-        h ^= (long) (vy * 10.0);
+        h ^= Double.doubleToLongBits(vy);
         h *= 1099511628211L;
-        h ^= (long) (vz * 10.0);
+        h ^= Double.doubleToLongBits(vz);
         h *= 1099511628211L;
         return h;
     }
@@ -483,19 +532,27 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             int layerBaseCmd = layer * LAYER_CAPACITY;
             int layerBaseChunk = layer * LAYER_CAPACITY;
 
+            // The translucent layer is sorted back to front every time the camera moves, and the visible-chunk list
+            // it sorts does not change when the camera merely turns. So its command order is a function of the camera
+            // as well, and caching it on the chunk list alone would keep replaying the order from wherever the player
+            // used to stand - water and glass blending against each other in stale order. Rebuilding this one layer
+            // every frame costs the sort the game already does.
+            boolean cacheable = !isTranslucent;
+
             long visHash = (visibleChunks != null)
                     ? hashVisibleChunks(visibleChunks)
                     : hashFrustum(frustumPlanes, viewX, viewY, viewZ);
 
             // Tier 1 Check: Current slot already has the exact GPU buffer!
-            if (slotCacheValid[slot][layer]
+            if (cacheable && slotCacheValid[slot][layer]
                     && slotGeometryVersion[slot][layer] == geometryVersion[layer]
                     && slotVisibilityHash[slot][layer] == visHash) {
-                int batchCount = slotBatchCount[slot][layer];
+                Batches batches = slotBatches[slot][layer];
+                int batchCount = batches.size();
                 for (int b = 0; b < batchCount; b++) {
-                    int slab = slotBatchSlab[slot][layer][b];
-                    int firstCmd = slotBatchFirstCmd[slot][layer][b];
-                    int count = slotBatchCmdCount[slot][layer][b];
+                    int slab = batches.slab(b);
+                    int firstCmd = batches.firstCommand(b);
+                    int count = batches.commandCount(b);
                     vkCmdBindVertexBuffers(commandBuffer, 0,
                             stack.longs(arenaPool.slab(slab).buffer().handle()),
                             stack.mallocLong(1).put(0, 0L));
@@ -515,7 +572,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             long chunkOffsetMapped = chunkOffsetBuffers[slot].mappedAddress();
 
             // Tier 2 Check: Shared host staging buffer already has the exact data!
-            if (stagingCacheValid[layer]
+            if (cacheable && stagingCacheValid[layer]
                     && stagingGeometryVersion[layer] == geometryVersion[layer]
                     && stagingVisibilityHash[layer] == visHash) {
                 int totalDrawn = stagingDrawnTotal[layer];
@@ -527,15 +584,14 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     MemoryUtil.memCopy(hostOffsetBase, gpuOffsetBase, (long) totalDrawn << 4);
                     MemoryUtil.memCopy(hostIndirectBase, gpuIndirectBase, (long) totalDrawn * 20L);
                 }
-                int batchCount = stagingBatchCount[layer];
-                slotBatchCount[slot][layer] = batchCount;
+                Batches staged = stagingBatches[layer];
+                Batches batches = slotBatches[slot][layer];
+                batches.copyFrom(staged);
+                int batchCount = batches.size();
                 for (int b = 0; b < batchCount; b++) {
-                    slotBatchSlab[slot][layer][b] = stagingBatchSlab[layer][b];
-                    slotBatchFirstCmd[slot][layer][b] = stagingBatchFirstCmd[layer][b];
-                    slotBatchCmdCount[slot][layer][b] = stagingBatchCmdCount[layer][b];
-                    int slab = stagingBatchSlab[layer][b];
-                    int firstCmd = stagingBatchFirstCmd[layer][b];
-                    int count = stagingBatchCmdCount[layer][b];
+                    int slab = batches.slab(b);
+                    int firstCmd = batches.firstCommand(b);
+                    int count = batches.commandCount(b);
                     vkCmdBindVertexBuffers(commandBuffer, 0,
                             stack.longs(arenaPool.slab(slab).buffer().handle()),
                             stack.mallocLong(1).put(0, 0L));
@@ -545,7 +601,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 slotDrawnTotal[slot][layer] = totalDrawn;
                 slotGeometryVersion[slot][layer] = geometryVersion[layer];
                 slotVisibilityHash[slot][layer] = visHash;
-                slotCacheValid[slot][layer] = true;
+                slotCacheValid[slot][layer] = cacheable;
                 drawn = totalDrawn;
                 drawCount += drawn;
                 if (++logFrameCounter % 300 == 1 && list.size() > 0) {
@@ -605,6 +661,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
             long hostOffsetBase = hostOffsetStagingAddr + ((long) layerBaseChunk << 4);
             long hostIndirectBase = hostIndirectStagingAddr + (long) layerBaseCmd * 20L;
+            stagingBatches[layer].clear();
             int batchCount = 0;
 
             if (slabCount <= 1) {
@@ -646,9 +703,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 }
 
                 if (layerDrawn > 0) {
-                    stagingBatchSlab[layer][0] = 0;
-                    stagingBatchFirstCmd[layer][0] = layerBaseCmd;
-                    stagingBatchCmdCount[layer][0] = layerDrawn;
+                    stagingBatches[layer].add(0, layerBaseCmd, layerDrawn);
                     batchCount = 1;
 
                     long gpuOffsetBase = chunkOffsetMapped + ((long) layerBaseChunk << 4);
@@ -715,12 +770,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     bucket.clear();
 
                     if (slabDrawn > 0) {
-                        if (batchCount < MAX_BATCHES_PER_LAYER) {
-                            stagingBatchSlab[layer][batchCount] = s;
-                            stagingBatchFirstCmd[layer][batchCount] = startCmdIndex;
-                            stagingBatchCmdCount[layer][batchCount] = slabDrawn;
-                            batchCount++;
-                        }
+                        stagingBatches[layer].add(s, startCmdIndex, slabDrawn);
+                        batchCount++;
                         long gpuOffsetBase = chunkOffsetMapped + ((long) startChunkId << 4);
                         long gpuIndirectBase = indirectMapped + (long) startCmdIndex * 20L;
                         long srcOffset = (long) (startChunkId - layerBaseChunk) << 4;
@@ -745,22 +796,17 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             }
 
             // Update both Tier 2 and Tier 1 caches
-            stagingBatchCount[layer] = batchCount;
+
             stagingDrawnTotal[layer] = drawn;
             stagingGeometryVersion[layer] = geometryVersion[layer];
             stagingVisibilityHash[layer] = visHash;
-            stagingCacheValid[layer] = true;
+            stagingCacheValid[layer] = cacheable;
 
-            slotBatchCount[slot][layer] = batchCount;
-            for (int b = 0; b < batchCount; b++) {
-                slotBatchSlab[slot][layer][b] = stagingBatchSlab[layer][b];
-                slotBatchFirstCmd[slot][layer][b] = stagingBatchFirstCmd[layer][b];
-                slotBatchCmdCount[slot][layer][b] = stagingBatchCmdCount[layer][b];
-            }
+            slotBatches[slot][layer].copyFrom(stagingBatches[layer]);
             slotDrawnTotal[slot][layer] = drawn;
             slotGeometryVersion[slot][layer] = geometryVersion[layer];
             slotVisibilityHash[slot][layer] = visHash;
-            slotCacheValid[slot][layer] = true;
+            slotCacheValid[slot][layer] = cacheable;
 
             drawCount += drawn;
             if (++logFrameCounter % 300 == 1 && list.size() > 0) {
