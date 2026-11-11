@@ -776,6 +776,10 @@ dependencies {
     shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version"
     shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version:$lwjglArch"
 }
+// Hand-written replacements for the game's own shaders, in Vulkan GLSL. They live outside the resource roots on
+// purpose: a #version 450 source on the classpath at assets/minecraft/shaders/program/ would be handed to a GL
+// context as if it were the game's 1.20 shader. Only the modules they produce ship.
+def vanillaShaderSources = rootProject.layout.projectDirectory.dir('src/main/shaders/vanilla')
 def programShaderOutput = layout.buildDirectory.dir('generated/programShaders')
 tasks.register('compileProgramShaders', JavaExec) {
     group = 'build'
@@ -784,9 +788,11 @@ tasks.register('compileProgramShaders', JavaExec) {
     classpath = files(sourceSets.main.output.classesDirs) + configurations.shaderCompilerTools
     mainClass = 'net.minecraftforge.client.render.vulkan.shader.ProgramShaderCompiler'
     inputs.files(mcpBase.extra)
+    inputs.dir(vanillaShaderSources).optional()
     outputs.dir(programShaderOutput)
     doFirst {
-        args = [mcpBase.extra.get().toString(), programShaderOutput.get().asFile.absolutePath]
+        args = [mcpBase.extra.get().toString(), programShaderOutput.get().asFile.absolutePath,
+                vanillaShaderSources.asFile.absolutePath]
     }
 }
 // The generated modules are *not* routed through processResources: compileJava already depends on it in this build,
