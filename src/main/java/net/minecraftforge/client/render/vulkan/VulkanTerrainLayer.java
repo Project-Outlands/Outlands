@@ -446,11 +446,10 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                     if (cap != null && cap.quadCount() > 0) {
                         int byteSize = cap.quadCount() * TerrainVertexFormat.COMPACT_QUAD_SIZE;
                         TerrainArenaPool.Allocation alloc = arenaPool.allocate(byteSize);
-                        if (cap.vertices().length == byteSize) {
-                            arenaPool.upload(alloc, cap.vertices(), byteSize);
-                        } else {
-                            arenaPool.uploadCompact(alloc, cap.vertices(), cap.quadCount());
-                        }
+                        // The capture produces the compact layout already, so this is a straight copy of its first
+                        // byteSize bytes. (The array may be longer than the mesh: it comes from a size-bucketed pool.)
+                        arenaPool.upload(alloc, cap.vertices(), byteSize);
+                        ChunkMeshCapture.releaseBuffer(cap.vertices());
                         TerrainSlice slice = new TerrainSlice(
                                 alloc.slabIndex(),
                                 alloc.offset(),
@@ -925,11 +924,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             if (chunk.quadCount() > 0) {
                 int byteSize = chunk.quadCount() * TerrainVertexFormat.COMPACT_QUAD_SIZE;
                 TerrainArenaPool.Allocation alloc = arenaPool.allocate(byteSize);
-                if (chunk.vertices().length == byteSize) {
-                    arenaPool.upload(alloc, chunk.vertices(), byteSize);
-                } else {
-                    arenaPool.uploadCompact(alloc, chunk.vertices(), chunk.quadCount());
-                }
+                arenaPool.upload(alloc, chunk.vertices(), byteSize);
                 TerrainSlice slice = new TerrainSlice(
                         alloc.slabIndex(),
                         alloc.offset(),

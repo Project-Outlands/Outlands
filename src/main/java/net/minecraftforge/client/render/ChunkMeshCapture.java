@@ -66,6 +66,30 @@ public final class ChunkMeshCapture {
     private static final AtomicLong captured = new AtomicLong();
     private static final AtomicLong dropped = new AtomicLong();
 
+    /**
+     * Recycled vertex arrays, bucketed by power-of-two length.
+     *
+     * <p>A captured mesh is handed to the render thread and dropped as soon as it has been copied into the arena, so
+     * the array lives for a few milliseconds. Without pooling, every rebuilt chunk layer allocates one: a render
+     * distance of 16 rebuilds thousands of them a second while flying, and each is tens of kilobytes.</p>
+     *
+     * <p>Bucketed rather than exact-sized because a mesh's size changes as its chunk changes, and an exact-match pool
+     * would miss almost every time. The budget bounds the memory the pool may hold; beyond it, arrays are simply
+     * dropped, which is what would have happened without the pool.</p>
+     */
+    private static final int POOL_BUCKETS = 23;
+    private static final long POOL_BUDGET_BYTES = 16L * 1024 * 1024;
+    @SuppressWarnings("unchecked")
+    private static final Queue<byte[]>[] POOL = new Queue[POOL_BUCKETS];
+    private static final AtomicLong pooledBytes = new AtomicLong();
+    private static final AtomicLong reused = new AtomicLong();
+
+    static {
+        for (int i = 0; i < POOL.length; i++) {
+            POOL[i] = new ConcurrentLinkedQueue<>();
+        }
+    }
+
     private static final ChunkLifecycleListener LIFECYCLE_LISTENER = new ChunkLifecycleListener() {
         @Override
         public void onChunkUnload(World world, int chunkX, int chunkZ) {
@@ -93,6 +117,62 @@ public final class ChunkMeshCapture {
         ChunkLifecycle.unregister(LIFECYCLE_LISTENER);
         ACTIVE_KEYS.clear();
         PENDING_EVENTS.clear();
+        for (Queue<byte[]> bucket : POOL) {
+            bucket.clear();
+        }
+        pooledBytes.set(0L);
+    }
+
+    /**
+     * An array holding at least {@code bytes}, preferring a recycled one.
+     *
+     * <p>Returns an array at least as large as asked for: a caller writes its mesh from offset zero and reads back
+     * using its own computed length, so a larger array is simply unused tail.</p>
+     */
+    public static byte[] acquireBuffer(int bytes) {
+        int bucket = bucketFor(bytes);
+        for (int i = bucket; i < POOL.length; i++) {
+            byte[] recycled = POOL[i].poll();
+            if (recycled != null) {
+                pooledBytes.addAndGet(-recycled.length);
+                reused.incrementAndGet();
+                return recycled;
+            }
+        }
+        return new byte[bytes];
+    }
+
+    /**
+     * Returns an array from {@link #acquireBuffer} once its contents have been copied out.
+     *
+     * <p>Callers must be done with it: the next acquirer gets the same array.</p>
+     */
+    public static void releaseBuffer(byte[] buffer) {
+        if (buffer == null) {
+            return;
+        }
+        int bucket = bucketFor(buffer.length);
+        if (bucket >= POOL.length) {
+            return;
+        }
+        long size = buffer.length;
+        if (pooledBytes.get() + size > POOL_BUDGET_BYTES) {
+            return;
+        }
+        pooledBytes.addAndGet(size);
+        POOL[bucket].add(buffer);
+    }
+
+    private static int bucketFor(int bytes) {
+        if (bytes <= 1) {
+            return 0;
+        }
+        return Math.min(POOL_BUCKETS - 1, 32 - Integer.numberOfLeadingZeros(bytes - 1));
+    }
+
+    /** How many arrays have been handed back out by the pool, for the log line. */
+    public static long recycledBuffers() {
+        return reused.get();
     }
 
     public static boolean isEnabled() {
@@ -102,6 +182,14 @@ public final class ChunkMeshCapture {
     /** Clears all current meshes and notifies the backend to reset its arena allocations. */
     public static void clear() {
         ACTIVE_KEYS.clear();
+        // Anything still queued will never reach the arena, so its array goes back to the pool rather than to the
+        // collector. This is the only place a captured array is discarded without being consumed.
+        CaptureEvent queued;
+        while ((queued = PENDING_EVENTS.poll()) != null) {
+            if (queued.capture() != null) {
+                releaseBuffer(queued.capture().vertices());
+            }
+        }
         PENDING_EVENTS.clear();
         if (enabled) {
             PENDING_EVENTS.add(CaptureEvent.clear());
@@ -194,7 +282,9 @@ public final class ChunkMeshCapture {
 
             java.nio.ByteBuffer source = buffer.getByteBuffer();
             source.position(0);
-            byte[] compactVertices = net.minecraftforge.client.render.vulkan.TerrainVertexFormat.compact(source, quadCount);
+            int byteLength = quadCount * net.minecraftforge.client.render.vulkan.TerrainVertexFormat.COMPACT_QUAD_SIZE;
+            byte[] compactVertices = acquireBuffer(byteLength);
+            net.minecraftforge.client.render.vulkan.TerrainVertexFormat.compact(source, quadCount, compactVertices);
 
             Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, compactVertices, quadCount);
             ACTIVE_KEYS.add(key);

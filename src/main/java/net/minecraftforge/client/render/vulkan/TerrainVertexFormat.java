@@ -207,6 +207,21 @@ public final class TerrainVertexFormat {
     }
 
     /**
+     * Compacts quads into the caller's array, which must hold at least {@code quadCount * 16} bytes.
+     *
+     * <p>The entry point for a caller that already owns a buffer - a recycled one, say. Nothing is allocated, and the
+     * offset is zero: the array is the mesh from its first byte.</p>
+     */
+    public static void compact(ByteBuffer srcBuffer, int quadCount, byte[] dst) {
+        int required = quadCount * COMPACT_QUAD_SIZE;
+        if (dst.length < required) {
+            throw new IllegalArgumentException("compacting " + quadCount + " quads needs " + required
+                    + " bytes, the array holds " + dst.length);
+        }
+        compactDirectToArray(MemoryUtil.memAddress(srcBuffer), dst, quadCount);
+    }
+
+    /**
      * Compacts quads from a byte array in vanilla's layout into the given address, which must be mapped memory.
      */
     public static void compact(byte[] raw, int quadCount, long dstAddress) {

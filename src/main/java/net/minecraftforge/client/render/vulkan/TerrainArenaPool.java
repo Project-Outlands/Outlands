@@ -163,15 +163,6 @@ public final class TerrainArenaPool implements AutoCloseable {
     }
 
     /**
-     * Compacts raw 28-byte vertices into the 16-byte GPU layout directly inside the mapped slab memory.
-     */
-    public void uploadCompact(Allocation alloc, byte[] rawVertices, int quadCount) {
-        Slab slab = slabs.get(alloc.slabIndex());
-        long targetAddress = slab.buffer().mappedAddress() + alloc.offset();
-        TerrainVertexFormat.compact(rawVertices, quadCount, targetAddress);
-    }
-
-    /**
      * Retires an allocation so it can be safely freed after the current slot completes its GPU execution.
      */
     public void retire(Allocation alloc, int currentSlot) {
