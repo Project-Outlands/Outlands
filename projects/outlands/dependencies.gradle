@@ -90,6 +90,18 @@ dependencies {
         }
     }
 
+    // Runtime GLSL compilation. Needed at runtime, not only to compile the loader against: the backend calls shaderc
+    // when a mod or the game hands over shader source, so it goes wherever the other runtime LWJGL modules go.
+    project.shaderCompilerLibraries.each {
+        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
+        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
+        installer "org.lwjgl:$it:$props.lwjgl_version"
+        runtimeOnly "org.lwjgl:$it:$props.lwjgl_version:$lwjglArch"
+        lwjglLibraries[1].each { arch ->
+            lwjglNatives "org.lwjgl:$it:$props.lwjgl_version:$arch"
+        }
+    }
+
     // Config formats. These are loader-level libraries, so they belong on the launcher classpath rather than inside
     // any jar: config files are read before mods are constructed. The versions are inline: a property in
     // gradle.properties only earns its keep when several dependencies are upgraded together.

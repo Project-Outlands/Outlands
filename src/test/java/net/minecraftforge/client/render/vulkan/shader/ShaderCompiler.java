@@ -45,68 +45,29 @@ public final class ShaderCompiler {
     private static final String[][] SHADERS = {
             {"terrain.vert", "vertex"},
             {"terrain.frag", "fragment"},
-            {"stream.vert", "vertex"},
-            {"stream.frag", "fragment"},
     };
 
     private ShaderCompiler() {}
 
     public static void main(String[] args) throws IOException {
         Path root = Path.of(args.length > 0 ? args[0] : ".").resolve(SOURCE_DIR);
-        long compiler = shaderc_compiler_initialize();
-        if (compiler == 0L) {
-            throw new IllegalStateException("shaderc_compiler_initialize returned 0");
+        for (String[] shader : SHADERS) {
+            Path source = root.resolve(shader[0]);
+            Path output = root.resolve(shader[0] + ".spv");
+            byte[] spirv = net.minecraftforge.client.render.vulkan.shader.GlslCompiler.compile(
+                    Files.readString(source), stage(shader[1]), shader[0]);
+            Files.write(output, spirv);
+            System.out.println("compiled " + shader[0] + " -> " + output.getFileName()
+                    + " (" + spirv.length + " bytes)");
         }
-        try {
-            for (String[] shader : SHADERS) {
-                compile(compiler, root, shader[0], shader[1]);
-            }
-        } finally {
-            shaderc_compiler_release(compiler);
-        }
+        net.minecraftforge.client.render.vulkan.shader.GlslCompiler.release();
     }
 
-    private static void compile(long compiler, Path root, String file, String stage) throws IOException {
-        Path source = root.resolve(file);
-        Path output = root.resolve(file + ".spv");
-        String text = Files.readString(source);
-
-        long options = shaderc_compile_options_initialize();
-        if (options == 0L) {
-            throw new IllegalStateException("shaderc_compile_options_initialize returned 0");
-        }
-        long result = 0L;
-        try {
-            shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan,
-                    shaderc_env_version_vulkan_1_4);
-            shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
-
-            result = shaderc_compile_into_spv(compiler, text, kind(stage), source.getFileName().toString(),
-                    "main", options);
-            if (result == 0L) {
-                throw new IllegalStateException("shaderc returned no result for " + file);
-            }
-            if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
-                throw new IllegalStateException(file + ": " + shaderc_result_get_error_message(result));
-            }
-            ByteBuffer spirv = shaderc_result_get_bytes(result);
-            byte[] bytes = new byte[spirv.remaining()];
-            spirv.get(bytes);
-            Files.write(output, bytes);
-            System.out.println("compiled " + file + " -> " + output.getFileName() + " (" + bytes.length + " bytes)");
-        } finally {
-            if (result != 0L) {
-                shaderc_result_release(result);
-            }
-            shaderc_compile_options_release(options);
-        }
-    }
-
-    private static int kind(String stage) {
-        return switch (stage) {
-            case "vertex" -> shaderc_glsl_vertex_shader;
-            case "fragment" -> shaderc_glsl_fragment_shader;
-            default -> throw new IllegalArgumentException("unsupported stage: " + stage);
+    private static net.minecraftforge.client.render.vulkan.shader.GlslCompiler.Stage stage(String name) {
+        return switch (name) {
+            case "vertex" -> net.minecraftforge.client.render.vulkan.shader.GlslCompiler.Stage.VERTEX;
+            case "fragment" -> net.minecraftforge.client.render.vulkan.shader.GlslCompiler.Stage.FRAGMENT;
+            default -> throw new IllegalArgumentException("unsupported stage: " + name);
         };
     }
 }

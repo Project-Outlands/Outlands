@@ -121,6 +121,10 @@ ext {
     // Order matters where this list is concatenated with lwjglLibraries[0]: the natives helper matches jar names by
     // substring, and 'lwjgl' is a substring of every module here, so the specific names have to come first.
     vulkanLibraries = ['lwjgl-vulkan', 'lwjgl-vma']
+    // shaderc compiles GLSL to SPIR-V in the running process. The loader's own shaders are compiled at build time and
+    // committed, but a mod or a shader pack hands over GLSL while the game runs, and vanilla's post-processing and
+    // entity outline arrive the same way. LWJGL ships it as a module with natives, so it arrives with the rest.
+    shaderCompilerLibraries = ['lwjgl-shaderc']
     // The architectures lwjgl-vulkan actually publishes natives for.
     vulkanVulkanNativeArches = ['natives-macos', 'natives-macos-arm64']
 }
