@@ -66,6 +66,13 @@ class ContainedDepPathsTest {
     }
 
     @Test
+    void anEmptyModernDeclarationSuppressesTheLegacyList() {
+        JarDeclaration declaration = declaration("");
+
+        assertEquals(List.of(), LibraryManager.containedDepPaths(manifest("old.jar"), declaration, "test.jar"));
+    }
+
+    @Test
     void repeatedSeparatorsInTheLegacyAttributeAreNotPaths() {
         // "a.jar  b.jar" splits into an empty element, which used to be reported as a dependency that is not a jar
         assertEquals(List.of("a.jar", "b.jar"), LibraryManager.containedDepPaths(manifest("a.jar  b.jar "), null, "test.jar"));

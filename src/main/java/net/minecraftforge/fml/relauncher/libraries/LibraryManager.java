@@ -20,6 +20,7 @@
 package net.minecraftforge.fml.relauncher.libraries;
 
 import java.io.*;
+import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.security.CodeSource;
@@ -425,14 +426,19 @@ public class LibraryManager
      */
     @javax.annotation.Nullable
     public static URL bundledLibraryUrl(File source, JarDeclaration.ContainedDep dep)
-            throws java.net.MalformedURLException
+            throws MalformedURLException
     {
-        URL mounted = mountedLibraries.get(dep.fileName());
+        return bundledLibraryUrl(dep.fileName());
+    }
+
+    private static URL bundledLibraryUrl(String fileName) throws MalformedURLException
+    {
+        URL mounted = mountedLibraries.get(fileName);
         if (mounted != null)
         {
             return mounted;
         }
-        File extracted = bundledLibraryNamed(dep.fileName());
+        File extracted = bundledLibraryNamed(fileName);
         return extracted == null ? null : extracted.getAbsoluteFile().toURI().toURL();
     }
 
@@ -489,6 +495,60 @@ public class LibraryManager
     }
 
     /**
+     * Returns bundled library URLs for injection before a coremod or tweaker runs.
+     * Must run on the launch thread after candidate discovery has prepared the bundled libraries.
+     * Missing libraries are logged and omitted; malformed file URLs propagate to the caller.
+     */
+    public static List<URL> earlyLibraryUrls(File source) throws MalformedURLException
+    {
+        return earlyLibraryUrls(source, skipContainedDeps);
+    }
+
+    static List<URL> earlyLibraryUrls(File source, List<String> skipped) throws MalformedURLException
+    {
+        Attributes attrs;
+        JarDeclaration declaration;
+        List<String> paths;
+        try (JarFile jar = new JarFile(source))
+        {
+            attrs = jar.getManifest() == null ? null : jar.getManifest().getMainAttributes();
+            declaration = declaredContainedDeps(jar);
+            paths = containedDepPaths(attrs, declaration, source.getName());
+        }
+        catch (IOException e)
+        {
+            FMLLog.log.error("Could not read the bundled libraries of {}", source.getName(), e);
+            return List.of();
+        }
+
+        List<URL> libraries = new ArrayList<>();
+        for (String path : paths)
+        {
+            if (!declaresAsLibrary(attrs, declaration, path)
+                    || isSkippedContainedDep(path, NestedLibraryJars.entryInside(source, path), skipped))
+            {
+                continue;
+            }
+            JarDeclaration.ContainedDep dep = declaration == null ? null : declaration.depFor(path);
+            if (dep != null && isBundledLibraryShadowed(source, dep))
+            {
+                FMLLog.log.debug("{} bundles the library {}, which lost to another jar's higher version",
+                        source.getName(), dep.id());
+                continue;
+            }
+            URL library = bundledLibraryUrl(new File(path).getName());
+            if (library == null)
+            {
+                FMLLog.log.warn("{} declares the bundled library {}, but it is neither mounted nor extracted",
+                        source.getName(), path);
+                continue;
+            }
+            libraries.add(library);
+        }
+        return List.copyOf(libraries);
+    }
+
+    /**
      * @return the jar section of {@code jar}'s {@code mcmod.info}, or {@code null} when it has none
      *
      * <p>Goes through {@link JarMetadata}, which reads the entry once and shares it with the discovery pass that needs
@@ -539,7 +599,7 @@ public class LibraryManager
      * <p>Reused rather than rewritten: an existing file of the same name is left alone, so a pack that already has the
      * dependency unpacked keeps what it has.
      */
-    private static void extractContained(byte[] bytes, String fileName, String declaredPath, JarDeclaration declaration,
+    private static void extractContained(byte[] bytes, String fileName, boolean library,
                                          String fromJar, ModList modlist, File... modDirs)
     {
         for (File dir : modDirs)
@@ -548,6 +608,10 @@ public class LibraryManager
             if (existing.exists())
             {
                 FMLLog.log.debug("Found existing extracted dependency {}, reusing it", existing);
+                if (library)
+                {
+                    bundledLibraries.add(existing);
+                }
                 return;
             }
         }
@@ -558,7 +622,7 @@ public class LibraryManager
             Files.createParentDirs(target);
             java.nio.file.Files.write(target.toPath(), bytes);
             FMLLog.log.debug("Extracted bundled jar {} from {} to {}", fileName, fromJar, target);
-            if (declaresAsLibrary(declaration, declaredPath))
+            if (library)
             {
                 // A library is not a mod candidate: it is put on the classpath where it is needed and that is all. Adding
                 // it as a candidate would make the scan open it, look for @Mod classes and classify it as a non-mod
@@ -578,25 +642,20 @@ public class LibraryManager
      * @return whether the declaration marks {@code path} as a library. A path may have been rewritten to
      *         {@code META-INF/libraries/...} while looking it up, so the file name is compared as well.
      */
-    private static boolean declaresAsLibrary(JarDeclaration declaration, String path)
+    private static boolean declaresAsLibrary(Attributes attrs, JarDeclaration declaration, String path)
     {
         if (declaration == null)
         {
-            return false;
+            return attrs != null && Boolean.parseBoolean(attrs.getValue("NonModDeps"));
         }
-        String name = new File(path).getName();
-        for (JarDeclaration.ContainedDep dep : declaration.containedDeps())
-        {
-            if (dep.kind() != JarDeclaration.ContainedDepKind.LIB)
-            {
-                continue;
-            }
-            if (dep.path().equals(path) || new File(dep.path()).getName().equals(name))
-            {
-                return true;
-            }
-        }
-        return false;
+        JarDeclaration.ContainedDep dep = declaration.depFor(path);
+        return dep != null && dep.kind() == JarDeclaration.ContainedDepKind.LIB;
+    }
+
+    private static boolean isSkippedContainedDep(String declaredPath, String resolvedPath, List<String> skipped)
+    {
+        return skipped.contains(declaredPath) || skipped.contains(resolvedPath)
+                || skipped.contains(new File(declaredPath).getName());
     }
 
     private static Pair<Artifact, byte[]> extractPacked(JarFile jar, ModList modlist, File... modDirs) throws IOException
@@ -626,8 +685,17 @@ public class LibraryManager
                     throw new IllegalStateException("Invalid contained dep, Must be jar: " + dep);
                 }
 
-                if (jar.getJarEntry(dep) == null && jar.getJarEntry("META-INF/libraries/" + dep) != null)
-                    dep = "META-INF/libraries/" + dep;
+                String declaredPath = dep;
+                String resolvedPath = NestedLibraryJars.entryInside(new File(jar.getName()), dep);
+                if (isSkippedContainedDep(declaredPath, resolvedPath, skipContainedDeps))
+                {
+                    FMLLog.log.error("Skipping dep at request: {}", declaredPath);
+                    continue;
+                }
+                if (resolvedPath != null)
+                {
+                    dep = resolvedPath;
+                }
 
                 JarEntry depEntry = jar.getJarEntry(dep);
                 if (depEntry == null)
@@ -646,26 +714,20 @@ public class LibraryManager
                     continue;
                 }
 
-                // A declared library never has to touch the disk: the class loader can read it out of this jar. This is
-                // the whole point of NestedLibraryJars, and the reason nothing else in this loop needs to change.
-                if (declared != null && declared.kind() == JarDeclaration.ContainedDepKind.LIB && NestedLibraryJars.enabled())
+                // A bundled library can stay inside its parent jar while zipfs mounting is enabled.
+                boolean library = declaresAsLibrary(attrs, declaration, dep);
+                String depEndName = new File(dep).getName();
+                if (library && NestedLibraryJars.enabled())
                 {
                     URL mounted = NestedLibraryJars.urlFor(new File(jar.getName()), dep);
                     if (mounted != null)
                     {
-                        mountedLibraries.put(declared.fileName(), mounted);
+                        mountedLibraries.put(depEndName, mounted);
                         FMLLog.log.debug("Mounted the bundled library {} from {} without extracting it", dep, new File(jar.getName()).getName());
                         continue;
                     }
                     FMLLog.log.warn("{} declares the bundled library {}, but the entry is missing; extracting instead",
                             new File(jar.getName()).getName(), dep);
-                }
-
-                String depEndName = new File(dep).getName(); // extract last part of name
-                if (skipContainedDeps.contains(dep) || skipContainedDeps.contains(depEndName))
-                {
-                    FMLLog.log.error("Skipping dep at request: {}", dep);
-                    continue;
                 }
 
                 Attributes meta = null;
@@ -700,7 +762,7 @@ public class LibraryManager
                 {
                     // No coordinates. It goes next to the other mods, so it is discovered the same way - a bundled jar is
                     // usually a prerequisite mod, not a library.
-                    extractContained(bytesOf(jar, depEntry, data), depEndName, dep, declaration, jar.getName(), modlist, modDirs);
+                    extractContained(bytesOf(jar, depEntry, data), depEndName, library, jar.getName(), modlist, modDirs);
                 }
                 else
                 {
@@ -711,6 +773,10 @@ public class LibraryManager
                         if (target.exists())
                         {
                             FMLLog.log.debug("Found existing ContainedDep {}({}) from {} extracted to {}, skipping extraction", dep, artifact.toString(), target.getCanonicalPath(), jar.getName());
+                            if (library)
+                            {
+                                bundledLibraries.add(target);
+                            }
                             if (!ENABLE_AUTO_MOD_MOVEMENT)
                             {
                                 Pair<?, ?> child = extractPacked(target, modlist, modDirs); //If we're not building a real list we have to re-build the dep list every run. So search down.
@@ -733,6 +799,10 @@ public class LibraryManager
                                 ByteStreams.copy(in, out);
                             }
                             FMLLog.log.debug("Extracted ContainedDep {}({}) from {} to {}", dep, artifact.toString(), jar.getName(), target.getCanonicalPath());
+                            if (library)
+                            {
+                                bundledLibraries.add(target);
+                            }
 
                             if (artifact.isSnapshot())
                             {
@@ -809,7 +879,7 @@ public class LibraryManager
             }
         }
 
-        if (declared.isEmpty())
+        if (declaration == null)
         {
             return legacy;
         }
