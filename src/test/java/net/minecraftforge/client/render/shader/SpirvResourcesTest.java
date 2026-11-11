@@ -83,6 +83,34 @@ class SpirvResourcesTest {
         assertTrue(GlShaders.shaderLog(shader).contains("module-broken"), "the reason names the file");
     }
 
+    @Test
+    void theGameProgramsAreShippedAsModulesOfTheRightStage() throws java.io.IOException {
+        // End to end: the build's generator put a module beside each of the game's program shaders, and it is a module
+        // of the stage the source declares. If this fails, the AOT half is not reaching the game at all.
+        for (String name : new String[] {"outline_combine.fsh", "outline_soft.fsh", "sobel.vsh", "blit.fsh"}) {
+            byte[] module;
+            try (java.io.InputStream in = SpirvResourcesTest.class
+                    .getResourceAsStream("/assets/minecraft/shaders/program/" + name + ".spv")) {
+                assertNotNull(in, "a module is shipped for " + name);
+                module = in.readAllBytes();
+            }
+            int glType = name.endsWith(".vsh") ? GlShaders.VERTEX_SHADER : GlShaders.FRAGMENT_SHADER;
+            assertNull(SpirvResources.validate(module, glType), name + " is a usable module of its stage");
+
+            // And it carries the names the game will ask for, which is what makes it a drop-in for the GLSL.
+            var reflected = net.minecraftforge.client.render.vulkan.shader.SpirvReflection.reflect(module);
+            if (name.equals("outline_combine.fsh")) {
+                assertNotNull(reflected.sampler("DiffuseSampler"), "the combine pass reads the scene");
+                assertNotNull(reflected.sampler("OutlineSampler"), "and the outline buffer");
+            } else if (name.endsWith(".fsh")) {
+                assertNotNull(reflected.sampler("DiffuseSampler"), name + " reads the previous pass");
+            } else {
+                assertTrue(reflected.samplers().isEmpty(),
+                        "a vertex stage that reads no textures, got " + reflected.samplers());
+            }
+        }
+    }
+
     private static byte[] compile(String body, GlslCompiler.Stage stage) {
         String source = "#version 120\n" + body;
         return GlslCompiler.compile(GlslPreprocessor.forVulkan(source, stage), stage, "test", true);

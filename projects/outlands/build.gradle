@@ -237,6 +237,8 @@ processResources {
 }
 
 test {
+    // The tests read the compiled program modules the way the game will, so the generator has to have run.
+    dependsOn 'compileProgramShaders'
     maxParallelForks = 1
     useJUnitPlatform()
     testLogging {
@@ -767,12 +769,21 @@ tasks.register('compileProgramShaders', JavaExec) {
     }
 }
 // The generated modules are *not* routed through processResources: compileJava already depends on it in this build,
-// and processResources depending on a task that needs compileJava is a cycle. They are added to the places that
-// actually consume resources at run time and at packaging time instead.
-sourceSets.main.runtimeClasspath += files(programShaderOutput)
-tasks.named('jar') {
-    from(programShaderOutput)
+// and processResources depending on a task that needs compileJava is a cycle. They travel as their own artifact
+// instead - one jar holding assets/minecraft/shaders/program/*.spv - which puts them on the run and test classpaths
+// through the ordinary dependency mechanism, so both see exactly what a released jar would contain.
+def programShaderJarTask = tasks.register('programShaderJar', Jar) {
+    dependsOn 'compileProgramShaders'
+    archiveClassifier = 'program-shaders'
+    from programShaderOutput
 }
+dependencies {
+    runtimeOnly files(programShaderJarTask)
+}
+// sourceSets.test.runtimeClasspath is built from main's at configuration time (see the sourceSets block above), which
+// is before this task exists, so the artifact is appended to both explicitly rather than relying on that copy.
+sourceSets.main.runtimeClasspath += files(programShaderJarTask)
+sourceSets.test.runtimeClasspath += files(programShaderJarTask)
 tasks.configureEach {
     if (name == 'runOutlandsClient' || name == 'runOutlandsServer') {
         dependsOn 'compileProgramShaders'
