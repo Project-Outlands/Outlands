@@ -85,11 +85,12 @@ public final class VulkanBackend implements RenderBackend {
             LOGGER.warn("Vulkan is the preferred render backend (branch development mode): this build boots into "
                     + "Vulkan, which currently clears the screen and draws nothing else. Revisit the default "
                     + "before merge.");
-            LOGGER.warn("GLSL programs are not implemented on this backend yet, so the capability table does not "
-                    + "declare GL 2.0/2.1: entity outlines (including the one the spectral arrow needs) and "
-                    + "post-processing are skipped. This is our gap, not the hardware's - the main-menu warning about "
-                    + "an old graphics card is suppressed on a non-GL backend for that reason. Declaring support "
-                    + "would crash in glCreateShader during startup.");
+            LOGGER.warn("The capability table does not declare GL 2.0/2.1, so entity outlines (including the one the "
+                    + "spectral arrow needs) and post-processing are skipped. Shader objects themselves work - the "
+                    + "game's programs ship as precompiled SPIR-V modules and anything else is compiled from GLSL - "
+                    + "but a ShaderGroup needs a second render target and a program draw path, and neither exists "
+                    + "yet. This is our gap, not the hardware's - the main-menu warning about an old graphics card is "
+                    + "suppressed on a non-GL backend for that reason.");
         } else {
             LOGGER.info("Vulkan backend registered as the preferred candidate, but it reports unavailable; the "
                     + "vanilla renderer will be used.");

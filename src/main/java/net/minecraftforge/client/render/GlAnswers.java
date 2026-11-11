@@ -86,11 +86,16 @@ public final class GlAnswers {
         caps.OpenGL15 = true;
         // 2.0 / 2.1 and the shader extensions are NOT declared yet, and this is deliberate.
         //
-        // §8.4 fixes the contract at GL 2.1 because vanilla's post-processing is GLSL 1.20. But a capability table
-        // has to describe what exists: claiming 2.1 made RenderGlobal build the entity-outline program during
-        // startup, which reached glCreateShader and took the process down (measured). Shader support needs a
-        // GLSL-to-SPIR-V compiler at runtime - §8.2 settled the distribution format, not the compilation - so it is
-        // a milestone of its own.
+        // §8.4 fixes the contract at GL 2.1 because vanilla's post-processing is GLSL 1.20. Shader *objects* now work
+        // on this backend - GlShaders keeps GL's object model, the game's own programs ship as precompiled modules
+        // beside their sources, and anything else is compiled from GLSL by shaderc - so glCreateShader is no longer
+        // the reason to say no.
+        //
+        // The reason is what follows a successful link. Declaring 2.0/2.1 makes RenderGlobal build the entity-outline
+        // ShaderGroup, and that group binds and clears a *second* render target every frame and then draws four
+        // full-screen quads with the linked program. This backend has one colour target and no program draw path yet,
+        // so the group would fail on its first bind. Answering "supported" before those exist would move the failure
+        // from a stated gap into the middle of a frame.
         //
         // Declaring it off means vanilla skips those paths rather than failing in them. Every use of
         // ShaderLinkHelper in the game is behind an OpenGlHelper.shadersSupported check, so nothing else breaks.

@@ -1,6 +1,6 @@
 --- before/net/minecraft/client/renderer/OpenGlHelper.java
 +++ after/net/minecraft/client/renderer/OpenGlHelper.java
-@@ -6,6 +6,7 @@
+@@ -6,11 +6,13 @@
  import java.nio.ByteBuffer;
  import java.nio.FloatBuffer;
  import java.nio.IntBuffer;
@@ -8,7 +8,13 @@
  import java.util.Locale;
  import net.minecraft.client.Minecraft;
  import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
-@@ -19,7 +20,6 @@
+ import net.minecraft.client.settings.GameSettings;
+ import net.minecraft.util.Util;
++import net.minecraftforge.client.render.shader.GlShaders;
+ import net.minecraftforge.fml.relauncher.Side;
+ import net.minecraftforge.fml.relauncher.SideOnly;
+ import org.apache.logging.log4j.LogManager;
+@@ -19,7 +21,6 @@
  import org.lwjgl.opengl.ARBFramebufferObject;
  import org.lwjgl.opengl.ARBMultitexture;
  import org.lwjgl.opengl.ARBShaderObjects;
@@ -16,7 +22,7 @@
  import org.lwjgl.opengl.ARBVertexShader;
  import org.lwjgl.opengl.ContextCapabilities;
  import org.lwjgl.opengl.EXTBlendFuncSeparate;
-@@ -31,8 +31,8 @@
+@@ -31,8 +32,8 @@
  import org.lwjgl.opengl.GL20;
  import org.lwjgl.opengl.GL30;
  import org.lwjgl.opengl.GLContext;
@@ -27,7 +33,7 @@
  
  @SideOnly(Side.CLIENT)
  public class OpenGlHelper
-@@ -93,6 +93,10 @@
+@@ -93,6 +94,10 @@
      public static int GL_ARRAY_BUFFER;
      public static int GL_STATIC_DRAW;
  
@@ -38,7 +44,7 @@
      public static void initializeTextures()
      {
          ContextCapabilities contextcapabilities = GLContext.getCapabilities();
-@@ -258,7 +262,10 @@
+@@ -258,7 +263,10 @@
          }
  
          shadersSupported = framebufferSupported && shadersAvailable;
@@ -50,7 +56,7 @@
          nvidia = s.contains("nvidia");
          arbVbo = !contextcapabilities.OpenGL15 && contextcapabilities.GL_ARB_vertex_buffer_object;
          vboSupported = contextcapabilities.OpenGL15 || arbVbo;
-@@ -296,8 +303,8 @@
+@@ -296,8 +304,8 @@
  
          try
          {
@@ -61,7 +67,51 @@
          }
          catch (Throwable throwable)
          {
-@@ -350,14 +357,7 @@
+@@ -314,13 +322,29 @@
+         return logText;
+     }
+ 
++    /*
++     * The shader entry points below are where the game's GL 2.0 shader layer meets the backend, and every one of them
++     * gains one line: on a backend without a GL context, GlShaders answers instead.
++     *
++     * GlShaders keeps the same object model - create, source, compile, attach, link, look a name up, write a value -
++     * so the callers do not change at all, which is the point: ShaderManager, ShaderLoader, ShaderUniform and the
++     * post-processing groups are untouched. What happens underneath is different by necessity: the source is brought
++     * forward by GlslPreprocessor and compiled to SPIR-V by shaderc, uniforms become offsets in a block, and samplers
++     * become descriptor bindings. A shader that does not compile reports a status and a log instead of throwing, so a
++     * broken shader pack still disables itself the way it always did.
++     *
++     * These are the only call sites in the game that reach GL 2.0 shader functions; mods that call GL20 directly are a
++     * separate problem, and one this seam deliberately does not pretend to solve.
++     */
+     public static int glGetProgrami(int program, int pname)
+     {
++        if (GlShaders.active()) return GlShaders.programStatus(program, pname);
+         return arbShaders ? ARBShaderObjects.glGetObjectParameteriARB(program, pname) : GL20.glGetProgrami(program, pname);
+     }
+ 
+     public static void glAttachShader(int program, int shaderIn)
+     {
++        if (GlShaders.active()) { GlShaders.attachShader(program, shaderIn); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glAttachObjectARB(program, shaderIn);
+@@ -333,6 +357,7 @@
+ 
+     public static void glDeleteShader(int shaderIn)
+     {
++        if (GlShaders.active()) { GlShaders.deleteShader(shaderIn); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glDeleteObjectARB(shaderIn);
+@@ -345,23 +370,23 @@
+ 
+     public static int glCreateShader(int type)
+     {
++        if (GlShaders.active()) return GlShaders.createShader(type);
+         return arbShaders ? ARBShaderObjects.glCreateShaderObjectARB(type) : GL20.glCreateShader(type);
+     }
  
      public static void glShaderSource(int shaderIn, ByteBuffer string)
      {
@@ -73,12 +123,79 @@
 -        {
 -            GL20.glShaderSource(shaderIn, string);
 -        }
++        if (GlShaders.active())
++        {
++            GlShaders.shaderSource(shaderIn, StandardCharsets.UTF_8.decode(string.duplicate()).toString());
++            return;
++        }
 +        GL20.glShaderSource(shaderIn, StandardCharsets.UTF_8.decode(string.duplicate()));
      }
  
      public static void glCompileShader(int shaderIn)
-@@ -437,11 +437,11 @@
      {
++        if (GlShaders.active()) { GlShaders.compileShader(shaderIn); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glCompileShaderARB(shaderIn);
+@@ -374,21 +399,25 @@
+ 
+     public static int glGetShaderi(int shaderIn, int pname)
+     {
++        if (GlShaders.active()) return GlShaders.shaderStatus(shaderIn, pname);
+         return arbShaders ? ARBShaderObjects.glGetObjectParameteriARB(shaderIn, pname) : GL20.glGetShaderi(shaderIn, pname);
+     }
+ 
+     public static String glGetShaderInfoLog(int shaderIn, int maxLength)
+     {
++        if (GlShaders.active()) return GlShaders.shaderLog(shaderIn);
+         return arbShaders ? ARBShaderObjects.glGetInfoLogARB(shaderIn, maxLength) : GL20.glGetShaderInfoLog(shaderIn, maxLength);
+     }
+ 
+     public static String glGetProgramInfoLog(int program, int maxLength)
+     {
++        if (GlShaders.active()) return GlShaders.programLog(program);
+         return arbShaders ? ARBShaderObjects.glGetInfoLogARB(program, maxLength) : GL20.glGetProgramInfoLog(program, maxLength);
+     }
+ 
+     public static void glUseProgram(int program)
+     {
++        if (GlShaders.active()) { GlShaders.useProgram(program); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glUseProgramObjectARB(program);
+@@ -401,11 +430,13 @@
+ 
+     public static int glCreateProgram()
+     {
++        if (GlShaders.active()) return GlShaders.createProgram();
+         return arbShaders ? ARBShaderObjects.glCreateProgramObjectARB() : GL20.glCreateProgram();
+     }
+ 
+     public static void glDeleteProgram(int program)
+     {
++        if (GlShaders.active()) { GlShaders.deleteProgram(program); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glDeleteObjectARB(program);
+@@ -418,6 +449,7 @@
+ 
+     public static void glLinkProgram(int program)
+     {
++        if (GlShaders.active()) { GlShaders.linkProgram(program); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glLinkProgramARB(program);
+@@ -430,23 +462,26 @@
+ 
+     public static int glGetUniformLocation(int programObj, CharSequence name)
+     {
++        if (GlShaders.active()) return GlShaders.uniformLocation(programObj, name);
+         return arbShaders ? ARBShaderObjects.glGetUniformLocationARB(programObj, name) : GL20.glGetUniformLocation(programObj, name);
+     }
+ 
+     public static void glUniform1(int location, IntBuffer values)
+     {
++        if (GlShaders.active()) { GlShaders.uniform1i(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform1ARB(location, values);
@@ -91,8 +208,17 @@
          }
      }
  
-@@ -461,11 +461,11 @@
+     public static void glUniform1i(int location, int v0)
      {
++        if (GlShaders.active()) { GlShaders.uniform1i(location, v0); return; }
+         if (arbShaders)
+         {
+             ARBShaderObjects.glUniform1iARB(location, v0);
+@@ -459,168 +494,159 @@
+ 
+     public static void glUniform1(int location, FloatBuffer values)
+     {
++        if (GlShaders.active()) { GlShaders.uniform1(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform1ARB(location, values);
@@ -105,8 +231,9 @@
          }
      }
  
-@@ -473,11 +473,11 @@
+     public static void glUniform2(int location, IntBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform2i(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform2ARB(location, values);
@@ -119,8 +246,9 @@
          }
      }
  
-@@ -485,11 +485,11 @@
+     public static void glUniform2(int location, FloatBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform2(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform2ARB(location, values);
@@ -133,8 +261,9 @@
          }
      }
  
-@@ -497,11 +497,11 @@
+     public static void glUniform3(int location, IntBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform3i(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform3ARB(location, values);
@@ -147,8 +276,9 @@
          }
      }
  
-@@ -509,11 +509,11 @@
+     public static void glUniform3(int location, FloatBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform3(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform3ARB(location, values);
@@ -161,8 +291,9 @@
          }
      }
  
-@@ -521,11 +521,11 @@
+     public static void glUniform4(int location, IntBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform4i(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform4ARB(location, values);
@@ -175,8 +306,9 @@
          }
      }
  
-@@ -533,11 +533,11 @@
+     public static void glUniform4(int location, FloatBuffer values)
      {
++        if (GlShaders.active()) { GlShaders.uniform4(location, values); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniform4ARB(location, values);
@@ -189,8 +321,9 @@
          }
      }
  
-@@ -545,11 +545,11 @@
+     public static void glUniformMatrix2(int location, boolean transpose, FloatBuffer matrices)
      {
++        if (GlShaders.active()) { GlShaders.uniformMatrix2(location, transpose, matrices); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniformMatrix2ARB(location, transpose, matrices);
@@ -203,8 +336,9 @@
          }
      }
  
-@@ -557,11 +557,11 @@
+     public static void glUniformMatrix3(int location, boolean transpose, FloatBuffer matrices)
      {
++        if (GlShaders.active()) { GlShaders.uniformMatrix3(location, transpose, matrices); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniformMatrix3ARB(location, transpose, matrices);
@@ -217,8 +351,9 @@
          }
      }
  
-@@ -569,11 +569,11 @@
+     public static void glUniformMatrix4(int location, boolean transpose, FloatBuffer matrices)
      {
++        if (GlShaders.active()) { GlShaders.uniformMatrix4(location, transpose, matrices); return; }
          if (arbShaders)
          {
 -            ARBShaderObjects.glUniformMatrix4ARB(location, transpose, matrices);
@@ -231,7 +366,11 @@
          }
      }
  
-@@ -584,43 +584,23 @@
+     public static int glGetAttribLocation(int program, CharSequence name)
+     {
++        if (GlShaders.active()) return GlShaders.attribLocation(program, name);
+         return arbShaders ? ARBVertexShader.glGetAttribLocationARB(program, name) : GL20.glGetAttribLocation(program, name);
+     }
  
      public static int glGenBuffers()
      {
@@ -280,7 +419,7 @@
      }
  
      public static boolean useVbo()
-@@ -834,6 +814,7 @@
+@@ -834,6 +860,7 @@
  
      public static void setClientActiveTexture(int texture)
      {
@@ -288,7 +427,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -846,6 +827,12 @@
+@@ -846,6 +873,12 @@
  
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
@@ -301,7 +440,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
-@@ -854,10 +841,17 @@
+@@ -854,10 +887,17 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -319,7 +458,7 @@
          if (openGL14)
          {
              if (extBlendFuncSeparate)
-@@ -891,7 +885,9 @@
+@@ -891,7 +931,9 @@
          GlStateManager.depthMask(false);
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -330,7 +469,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
-@@ -900,7 +896,7 @@
+@@ -900,7 +942,7 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(0, 0, 0, 255).endVertex();
          tessellator.draw();
@@ -339,7 +478,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
-@@ -909,66 +905,35 @@
+@@ -909,66 +951,35 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(127, 127, 255, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(127, 127, 255, 255).endVertex();
          tessellator.draw();
