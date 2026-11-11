@@ -3,6 +3,7 @@ package net.minecraftforge.fml.relauncher.libraries;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URL;
+import java.net.URISyntaxException;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -58,11 +59,12 @@ class NestedLibraryJarsTest {
     }
 
     @Test
-    void aResourceInsideABundledJarIsReadable(@TempDir Path dir) throws IOException {
+    void aResourceInsideABundledJarIsReadable(@TempDir Path dir) throws IOException, URISyntaxException {
         Path outer = outerWithInner(dir, "META-INF/libraries/inner.jar", "hello.txt", "hi");
 
         URL base = NestedLibraryJars.urlFor(outer.toFile(), "META-INF/libraries/inner.jar");
         assertNotNull(base);
+        assertTrue(base.toURI().getScheme().equals(NestedLibraryJars.PROTOCOL));
         assertTrue(base.toString().endsWith("!/"), "a class path root has to end in !/ so names can be appended: " + base);
 
         try (var in = new URL(base, "hello.txt").openStream()) {
