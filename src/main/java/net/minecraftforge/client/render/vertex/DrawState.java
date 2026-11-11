@@ -34,8 +34,18 @@ public final class DrawState {
     private boolean lightingEnabled;
     private final float[] normalMatrix = new float[9];
     private boolean hasNormalMatrix;
-    private float[] light0;
-    private float[] light1;
+    /**
+     * The two lights the draw was issued under, in eye space.
+     *
+     * <p><b>Copied, not referenced.</b> {@code glLight} rewrites the state's light vectors in place, so holding the
+     * array meant every draw in the frame read whatever direction the <i>last</i> {@code glLight} call set. Vanilla
+     * re-specifies the lights per pass - GUI items, then the world, then entities, each under a different modelview -
+     * so a replay-time read gave item draws the world's light direction and the shaded face landed wherever the frame
+     * order put it.</p>
+     */
+    private final float[] light0 = new float[3];
+    private final float[] light1 = new float[3];
+    private boolean hasLights;
     private final float[] textureMatrix = new float[16];
     private boolean hasTextureMatrix;
     private boolean fogEnabled;
@@ -105,8 +115,13 @@ public final class DrawState {
         } else {
             this.hasNormalMatrix = false;
         }
-        this.light0 = light0;
-        this.light1 = light1;
+        if (light0 != null && light1 != null) {
+            System.arraycopy(light0, 0, this.light0, 0, 3);
+            System.arraycopy(light1, 0, this.light1, 0, 3);
+            this.hasLights = true;
+        } else {
+            this.hasLights = false;
+        }
         if (textureMatrix != null) {
             this.hasTextureMatrix = true;
             System.arraycopy(textureMatrix, 0, this.textureMatrix, 0, 16);
@@ -146,8 +161,9 @@ public final class DrawState {
         if (this.hasNormalMatrix) {
             System.arraycopy(other.normalMatrix, 0, this.normalMatrix, 0, 9);
         }
-        this.light0 = other.light0;
-        this.light1 = other.light1;
+        System.arraycopy(other.light0, 0, this.light0, 0, 3);
+        System.arraycopy(other.light1, 0, this.light1, 0, 3);
+        this.hasLights = other.hasLights;
         this.hasTextureMatrix = other.hasTextureMatrix;
         if (this.hasTextureMatrix) {
             System.arraycopy(other.textureMatrix, 0, this.textureMatrix, 0, 16);
@@ -211,12 +227,18 @@ public final class DrawState {
             } else {
                 this.hasNormalMatrix = false;
             }
-            this.light0 = state.light0Eye();
-            this.light1 = state.light1Eye();
+            float[] l0 = state.light0Eye();
+            float[] l1 = state.light1Eye();
+            if (l0 != null && l1 != null) {
+                System.arraycopy(l0, 0, this.light0, 0, 3);
+                System.arraycopy(l1, 0, this.light1, 0, 3);
+                this.hasLights = true;
+            } else {
+                this.hasLights = false;
+            }
         } else {
             this.hasNormalMatrix = false;
-            this.light0 = null;
-            this.light1 = null;
+            this.hasLights = false;
         }
 
         float[] tm = state.textureMatrix();
@@ -288,8 +310,8 @@ public final class DrawState {
     public float[] lightmap() { return hasLightmap ? lightmap : null; }
     public boolean lightingEnabled() { return lightingEnabled; }
     public float[] normalMatrix() { return hasNormalMatrix ? normalMatrix : null; }
-    public float[] light0() { return light0; }
-    public float[] light1() { return light1; }
+    public float[] light0() { return hasLights ? light0 : null; }
+    public float[] light1() { return hasLights ? light1 : null; }
     public float[] textureMatrix() { return hasTextureMatrix ? textureMatrix : null; }
     public boolean fogEnabled() { return fogEnabled; }
     public int fogMode() { return fogMode; }
