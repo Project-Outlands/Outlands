@@ -100,6 +100,16 @@
                     "sha1": "48fd510879dff266c3815947de66e3d4809f8668",
                     "size": 11055,
                     "url": "https://libraries.minecraft.net/com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar"
+                }
+            },
+            "name": "com.mojang:text2speech:1.10.3"
+        },
+        {
+            "downloads": {
+                "artifact": {
+                    "sha1": "48fd510879dff266c3815947de66e3d4809f8668",
+                    "size": 11055,
+                    "url": "https://libraries.minecraft.net/com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar"
                 },
                 "classifiers": {
                     "natives-linux": {

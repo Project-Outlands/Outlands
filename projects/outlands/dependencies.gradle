@@ -225,7 +225,7 @@ dependencies {
 
     // Mixin
     installer "com.cleanroommc:cleanmix:$cleanmixVersion"
-    installer annotationProcessor('com.cleanroommc:mixinextras-common:0.5.5')
+    installer 'com.cleanroommc:mixinextras-common:0.5.6'
 
     // Build-time shader compilation (src/test/java/.../ShaderCompiler). Not a runtime dependency: the running
     // process consumes SPIR-V only, so the compiler stays out of the shipped jar and off players' disks.

@@ -29,11 +29,23 @@ import org.lwjgl.LWJGLException;
  */
 public final class SharedDrawable extends DrawableGL {
 
+    private final Drawable drawable;
+
     public SharedDrawable(final Drawable drawable) throws LWJGLException {
-        this.context = (ContextGL) ((DrawableLWJGL) drawable).createSharedContext();
+        super(((DrawableGL) drawable).createSharedContext());
+        this.drawable = drawable;
+    }
+
+    /** Returns the source drawable whose resources this drawable shares; performs no native operation. */
+    public Drawable getSharingDrawable() {
+        return drawable;
     }
 
     public ContextGL createSharedContext() {
-        throw new UnsupportedOperationException();
+        try {
+            return ((DrawableGL) drawable).createSharedContext();
+        } catch (LWJGLException failure) {
+            throw new IllegalStateException("Failed to create a shared drawable context", failure);
+        }
     }
 }

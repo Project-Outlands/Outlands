@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.07] - 2026-11-07
+
+### 🐛 Bug Fixes
+
+- [`d06ff43`](https://github.com/Project-Outlands/Outlands/commit/d06ff43ed9e85decba9cdc87224cb1b70814418e) - Mixin extra 0.5.5 crash *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚡ Performance
+
+- [`2a4cd65`](https://github.com/Project-Outlands/Outlands/commit/2a4cd6576c4d9a845410795a30ac440fb276334c) - Reduce remapping and config synchronization work *(PR [#54](https://github.com/Project-Outlands/Outlands/pull/54) by [@Circulate233](https://github.com/Circulate233))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`7b48139`](https://github.com/Project-Outlands/Outlands/commit/7b48139dd840b072d28efa2be1bc06784f163778) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.06-2] - 2026-11-06
+
+### 🐛 Bug Fixes
+
+- [`9929887`](https://github.com/Project-Outlands/Outlands/commit/9929887202f9422229cdaddc349cdcb716cbceb8) - *(installer)* Emit artifact paths for vanilla libraries *(PR [#52](https://github.com/Project-Outlands/Outlands/pull/52) by [@H2Sxxa](https://github.com/H2Sxxa))*
+- [`1ce55ea`](https://github.com/Project-Outlands/Outlands/commit/1ce55ea83f16995546434f98134d2cf64f780f69) - Narrator broken in installer *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.06] - 2026-11-06
+
+### 🚀 Features
+
+- [`0b36b11`](https://github.com/Project-Outlands/Outlands/commit/0b36b118f0a2288d17c6983ecb593fdc6bc85c54) - *(render)* Add render takeover seams and the shim retarget table *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### 🐛 Bug Fixes
+
+- [`3139a6f`](https://github.com/Project-Outlands/Outlands/commit/3139a6f28cdf54e8cc043d0d0e840e4a3897bc69) - Use regular full screen on Linux, fix #50 *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`1070ad1`](https://github.com/Project-Outlands/Outlands/commit/1070ad178a86208f2ec9bfaa220382060d267d99) - Fix serveral issue on installer crafting and publish *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`f339d98`](https://github.com/Project-Outlands/Outlands/commit/f339d98d5fc998f127dacbf491162483c60c480e) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`ccf333d`](https://github.com/Project-Outlands/Outlands/commit/ccf333dbd2131897d73970a32de55e5004535cac) - Prefer wayland instead of X11 when possible *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.05-2] - 2026-11-05
 
 ### 🚀 Features

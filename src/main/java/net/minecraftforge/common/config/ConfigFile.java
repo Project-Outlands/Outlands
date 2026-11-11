@@ -2,6 +2,7 @@ package net.minecraftforge.common.config;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -38,9 +39,12 @@ public final class ConfigFile {
             throw new IOException("Could not create the directory " + parent);
 
         Path target = file.toPath();
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (hasContents(target, bytes))
+            return;
         Path temporary = Files.createTempFile(target.toAbsolutePath().getParent(), ".c-" + file.getName(), ".tmp");
         try {
-            Files.write(temporary, text.getBytes(StandardCharsets.UTF_8));
+            Files.write(temporary, bytes);
             try {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
@@ -50,6 +54,30 @@ public final class ConfigFile {
             }
         } finally {
             Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static boolean hasContents(Path target, byte[] bytes) {
+        try {
+            if (Files.size(target) != bytes.length)
+                return false;
+            try (InputStream input = Files.newInputStream(target)) {
+                byte[] buffer = new byte[8192];
+                int offset = 0;
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    if (count > bytes.length - offset)
+                        return false;
+                    for (int index = 0; index < count; index++)
+                        if (buffer[index] != bytes[offset + index])
+                            return false;
+                    offset += count;
+                }
+                return offset == bytes.length;
+            }
+        } catch (IOException unavailable) {
+            // Missing/unreadable files retain the original atomic write and its diagnostics.
+            return false;
         }
     }
 }

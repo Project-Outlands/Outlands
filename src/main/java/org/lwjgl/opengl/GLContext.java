@@ -21,12 +21,12 @@ public class GLContext {
         if (!net.minecraftforge.client.render.RenderBackendSelection.get().isOpenGl()) {
             return net.minecraftforge.client.render.GlAnswers.capabilities();
         }
-        ContextCapabilities caps = contextCapabilities;
-        if (caps == null) {
-            caps = new ContextCapabilities();
-            contextCapabilities = caps;
+        // On the GL path the table follows the current context, so it is (re)built on first use and rebuilt by
+        // refreshCapabilities whenever the context changes.
+        if (contextCapabilities == null) {
+            refreshCapabilities();
         }
-        return caps;
+        return contextCapabilities;
     }
 
     /**

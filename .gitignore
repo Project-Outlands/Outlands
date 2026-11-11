@@ -8,6 +8,7 @@
 /logs/
 build/
 version.txt
+/.serena/
 
 !/.idea/icon.svg
 

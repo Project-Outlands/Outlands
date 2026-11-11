@@ -124,13 +124,46 @@ tasks.register('launcherJson') {
         }
         cache.lwjglNatives.each { key, lib -> json.libraries.add(lib) }
 
-        // One entry per coordinate, last one wins. Two sources feed this list - the MMC component (vanilla's
+        // One entry per *kind* of library, last one wins. Two sources feed this list - the MMC component (vanilla's
         // libraries, with the natives/rule overrides MultiMC needs) and the resolved artifacts (everything the
-        // loader adds) - and they overlap. A profile that lists a library twice makes each launcher pick one of the
-        // two silently, which is how a stale text2speech entry used to shadow the real one.
-        def byName = new LinkedHashMap<String, Object>()
-        json.libraries.each { byName.put(it.name as String, it) }
-        json.libraries = new ArrayList(byName.values())
+        // loader adds) - and they overlap, so the list has to be collapsed.
+        //
+        // The key includes whether the entry is a natives entry, because the same coordinate is legitimately listed
+        // twice: 'com.mojang:text2speech:1.10.3' appears once as a plain artifact (the jar that carries the classes,
+        // i.e. the one that puts com.mojang.text2speech.Narrator on the classpath) and once with a 'natives' map
+        // (extraction only - launchers keep those off the classpath). Keying on the name alone merges the two and
+        // silently drops whichever came first, which is a NoClassDefFoundError for Narrator on every launch.
+        def byKey = new LinkedHashMap<String, Object>()
+        json.libraries.each { lib ->
+            def key = lib.name as String
+            if (lib.natives != null) key = key + '|natives'
+            byKey.put(key, lib)
+        }
+        json.libraries = new ArrayList(byKey.values())
+
+        // MultiMC's component metadata leaves 'downloads.artifact.path' out and derives it from the Maven
+        // coordinate, while Forge-style launcher JSON carries it explicitly. Fill in the vanilla entries copied
+        // from the template so launchers that require 'path' can resolve them, native classifiers included.
+        def artifactPath = { String name, String classifier ->
+            def parts = name.split(':')
+            def versionParts = parts[2].split('@')
+            def nameClassifier = parts.length >= 4 ? parts[3].split('@')[0] : null
+            def effectiveClassifier = classifier != null ? classifier : nameClassifier
+            def extension = versionParts.length > 1 ? versionParts[1] : 'jar'
+            def suffix = effectiveClassifier == null ? '' : "-${effectiveClassifier}"
+            "${parts[0].replace('.', '/')}/${parts[1]}/${versionParts[0]}/${parts[1]}-${versionParts[0]}${suffix}.${extension}"
+        }
+        json.libraries.each { library ->
+            def artifact = library.downloads?.artifact
+            if (artifact != null && artifact.path == null) {
+                artifact.path = artifactPath(library.name as String, null)
+            }
+            library.downloads?.classifiers?.each { classifier, classifiedArtifact ->
+                if (classifiedArtifact.path == null) {
+                    classifiedArtifact.path = artifactPath(library.name as String, classifier as String)
+                }
+            }
+        }
 
         outputFile.get().asFile.text = new JsonBuilder(json).toPrettyString()
     }

@@ -25,6 +25,7 @@ import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.lang.reflect.Modifier;
 import java.util.Locale;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 
@@ -63,6 +64,13 @@ public class ConfigManager
     /** Absolute paths already mentioned in a startup log line, so a file is only explained once. */
     private static final Set<String> WARNED_RESOLUTIONS = Sets.newHashSet();
     private static ConfigEnvironment environment;
+    private static final ClassValue<Field[]> PUBLIC_FIELDS = new ClassValue<>() {
+        @Override
+        protected Field[] computeValue(Class<?> type) {
+            return Arrays.stream(type.getDeclaredFields())
+                    .filter(field -> Modifier.isPublic(field.getModifiers())).toArray(Field[]::new);
+        }
+    };
 
     static
     {
@@ -475,11 +483,9 @@ public class ConfigManager
     private static void sync(Configuration cfg, Class<?> cls, String modid, String category, boolean loading, Object instance)
     {
         Side currentSide = currentSide();
-        for (Field f : cls.getDeclaredFields())
+        String languagePrefix = modid + "." + (category.isEmpty() ? "" : category + Configuration.CATEGORY_SPLITTER);
+        for (Field f : PUBLIC_FIELDS.get(cls))
         {
-            if (!Modifier.isPublic(f.getModifiers()))
-                continue;
-
             //Only the root class may have static fields. Otherwise category tree nodes of the same type would share the
             //contained value messing up the sync
             if (Modifier.isStatic(f.getModifiers()) != (instance == null))
@@ -497,21 +503,26 @@ public class ConfigManager
                 continue;
             }
 
+            boolean wrapped = FieldWrapper.hasWrapperFor(f);
             String comment = null;
-            Comment ca = f.getAnnotation(Comment.class);
-            if (ca != null)
-                comment = NEW_LINE.join(ca.value());
+            String langKey = null;
+            boolean requiresMcRestart = false;
+            boolean requiresWorldRestart = false;
+            boolean hasSlidingControl = false;
+            // Value-only syncs do not consume property presentation metadata. Category nodes still do.
+            if (loading || !wrapped)
+            {
+                Comment ca = f.getAnnotation(Comment.class);
+                if (ca != null)
+                    comment = NEW_LINE.join(ca.value());
+                LangKey la = f.getAnnotation(LangKey.class);
+                langKey = la == null ? languagePrefix + f.getName().toLowerCase(Locale.ENGLISH) : la.value();
+                requiresMcRestart = f.isAnnotationPresent(Config.RequiresMcRestart.class);
+                requiresWorldRestart = f.isAnnotationPresent(Config.RequiresWorldRestart.class);
+                hasSlidingControl = f.isAnnotationPresent(Config.SlidingOption.class);
+            }
 
-            String langKey = modid + "." + (category.isEmpty() ? "" : category + Configuration.CATEGORY_SPLITTER) + f.getName().toLowerCase(Locale.ENGLISH);
-            LangKey la = f.getAnnotation(LangKey.class);
-            if (la != null)
-                langKey = la.value();
-
-            boolean requiresMcRestart = f.isAnnotationPresent(Config.RequiresMcRestart.class);
-            boolean requiresWorldRestart = f.isAnnotationPresent(Config.RequiresWorldRestart.class);
-            boolean hasSlidingControl = f.isAnnotationPresent(Config.SlidingOption.class);
-
-            if (FieldWrapper.hasWrapperFor(f)) //Wrappers exist for primitives, enums, maps and arrays
+            if (wrapped) //Wrappers exist for primitives, enums, maps and arrays
             {
                 if (Strings.isNullOrEmpty(category))
                     throw new RuntimeException("An empty category may not contain anything but objects representing categories!");
