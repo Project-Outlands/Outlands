@@ -325,6 +325,27 @@ tasks.configureEach {
         dependsOn(mcpToSrg)
 }
 
+// The asset directory is not provisioned by this build: nothing here downloads it, and a launcher that finds it missing
+// does not fail. What happens instead is quiet and confusing - no sounds, and a menu that looks unmodded because the
+// resource stack cannot read the asset index - so say it out loud before the window opens.
+tasks.configureEach {
+    if (name == 'runOutlandsClient' || name == 'runOutlandsServer') {
+        doFirst {
+            def index = new File(assetsDir, "indexes/${assetIndex.get()}.json")
+            if (!index.isFile()) {
+                logger.warn("""
+                        [assets] ${index} is missing.
+                        [assets] The game will start without sounds and without anything that lives in the asset index,
+                        [assets] which makes the menu look unmodded even though the mods are loaded.
+                        [assets] Point the launcher at a real assets directory, e.g.
+                        [assets]   ./gradlew ${path} -PassetDirectory=\u0024HOME/.minecraft/assets
+                        [assets] or let a launcher regenerate the shared ForgeGradle asset cache.
+                        """.stripIndent())
+            }
+        }
+    }
+}
+
 
 // region Reobf + binary patches --------------------------------------------
 // Legacy FML needs a 'reobfuscated' (MCP -> SRG) jar to diff against vanilla when generating binary patches. The
