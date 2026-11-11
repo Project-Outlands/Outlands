@@ -1,5 +1,6 @@
 package net.minecraftforge.client.render;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -17,6 +18,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * never hits, which would look identical from the outside and save nothing.</p>
  */
 class ChunkMeshCapturePoolTest {
+
+    /**
+     * The pool is static and shared, so a test that asserts identity has to start from an empty one: arrays left
+     * behind by an earlier test are handed out first and the assertion then compares two different arrays that both
+     * happen to be valid answers.
+     */
+    @BeforeEach
+    void emptyThePool() {
+        ChunkMeshCapture.disable();
+    }
 
     @Test
     void releasedArrayIsHandedBackOut() {
@@ -56,6 +67,31 @@ class ChunkMeshCapturePoolTest {
         byte[] huge = ChunkMeshCapture.acquireBuffer(64 * 1024 * 1024);
         assertEquals(64 * 1024 * 1024, huge.length, "a request past the buckets is served directly");
         ChunkMeshCapture.releaseBuffer(huge);
+    }
+
+    @Test
+    void recycledArrayIsNeverSmallerThanTheRequest() {
+        // The regression this guards: filing and searching both rounded up, so a 18688-byte array and a 24768-byte
+        // request shared a bucket and the request was answered with an array two thirds its size. The caller then
+        // threw on its worker thread, the chunk never reached the arena, and the world had holes in it.
+        byte[] smaller = ChunkMeshCapture.acquireBuffer(18688);
+        ChunkMeshCapture.releaseBuffer(smaller);
+
+        byte[] larger = ChunkMeshCapture.acquireBuffer(24768);
+        assertTrue(larger.length >= 24768, "got " + larger.length + " bytes for a 24768-byte request");
+    }
+
+    @Test
+    void everyBucketBoundaryIsRespected() {
+        for (int size : new int[] {1, 2, 3, 63, 64, 65, 1000, 16384, 16385, 18688, 24768, 32768, 32769}) {
+            byte[] buffer = ChunkMeshCapture.acquireBuffer(size);
+            assertTrue(buffer.length >= size, "requesting " + size + " gave " + buffer.length);
+            ChunkMeshCapture.releaseBuffer(buffer);
+
+            byte[] again = ChunkMeshCapture.acquireBuffer(size);
+            assertTrue(again.length >= size, "recycled request of " + size + " gave " + again.length);
+            ChunkMeshCapture.releaseBuffer(again);
+        }
     }
 
     @Test

@@ -126,12 +126,32 @@ public final class ChunkMeshCapture {
     /**
      * An array holding at least {@code bytes}, preferring a recycled one.
      *
-     * <p>Returns an array at least as large as asked for: a caller writes its mesh from offset zero and reads back
-     * using its own computed length, so a larger array is simply unused tail.</p>
+     * <p>The returned array is always at least as large as asked for: a caller writes its mesh from offset zero and
+     * reads it back by its own computed length, so a longer array is simply unused tail.</p>
+     *
+     * <p><b>Storing and searching are deliberately different rounding.</b> An array is filed under the floor of its
+     * log2, so every array in bucket <i>i</i> has length at least {@code 2^i}. A request searches from the
+     * <i>ceiling</i> of its log2, so the first bucket it looks at starts at {@code 2^ceil(log2(bytes)) >= bytes}. Mixing
+     * the two - filing and searching both by ceiling - puts an 18688-byte array and a 24768-byte request in the same
+     * bucket, and hands out an array that is too small by a third. The exception that follows is thrown on a chunk
+     * meshing worker, so the chunk silently never reaches the arena.</p>
      */
     public static byte[] acquireBuffer(int bytes) {
-        int bucket = bucketFor(bytes);
-        for (int i = bucket; i < POOL.length; i++) {
+        // Same-bucket first, with the length actually checked: this is the common case (a chunk layer rebuilt at the
+        // same size) and it is the only bucket whose contents may be too small.
+        int own = floorBucket(bytes);
+        byte[] candidate = POOL[own].poll();
+        if (candidate != null) {
+            if (candidate.length >= bytes) {
+                pooledBytes.addAndGet(-candidate.length);
+                reused.incrementAndGet();
+                return candidate;
+            }
+            POOL[own].add(candidate);
+        }
+
+        // Past that bucket every array is at least 2^ceil(log2(bytes)) >= bytes, so no further check is needed.
+        for (int i = ceilBucket(bytes); i < POOL.length; i++) {
             byte[] recycled = POOL[i].poll();
             if (recycled != null) {
                 pooledBytes.addAndGet(-recycled.length);
@@ -145,13 +165,13 @@ public final class ChunkMeshCapture {
     /**
      * Returns an array from {@link #acquireBuffer} once its contents have been copied out.
      *
-     * <p>Callers must be done with it: the next acquirer gets the same array.</p>
+     * <p>Callers must be done with it: the next acquirer may get the same array.</p>
      */
     public static void releaseBuffer(byte[] buffer) {
         if (buffer == null) {
             return;
         }
-        int bucket = bucketFor(buffer.length);
+        int bucket = floorBucket(buffer.length);
         if (bucket >= POOL.length) {
             return;
         }
@@ -163,7 +183,13 @@ public final class ChunkMeshCapture {
         POOL[bucket].add(buffer);
     }
 
-    private static int bucketFor(int bytes) {
+    /** Bucket for storing: every array in bucket i has length at least 2^i. */
+    private static int floorBucket(int bytes) {
+        return Math.min(POOL_BUCKETS - 1, bytes <= 0 ? 0 : 31 - Integer.numberOfLeadingZeros(bytes));
+    }
+
+    /** Bucket to start searching from: bucket i holds arrays of at least 2^i bytes. */
+    private static int ceilBucket(int bytes) {
         if (bytes <= 1) {
             return 0;
         }

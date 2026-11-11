@@ -21,6 +21,12 @@ public final class RasterOcclusionCuller extends BoxOccluder {
     private static final int SIZE_STEP_TILES = 8;
     private static final float PIXELS_PER_BLOCK = 1.0f;
 
+    /**
+     * Switch for bisecting a rendering hole: when false, nothing is reported hidden, so the traversal submits every
+     * section it reaches.
+     */
+    private static final boolean ENABLED = !"false".equals(System.getProperty("outlands.cull.raster"));
+
     private int viewSequence = 0;
 
     public enum SectionVisibility {
@@ -120,6 +126,9 @@ public final class RasterOcclusionCuller extends BoxOccluder {
      * @return {@link SectionVisibility#VISIBLE}, {@link SectionVisibility#TRAVERSABLE}, or {@link SectionVisibility#HIDDEN}
      */
     public SectionVisibility testSection(int originX, int originY, int originZ, int squaredChunkDist, int bounds) {
+        if (!ENABLED) {
+            return SectionVisibility.VISIBLE;
+        }
         prepareRegion(originX, originY, originZ,
                 PackedBox.rangeFromSquareChunkDist(squaredChunkDist), squaredChunkDist);
 

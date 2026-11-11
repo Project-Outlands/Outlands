@@ -28,6 +28,12 @@ public final class RegionCullCache {
     // Exact coordinates, not a packed key: a region is chunk >> 3, so a coordinate reaches about 234,000 at the world
     // border and does not fit in 13 bits. Packing silently aliased distant regions onto each other, which could hand
     // one region the OUTSIDE verdict computed for another and cull a whole region that was in view.
+    /**
+     * Switch for bisecting a rendering hole: when false, every region is treated as partially inside, so no region is
+     * ever skipped. Reading a system property on each call is free enough at one call per section.
+     */
+    private static final boolean ENABLED = !"false".equals(System.getProperty("outlands.cull.region"));
+
     private final int[] cacheKeyX = new int[TABLE_SIZE];
     private final int[] cacheKeyY = new int[TABLE_SIZE];
     private final int[] cacheKeyZ = new int[TABLE_SIZE];
@@ -49,6 +55,9 @@ public final class RegionCullCache {
      * @return one of {@link #FULLY_INSIDE}, {@link #PARTIALLY_INSIDE}, or {@link #OUTSIDE}
      */
     public int classify(int rx, int ry, int rz, ICamera camera) {
+        if (!ENABLED) {
+            return PARTIALLY_INSIDE;
+        }
         int slot = hash(rx, ry, rz) & MASK;
 
         if (this.cacheFrames[slot] == this.currentFrame
