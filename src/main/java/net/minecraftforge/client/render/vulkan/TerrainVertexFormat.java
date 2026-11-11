@@ -61,6 +61,8 @@ public final class TerrainVertexFormat {
             MethodHandles.byteArrayViewVarHandle(short[].class, ByteOrder.nativeOrder());
     private static final VarHandle INT_VIEW =
             MethodHandles.byteArrayViewVarHandle(int[].class, ByteOrder.nativeOrder());
+    private static final VarHandle LONG_VIEW =
+            MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.nativeOrder());
 
     private TerrainVertexFormat() {}
 
@@ -103,7 +105,26 @@ public final class TerrainVertexFormat {
         }
     }
 
-    private static void compactArray(byte[] raw, long dstAddress, int quadCount) {
+    private static void compactArray(byte[] raw, byte[] dst, int quadCount) {
+        int vertexCount = quadCount * VERTICES_PER_QUAD;
+        int src = 0;
+        int out = 0;
+        for (int i = 0; i < vertexCount; i++) {
+            putVertex(dst, out,
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 4),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 8),
+                    (int) INT_VIEW.get(raw, src + RAW_COLOR_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_UV_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_UV_OFFSET + 4),
+                    (short) SHORT_VIEW.get(raw, src + RAW_LIGHTMAP_OFFSET),
+                    (short) SHORT_VIEW.get(raw, src + RAW_LIGHTMAP_OFFSET + 2));
+            src += RAW_STRIDE;
+            out += COMPACT_STRIDE;
+        }
+    }
+
+    private static void compactArrayToAddress(byte[] raw, long dstAddress, int quadCount) {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
         int src = 0;
         long dst = dstAddress;
@@ -122,62 +143,89 @@ public final class TerrainVertexFormat {
         }
     }
 
-    /** Writes one 16-byte vertex: position and light in the first word, texture coordinates and colour in the second. */
-    private static void putVertex(long dst, float x, float y, float z, int color, float u, float v,
-                                  short blockLight, short skyLight) {
+    /** The two 64-bit words of one vertex, in the order the layout stores them. */
+    private static long posLight(float x, float y, float z, short blockLight, short skyLight) {
         // Vanilla writes block light to the element's first short and sky light to the second - the opposite of the
         // argument order of BufferBuilder.lightmap. The terrain shader reads them back in this order.
         int light = Math.min(255, Math.max(0, blockLight & 0xFFFF))
                 | (Math.min(255, Math.max(0, skyLight & 0xFFFF)) << 8);
-        long posLight = ((long) (fixed(x) & 0xFFFF))
+        return ((long) (fixed(x) & 0xFFFF))
                 | (((long) (fixed(y) & 0xFFFF)) << 16)
                 | (((long) (fixed(z) & 0xFFFF)) << 32)
                 | (((long) light) << 48);
+    }
+
+    private static long uvColor(float u, float v, int color) {
         int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
         int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
-        long uvColor = ((long) u16) | (((long) v16) << 16) | (((long) color & 0xFFFFFFFFL) << 32);
+        return ((long) u16) | (((long) v16) << 16) | (((long) color & 0xFFFFFFFFL) << 32);
+    }
 
-        MemoryUtil.memPutLong(dst, posLight);
-        MemoryUtil.memPutLong(dst + 8, uvColor);
+    private static void putVertex(long dst, float x, float y, float z, int color, float u, float v,
+                                  short blockLight, short skyLight) {
+        MemoryUtil.memPutLong(dst, posLight(x, y, z, blockLight, skyLight));
+        MemoryUtil.memPutLong(dst + 8, uvColor(u, v, color));
+    }
+
+    private static void putVertex(byte[] dst, int offset, float x, float y, float z, int color, float u, float v,
+                                  short blockLight, short skyLight) {
+        LONG_VIEW.set(dst, offset, posLight(x, y, z, blockLight, skyLight));
+        LONG_VIEW.set(dst, offset + 8, uvColor(u, v, color));
+    }
+
+    /** Compacts from mapped memory into a byte array: the arena's path when a mesh is rebuilt in place. */
+    private static void compactDirectToArray(long srcAddress, byte[] dst, int quadCount) {
+        int vertexCount = quadCount * VERTICES_PER_QUAD;
+        long src = srcAddress;
+        int out = 0;
+        for (int i = 0; i < vertexCount; i++) {
+            putVertex(dst, out,
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 4),
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 8),
+                    MemoryUtil.memGetInt(src + RAW_COLOR_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_UV_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_UV_OFFSET + 4),
+                    MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET),
+                    MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET + 2));
+            src += RAW_STRIDE;
+            out += COMPACT_STRIDE;
+        }
     }
 
     /**
      * Compacts quads from a buffer in vanilla's layout into a new byte array.
      *
-     * <p>A Java array has no address, so the write goes through a direct scratch buffer and one bulk copy. That is
-     * the cost of the alloc-and-copy entry point; the arena path writes straight into mapped memory and pays nothing.
-     * (Addressing a heap {@code ByteBuffer} is not an option - the address it reports is not usable memory.)</p>
+     * <p>Allocates the result and nothing else. A Java array is written through a byte-view long handle rather than a
+     * wrapped buffer, so there is no scratch allocation and no second pass - which matters because this is the
+     * per-chunk-layer path, not a one-off.</p>
      */
     public static byte[] compact(ByteBuffer srcBuffer, int quadCount) {
-        ByteBuffer scratch = scratch(quadCount);
-        compactDirect(MemoryUtil.memAddress(srcBuffer), MemoryUtil.memAddress(scratch), quadCount);
-        return toArray(scratch, quadCount);
+        byte[] dst = new byte[quadCount * COMPACT_QUAD_SIZE];
+        compactDirectToArray(MemoryUtil.memAddress(srcBuffer), dst, quadCount);
+        return dst;
     }
 
     /**
      * Compacts quads from a byte array in vanilla's layout into the given address, which must be mapped memory.
      */
     public static void compact(byte[] raw, int quadCount, long dstAddress) {
-        compactArray(raw, dstAddress, quadCount);
+        compactArrayToAddress(raw, dstAddress, quadCount);
     }
 
     /**
      * Compacts quads from a byte array in vanilla's layout, allocating the result.
      */
     public static byte[] compactToBytes(byte[] raw, int quadCount) {
-        ByteBuffer scratch = scratch(quadCount);
-        compactArray(raw, MemoryUtil.memAddress(scratch), quadCount);
-        return toArray(scratch, quadCount);
-    }
-
-    private static ByteBuffer scratch(int quadCount) {
-        return ByteBuffer.allocateDirect(quadCount * COMPACT_QUAD_SIZE).order(ByteOrder.nativeOrder());
-    }
-
-    private static byte[] toArray(ByteBuffer scratch, int quadCount) {
         byte[] dst = new byte[quadCount * COMPACT_QUAD_SIZE];
-        scratch.position(0);
-        scratch.get(dst);
+        compactArray(raw, dst, quadCount);
         return dst;
+    }
+
+    /**
+     * Compacts quads already in mapped memory into other mapped memory. Used when a mesh moves within the arena.
+     */
+    public static void compact(long srcAddress, long dstAddress, int quadCount) {
+        compactDirect(srcAddress, dstAddress, quadCount);
     }
 }
