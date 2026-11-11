@@ -53,6 +53,7 @@ import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_INPUT_FOCUS;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_MINIMIZED;
 import static org.lwjgl.sdl.SDLVideo.SDL_WINDOW_OPENGL;
 
+import net.minecraftforge.client.render.RenderBackend;
 import net.minecraftforge.client.render.RenderBackendSelection;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memUTF8;
@@ -175,6 +176,8 @@ public class Display {
     private static final SDL_MouseWheelEvent sdlWheelEvent = sdlEvent.wheel();
 
     private static DrawableGL drawable = null;
+    private static boolean hasGLContext;
+    private static boolean backendInitialized;
 
     static {
         Sys.initialize();
@@ -250,29 +253,32 @@ public class Display {
             return;
         }
 
+        final RenderBackend backend = RenderBackendSelection.get();
+        hasGLContext = backend.isOpenGl() && DisplayEvents.isCreateGLContextEnabled();
         final int resolvedMajor = resolveContextMajor();
         final int resolvedMinor = resolveContextMinor();
-
-        MainThread.runOnMainThread(() -> createWindow(resolvedMajor, resolvedMinor));
-
-        if (sdlGlContext != NULL) {
-            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
-            // OPENGL_EXPLICIT_INIT is set in Sys.initialize, so GL.create() has not run yet. It must be
-            // driven here, once a context is current, or every GL call resolves to a null pointer.
-            GL.create(SDLVideo::SDL_GL_GetProcAddress);
-            drawable = new DrawableGL();
-        }
-        // A non-GL backend owns its own context and drawable; the GL path above is skipped entirely.
         try {
-            drawable.makeCurrent();
-        } catch (LWJGLException e) {
-            throw new IllegalStateException("Failed to make the Display GL context current", e);
+            MainThread.runOnMainThread(() -> createWindow(resolvedMajor, resolvedMinor));
+            if (hasGLContext) {
+                Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
+                GL.create(SDLVideo::SDL_GL_GetProcAddress);
+                drawable = new DrawableGL();
+            }
+            backendInitialized = true;
+            backend.init(sdlWindow);
+            if (drawable != null) drawable.makeCurrent();
+        } catch (LWJGLException | RuntimeException | Error failure) {
+            try {
+                destroy();
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            if (failure instanceof LWJGLException checked) throw new IllegalStateException("Failed to initialize the Display drawable", checked);
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            throw (Error) failure;
         }
 
         displayCreated = true;
-
-        // Rebuild after the context is current: the table is cached in a static initializer, and
-        // OpenGlHelper reads it right after create().
         GLContext.refreshCapabilities();
 
         if (pendingBorderless) {
@@ -407,7 +413,7 @@ public class Display {
     private static void createWindow(int versionMajor, int versionMinor) {
         // GL attributes are only meaningful for the OpenGL backend; setting them for a Vulkan window would be
         // either ignored or, on some drivers, a reason to refuse window creation.
-        final boolean openGl = RenderBackendSelection.get().isOpenGl();
+        final boolean openGl = hasGLContext;
         if (openGl) {
             applyGlAttributes(versionMajor, versionMinor);
         }
@@ -461,6 +467,8 @@ public class Display {
                     SDLVideo.SDL_PROP_WINDOW_CREATE_MAXIMIZED_BOOLEAN,
                     ForgeEarlyConfig.windowStartMaximized));
 
+            DisplayEvents.firePreWindowCreate(windowContext(props));
+
             sdlWindow = SDL_CreateWindowWithProperties(props);
             if (sdlWindow == NULL) {
                 throw new IllegalStateException("Failed to create Display window: " + SDLError.SDL_GetError());
@@ -487,6 +495,7 @@ public class Display {
         if (savedIcons != null) {
             applySavedIcons();
         }
+        DisplayEvents.firePostWindowCreate(windowContext(0));
     }
 
     /**
@@ -526,7 +535,8 @@ public class Display {
     }
 
     private static long backendWindowFlags() {
-        return RenderBackendSelection.get().sdlWindowFlags();
+        long flags = RenderBackendSelection.get().sdlWindowFlags();
+        return hasGLContext ? flags : flags & ~SDL_WINDOW_OPENGL;
     }
 
     private static void applyGlAttributes(int versionMajor, int versionMinor) {
@@ -954,37 +964,71 @@ public class Display {
         if (!displayCreated) {
             return;
         }
-        // Runs on the caller thread: the splash renderer swaps its own frames and would deadlock waiting
-        // for the client thread to drain a queued swap.
+        if (!hasGLContext) return;
         Sys.checkSdl(SDLVideo.SDL_GL_SwapWindow(sdlWindow));
     }
 
     public static void destroy() {
-        if (drawable != null) {
-            drawable.destroy();
+        Throwable failure = null;
+        try {
+            if (sdlWindow != NULL) DisplayEvents.firePreWindowDestroy(windowContext(0));
+        } catch (RuntimeException | Error closeFailure) {
+            failure = closeFailure;
+        }
+        try {
+            if (drawable != null) drawable.destroy();
+        } catch (RuntimeException | Error drawableFailure) {
+            if (failure == null) failure = drawableFailure;
+            else failure.addSuppressed(drawableFailure);
+        } finally {
             drawable = null;
         }
-        // create() installs the function provider before the display counts as created, so releasing it must not
-        // depend on displayCreated: a create that fails right after GL.create() would otherwise leave the provider
-        // loaded and make every retry throw "OpenGL library has already been loaded" from GL.create().
-        // GL.destroy() is a no-op when no provider was installed.
-        GL.setCapabilities(null);
-        GL.destroy();
-        MainThread.runOnMainThread(() -> {
-            if (sdlGlContext != NULL) {
-                SDLVideo.SDL_GL_DestroyContext(sdlGlContext);
-                sdlGlContext = NULL;
+        try {
+            if (backendInitialized) {
+                backendInitialized = false;
+                RenderBackendSelection.get().close();
             }
-            if (sdlWindow != NULL) {
-                SDL_DestroyWindow(sdlWindow);
-                sdlWindow = NULL;
-                sdlWindowId = 0;
+        } catch (RuntimeException | Error backendFailure) {
+            if (failure == null) failure = backendFailure;
+            else failure.addSuppressed(backendFailure);
+        }
+        try {
+            destroyWindow();
+        } catch (RuntimeException | Error windowFailure) {
+            if (failure == null) failure = windowFailure;
+            else failure.addSuppressed(windowFailure);
+        } finally {
+            displayCreated = false;
+            hasGLContext = false;
+        }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+    }
+
+    private static void destroyWindow() {
+        try {
+            if (hasGLContext) {
+                GL.setCapabilities(null);
+                GL.destroy();
             }
-        });
-        displayCreated = false;
+        } finally {
+            MainThread.runOnMainThread(() -> {
+                if (sdlGlContext != NULL) {
+                    SDLVideo.SDL_GL_DestroyContext(sdlGlContext);
+                    sdlGlContext = NULL;
+                }
+                if (sdlWindow != NULL) {
+                    SDL_DestroyWindow(sdlWindow);
+                    sdlWindow = NULL;
+                    sdlWindowId = 0;
+                }
+            });
+        }
     }
 
     public static void setDisplayMode(DisplayMode dm) {
+        if (displayCreated) DisplayEvents.firePreSwapchainInvalidatingChange(
+            new SwapchainInvalidatingChange(SwapchainInvalidatingChange.Kind.DISPLAY_MODE, false, dm));
         mode = dm;
         if (displayCreated) {
             MainThread.runOnMainThread(() -> Sys.checkSdl(SDL_SetWindowSize(sdlWindow, dm.getWidth(), dm.getHeight())));
@@ -1238,6 +1282,8 @@ public class Display {
     }
 
     public static void setBorderless(boolean toBorderless) {
+        if (displayCreated) DisplayEvents.firePreSwapchainInvalidatingChange(
+            new SwapchainInvalidatingChange(SwapchainInvalidatingChange.Kind.FULLSCREEN, toBorderless, null));
         borderlessInsteadOfFullscreen = toBorderless;
         if (!displayCreated) {
             return;
@@ -1322,6 +1368,7 @@ public class Display {
         if (!displayCreated) {
             return;
         }
+        if (!hasGLContext) return;
         MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_SetSwapInterval(value)));
     }
 
@@ -1333,10 +1380,12 @@ public class Display {
         if (!displayCreated) {
             return;
         }
+        if (!hasGLContext) return;
         MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL)));
     }
 
     public static boolean isCurrent() {
+        if (!hasGLContext) return false;
         return displayCreated && SDLVideo.SDL_GL_GetCurrentContext() == sdlGlContext;
     }
 
@@ -1344,11 +1393,13 @@ public class Display {
         if (!displayCreated) {
             return;
         }
+        if (!hasGLContext) return;
         MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext)));
     }
 
     public static String getAdapter() {
         if (isCreated()) {
+            if (!hasGLContext) return "Unknown";
             return GL11.glGetString(GL11.GL_VENDOR);
         }
         return "Unknown";
@@ -1356,6 +1407,7 @@ public class Display {
 
     public static String getVersion() {
         if (isCreated()) {
+            if (!hasGLContext) return "Unknown";
             return GL11.glGetString(GL11.GL_VERSION);
         }
         return "Unknown";
@@ -1372,6 +1424,20 @@ public class Display {
 
     public static Drawable getDrawable() {
         return drawable;
+    }
+
+    /** Installs a rendering integration's drawable during a post-window-create callback, before display creation completes. */
+    public static void setDrawable(DrawableGL replacement) {
+        if (displayCreated) throw new IllegalStateException("The display drawable is already active");
+        drawable = Objects.requireNonNull(replacement);
+    }
+
+    /** Returns whether the active window was created with a native OpenGL context. */
+    public static boolean hasGLContext() { return hasGLContext; }
+
+    private static DisplayWindowContext windowContext(int props) {
+        return new DisplayWindowContext(props, sdlWindow, sdlGlContext, attachmentPixelFormat,
+            attachmentContextAttribs, mode, windowTitle, hasGLContext);
     }
 
     static DisplayImplementation getImplementation() {

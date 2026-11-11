@@ -83,7 +83,11 @@ public final class NestedLibraryJars {
             return null;
         }
         try {
-            return new URL(null, PROTOCOL + ":" + outerJar.getAbsolutePath() + "!/" + entry + "!/", HANDLER);
+            String outerPath = outerJar.toURI().getRawPath();
+            if (outerPath.length() >= 3 && outerPath.charAt(0) == '/' && outerPath.charAt(2) == ':') {
+                outerPath = outerPath.substring(1);
+            }
+            return new URL(null, PROTOCOL + ":" + outerPath + "!/" + entry + "!/", HANDLER);
         } catch (MalformedURLException e) {
             return null;
         }

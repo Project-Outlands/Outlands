@@ -16,8 +16,6 @@ on:
       - '.github/**'
   workflow_dispatch:
 
-# The run title stays short on purpose: the default is the commit message, which makes a multi line
-# message (and this repository writes them) fill the whole actions list.
 run-name: "${{ github.ref_name }} #${{ github.run_number }}"
 
 permissions:
@@ -34,7 +32,9 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          java-version: |
+            8
+            25
           distribution: 'temurin'
 
       - name: Setup Gradle
@@ -56,8 +56,6 @@ jobs:
       - name: Build Jars
         run: ./gradlew build
 
-      # Test builds are not released, so they carry no same-day suffix: the version is just today's date and the
-      # artifact names say 'local' through the MMC pack.
       - name: Get version
         run: echo "OUTLANDS_VERSION=$(cat version.txt)" >> "$GITHUB_ENV"
 

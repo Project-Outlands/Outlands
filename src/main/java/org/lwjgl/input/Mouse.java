@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 
 import net.minecraftforge.common.ForgeEarlyConfig;
+import net.minecraftforge.client.ime.TextFieldHandler;
 
 import org.apache.commons.lang3.StringUtils;
 import org.lwjgl.BufferUtils;
@@ -259,6 +260,9 @@ public class Mouse {
     public static void setGrabbed(boolean grab) {
         if (grabbed == grab) {
             return;
+        }
+        if (grab) {
+            TextFieldHandler.resetTextInput();
         }
         MainThread.runOnMainThread(() -> {
             Sys.checkSdl(SDLMouse.SDL_SetWindowRelativeMouseMode(Display.getWindow(), grab));
