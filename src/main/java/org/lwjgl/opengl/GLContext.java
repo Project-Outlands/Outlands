@@ -2,9 +2,10 @@ package org.lwjgl.opengl;
 
 public class GLContext {
 
-    private static ContextCapabilities contextCapabilities = new ContextCapabilities();
+    private static ContextCapabilities contextCapabilities;
 
     public static ContextCapabilities getCapabilities() {
+        if (contextCapabilities == null) refreshCapabilities();
         return contextCapabilities;
     }
 

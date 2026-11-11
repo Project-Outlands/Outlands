@@ -615,6 +615,11 @@ public class Display {
         }
     }
 
+    /** Returns whether the display owns a native OpenGL context. */
+    public static boolean hasGLContext() {
+        return sdlGlContext != NULL;
+    }
+
     public static boolean isCreated() {
         return displayCreated;
     }
