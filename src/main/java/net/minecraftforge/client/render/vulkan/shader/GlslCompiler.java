@@ -13,6 +13,7 @@ import static org.lwjgl.util.shaderc.Shaderc.shaderc_glsl_vertex_shader;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_into_spv;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_initialize;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_set_auto_bind_uniforms;
+import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_set_generate_debug_info;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_set_auto_map_locations;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_release;
 import static org.lwjgl.util.shaderc.Shaderc.shaderc_compile_options_set_optimization_level;
@@ -75,6 +76,17 @@ public final class GlslCompiler {
      *                              so it is a checked-style exception rather than an IllegalState.
      */
     public static byte[] compile(String source, Stage stage, String name) {
+        return compile(source, stage, name, true);
+    }
+
+    /**
+     * Compiles, optionally without the name table.
+     *
+     * <p>Names cost size - about twice the module for the loader's own shaders - and only the GL facade needs them,
+     * because only it has to answer {@code glGetUniformLocation} by name. A shader this project refers to by explicit
+     * binding does not.</p>
+     */
+    public static byte[] compile(String source, Stage stage, String name, boolean withNames) {
         if (source == null) {
             throw new IllegalArgumentException("shader source is null");
         }
@@ -96,6 +108,12 @@ public final class GlslCompiler {
             // sources, and it is what lets an unmodified - or minimally modified - mod shader through.
             shaderc_compile_options_set_auto_map_locations(options, true);
             shaderc_compile_options_set_auto_bind_uniforms(options, true);
+            // Names, and this is not a debugging nicety: GL looks uniforms up by name, and without debug info the
+            // module carries an empty name table, so a program would have no way to answer glGetUniformLocation.
+            // Measured: without this flag the module has no OpName or OpMemberName instruction at all.
+            if (withNames) {
+                shaderc_compile_options_set_generate_debug_info(options);
+            }
 
             synchronized (LOCK) {
                 if (compiler == 0L) {

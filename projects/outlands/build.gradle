@@ -734,6 +734,51 @@ checks.patches { it.patchDir.set(rootProject.layout.projectDirectory.dir('patche
 checks.execs {}
 // endregion
 
+// Compiles the game's own shader programs to SPIR-V, ahead of time.
+//
+// The runtime compiler in the backend exists for source that arrives while the game runs - a mod, a shader pack. The
+// game's programs are fixed assets, so they are compiled once here and shipped as modules: the vanilla path then never
+// compiles anything and cannot be affected by a change to the rewrite rules.
+//
+// It reads them out of the assets jar rather than out of processResources' output, so there is no ordering cycle: the
+// generator feeds processResources, not the other way round.
+configurations {
+    shaderCompilerTools {
+        transitive = false
+    }
+}
+dependencies {
+    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version"
+    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version:$lwjglArch"
+    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version"
+    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version:$lwjglArch"
+}
+def programShaderOutput = layout.buildDirectory.dir('generated/programShaders')
+tasks.register('compileProgramShaders', JavaExec) {
+    group = 'build'
+    description = "Compiles the game's shaders/program/*.{vsh,fsh} to SPIR-V for the Vulkan backend"
+    dependsOn 'compileJava'
+    classpath = files(sourceSets.main.output.classesDirs) + configurations.shaderCompilerTools
+    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ProgramShaderCompiler'
+    inputs.files(mcpBase.extra)
+    outputs.dir(programShaderOutput)
+    doFirst {
+        args = [mcpBase.extra.get().toString(), programShaderOutput.get().asFile.absolutePath]
+    }
+}
+// The generated modules are *not* routed through processResources: compileJava already depends on it in this build,
+// and processResources depending on a task that needs compileJava is a cycle. They are added to the places that
+// actually consume resources at run time and at packaging time instead.
+sourceSets.main.runtimeClasspath += files(programShaderOutput)
+tasks.named('jar') {
+    from(programShaderOutput)
+}
+tasks.configureEach {
+    if (name == 'runOutlandsClient' || name == 'runOutlandsServer') {
+        dependsOn 'compileProgramShaders'
+    }
+}
+
 // Regenerates the .spv files that ship next to their GLSL sources. The results are committed, so this only has
 // to run when a shader changes; a build without it works.
 tasks.register('compileShaders', JavaExec) {

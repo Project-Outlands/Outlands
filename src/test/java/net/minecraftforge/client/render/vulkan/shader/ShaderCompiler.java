@@ -55,7 +55,7 @@ public final class ShaderCompiler {
             Path source = root.resolve(shader[0]);
             Path output = root.resolve(shader[0] + ".spv");
             byte[] spirv = net.minecraftforge.client.render.vulkan.shader.GlslCompiler.compile(
-                    Files.readString(source), stage(shader[1]), shader[0]);
+                    Files.readString(source), stage(shader[1]), shader[0], false);
             Files.write(output, spirv);
             System.out.println("compiled " + shader[0] + " -> " + output.getFileName()
                     + " (" + spirv.length + " bytes)");
