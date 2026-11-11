@@ -31,9 +31,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class VanillaProgramShadersTest {
 
-    /** File name to stage, for the five stages the chain uses. */
+    /**
+     * The stages the chain actually uses, by the names its program json files name them.
+     *
+     * <p>{@code entity_outline.json} is the first pass - vertex {@code sobel}, fragment {@code entity_sobel} - and the
+     * blur and blit passes follow. {@code outline.fsh} is <b>not</b> part of this chain (it belongs to
+     * {@code post/outline.json}); it is listed because it is hand-written under the same rules and would otherwise
+     * rot unnoticed.</p>
+     */
     private static final String[] OUTLINE_CHAIN = {
-            "sobel.vsh", "outline.fsh", "blur.fsh", "blit.vsh", "blit.fsh"
+            "sobel.vsh", "entity_sobel.fsh", "outline.fsh", "blur.fsh", "blit.vsh", "blit.fsh"
     };
 
     @Test
@@ -56,7 +63,10 @@ class VanillaProgramShadersTest {
         assertUniforms("blit.vsh", "ProjMat", "OutSize");
         assertUniforms("blit.fsh", "ProjMat", "OutSize", "ColorModulate");
 
-        // outline.fsh reads only the sampler, so it declares no block at all. A block is per stage, not per program.
+        // entity_sobel.fsh and outline.fsh read only the sampler, so they declare no block at all. A block is per
+        // stage, not per program.
+        assertTrue(SpirvReflection.reflect(module("entity_sobel.fsh")).blocks().isEmpty(),
+                "entity_sobel.fsh has no uniform of its own");
         assertTrue(SpirvReflection.reflect(module("outline.fsh")).blocks().isEmpty(),
                 "outline.fsh has no uniform of its own");
     }
@@ -66,7 +76,7 @@ class VanillaProgramShadersTest {
         // The convention the hand-written sources follow, and the one the backend will build layouts from: set 0 is
         // the program's uniform block, set 1 is the textures. Keeping them apart is what lets a program bind one
         // uniform buffer and any number of samplers without the two lists colliding.
-        for (String name : new String[] {"outline.fsh", "blur.fsh", "blit.fsh"}) {
+        for (String name : new String[] {"entity_sobel.fsh", "outline.fsh", "blur.fsh", "blit.fsh"}) {
             SpirvReflection.Sampler sampler = SpirvReflection.reflect(module(name)).sampler("DiffuseSampler");
             assertNotNull(sampler, name + " reads the previous pass through DiffuseSampler");
             assertEquals(1, sampler.set(), name + ": samplers live in set 1");
@@ -91,6 +101,7 @@ class VanillaProgramShadersTest {
     void theVertexAndFragmentStagesOfEachPassAgreeOnTheirInterface() {
         // The three passes the chain runs: outline and both blur directions share sobel.vsh, and the final blit has
         // its own pair. Every fragment input has to be a vertex output with the same name at the same location.
+        assertInterfaceMatches("sobel.vsh", "entity_sobel.fsh");
         assertInterfaceMatches("sobel.vsh", "outline.fsh");
         assertInterfaceMatches("sobel.vsh", "blur.fsh");
         assertInterfaceMatches("blit.vsh", "blit.fsh");
