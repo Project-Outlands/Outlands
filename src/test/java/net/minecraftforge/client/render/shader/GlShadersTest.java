@@ -9,9 +9,11 @@ import net.minecraftforge.client.render.vulkan.shader.GlslCompiler;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -163,6 +165,95 @@ class GlShadersTest {
         assertEquals(program, GlShaders.currentProgram());
         GlShaders.useProgram(0);
         assertEquals(0, GlShaders.currentProgram(), "program 0 is \"none\", as in GL");
+    }
+
+    @Test
+    void integerVectorsAreWrittenAtTheDeclaredOffsets() {
+        // ShaderUniform writes ivec uniforms through glUniform1..4(IntBuffer), which is a different call from the
+        // scalar glUniform1i: the game uses both, and an int written as a float is a uniform that is silently wrong.
+        int fragment = shader(GlShaders.FRAGMENT_SHADER, """
+                #version 120
+                uniform ivec2 BlockPos;
+                uniform int Layer;
+                void main() { gl_FragColor = vec4(float(BlockPos.x), float(BlockPos.y), float(Layer), 1.0); }
+                """);
+        int program = GlShaders.createProgram();
+        GlShaders.attachShader(program, fragment);
+        GlShaders.linkProgram(program);
+
+        GlShaders.uniform2i(GlShaders.uniformLocation(program, "BlockPos"), IntBuffer.wrap(new int[] {7, -9}));
+        GlShaders.uniform1i(GlShaders.uniformLocation(program, "Layer"), 3);
+
+        ByteBuffer bytes = ByteBuffer.wrap(GlShaders.program(program).blockBytes()).order(ByteOrder.nativeOrder());
+        assertEquals(7, bytes.getInt(0), "BlockPos.x");
+        assertEquals(-9, bytes.getInt(4), "BlockPos.y");
+        assertEquals(3, bytes.getInt(8), "Layer follows the vector");
+    }
+
+    @Test
+    void aThreeByThreeMatrixHonoursTheTransposeFlag() {
+        int fragment = shader(GlShaders.FRAGMENT_SHADER, """
+                #version 120
+                uniform mat3 Tint;
+                void main() { gl_FragColor = vec4(Tint[0], 1.0); }
+                """);
+        int program = GlShaders.createProgram();
+        GlShaders.attachShader(program, fragment);
+        GlShaders.linkProgram(program);
+
+        // Row-major input: 1 2 3 / 4 5 6 / 7 8 9. Transposed, the first column becomes 1 4 7.
+        float[] rowMajor = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+        GlShaders.uniformMatrix3(GlShaders.uniformLocation(program, "Tint"), true, FloatBuffer.wrap(rowMajor));
+
+        ByteBuffer bytes = ByteBuffer.wrap(GlShaders.program(program).blockBytes()).order(ByteOrder.nativeOrder());
+        assertEquals(1.0F, bytes.getFloat(0));
+        assertEquals(4.0F, bytes.getFloat(4), "a transposed matrix swaps row and column, it is not just copied");
+        assertEquals(7.0F, bytes.getFloat(8));
+    }
+
+    @Test
+    void anAttributeLocationComesFromTheModuleWhenNothingWasBound() {
+        // The game binds its attributes by name, but a mod's shader usually does not, and glGetAttribLocation still has
+        // to answer with the location the module actually declares.
+        int vertex = shader(GlShaders.VERTEX_SHADER, """
+                #version 120
+                attribute vec4 Position;
+                attribute vec2 UV;
+                void main() { gl_Position = Position + vec4(UV, 0.0, 0.0); }
+                """);
+        int program = GlShaders.createProgram();
+        GlShaders.attachShader(program, vertex);
+        GlShaders.linkProgram(program);
+
+        int position = GlShaders.attribLocation(program, "Position");
+        int uv = GlShaders.attribLocation(program, "UV");
+        assertTrue(position >= 0 && uv >= 0, "both attributes have a location, got " + position + " and " + uv);
+        assertNotEquals(position, uv, "two attributes cannot share one");
+        assertEquals(-1, GlShaders.attribLocation(program, "NotThere"), "GL answers -1 for an attribute it lacks");
+    }
+
+    @Test
+    void pointingASamplerAtATextureUnitDoesNotOverwriteTheUniformBlock() {
+        // glUniform1i on a sampler names a texture unit; a sampler has no place in the block. Writing it there anyway
+        // would land on whichever member the compiler put at offset 0 - the first uniform the game ever set.
+        int fragment = shader(GlShaders.FRAGMENT_SHADER, """
+                #version 120
+                uniform float First;
+                uniform sampler2D DiffuseSampler;
+                void main() { gl_FragColor = texture2D(DiffuseSampler, vec2(0.5)) * First; }
+                """);
+        int program = GlShaders.createProgram();
+        GlShaders.attachShader(program, fragment);
+        GlShaders.linkProgram(program);
+
+        int first = GlShaders.uniformLocation(program, "First");
+        GlShaders.uniform1f(first, 0.25F);
+        GlShaders.uniform1i(GlShaders.uniformLocation(program, "DiffuseSampler"), 3);
+
+        ByteBuffer bytes = ByteBuffer.wrap(GlShaders.program(program).blockBytes()).order(ByteOrder.nativeOrder());
+        assertEquals(0.25F, bytes.getFloat(0), "the block still holds the value written before the sampler");
+        assertEquals(3, GlShaders.program(program).samplerUnit("DiffuseSampler"),
+                "and the unit the sampler reads is recorded for the draw");
     }
 
     private static int shader(int type, String source) {

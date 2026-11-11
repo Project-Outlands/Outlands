@@ -49,10 +49,13 @@ public final class SpirvReflection {
     private static final int DECORATION_DESCRIPTOR_SET = 34;
     private static final int DECORATION_OFFSET = 35;
     private static final int DECORATION_ARRAY_STRIDE = 6;
+    private static final int DECORATION_LOCATION = 30;
 
     // Storage classes.
     private static final int STORAGE_UNIFORM_CONSTANT = 0;
+    private static final int STORAGE_INPUT = 1;
     private static final int STORAGE_UNIFORM = 2;
+    private static final int STORAGE_OUTPUT = 3;
 
     /** Execution models, from the SPIR-V specification: the stage a module is written for. */
     public static final int EXECUTION_VERTEX = 0;
@@ -60,6 +63,16 @@ public final class SpirvReflection {
 
     /** One sampled texture the shader reads. */
     public record Sampler(String name, int set, int binding) {}
+
+    /**
+     * One stage input or output, with the location it was given.
+     *
+     * <p>This is the interface between two stages, and the reason it is read back rather than assumed: GL links a
+     * {@code varying} by <i>name</i>, and SPIR-V links by <i>location</i>. Two modules compiled separately can agree
+     * on the name and disagree on the location, and the result is a shader that runs, draws, and reads garbage - which
+     * is the failure mode with no exception attached.</p>
+     */
+    public record StageVariable(String name, int location, boolean output) {}
 
     /** One member of a uniform block, as the compiler laid it out. */
     public record Member(String name, int offset, int size) {}
@@ -137,6 +150,65 @@ public final class SpirvReflection {
             index += count;
         }
         return -1;
+    }
+
+    /**
+     * The stage inputs and outputs a module declares, in declaration order.
+     *
+     * <p>Only variables with a {@code Location} decoration are reported: without one the interface is not fixed at
+     * compile time, and a module like that is exactly what this method exists to catch.</p>
+     */
+    public static List<StageVariable> stageInterface(byte[] spirv) {
+        int[] words = toWords(spirv);
+        if (words.length < 5 || words[0] != MAGIC) {
+            throw new IllegalArgumentException("not a SPIR-V module: " + spirv.length + " bytes");
+        }
+        Map<Integer, String> names = new LinkedHashMap<>();
+        Map<Integer, Integer> locations = new LinkedHashMap<>();
+        Map<Integer, int[]> pointers = new LinkedHashMap<>();
+        List<int[]> variables = new ArrayList<>();
+        List<StageVariable> result = new ArrayList<>();
+
+        int index = 5;
+        while (index < words.length) {
+            int head = words[index];
+            int opcode = head & 0xFFFF;
+            int count = head >>> 16;
+            if (count == 0 || index + count > words.length) {
+                break;
+            }
+            switch (opcode) {
+                case OP_NAME -> names.put(words[index + 1], string(words, index + 2, count - 2));
+                case OP_TYPE_POINTER -> pointers.put(words[index + 1], new int[] {words[index + 3], words[index + 2]});
+                case OP_DECORATE -> {
+                    if (words[index + 2] == DECORATION_LOCATION && count > 3) {
+                        locations.put(words[index + 1], words[index + 3]);
+                    }
+                }
+                case OP_VARIABLE -> variables.add(new int[] {words[index + 1], words[index + 2]});
+                default -> {
+                }
+            }
+            index += count;
+        }
+
+        for (int[] variable : variables) {
+            int[] pointer = pointers.get(variable[0]);
+            if (pointer == null) {
+                continue;
+            }
+            int storage = pointer[1];
+            if (storage != STORAGE_INPUT && storage != STORAGE_OUTPUT) {
+                continue;
+            }
+            Integer location = locations.get(variable[1]);
+            if (location == null) {
+                continue;
+            }
+            result.add(new StageVariable(nameOf(names, variable[1], "location" + location), location,
+                    storage == STORAGE_OUTPUT));
+        }
+        return result;
     }
 
     /**

@@ -73,6 +73,14 @@ public final class GlShaders {
         private byte[] blockBytes = new byte[0];
         private int blockBinding;
         private int blockSet;
+        /**
+         * The texture unit each sampler was last pointed at, by uniform name.
+         *
+         * <p>{@code glUniform1i} on a sampler does not write shader state - it says which texture unit the sampler
+         * reads - so it cannot go into the uniform block. The backend resolves the unit to the texture bound there
+         * when it builds the draw.</p>
+         */
+        private final Map<String, Integer> samplerUnits = new LinkedHashMap<>();
         private String log = "";
         private boolean linked;
 
@@ -132,6 +140,17 @@ public final class GlShaders {
             }
             return null;
         }
+
+        /** The texture unit a sampler reads, or -1 when the game never set one. */
+        public int samplerUnit(String samplerName) {
+            Integer unit = samplerUnits.get(samplerName);
+            return unit == null ? -1 : unit;
+        }
+
+        /** Records the texture unit {@code glUniform1i} named for a sampler. */
+        void setSamplerUnit(String samplerName, int unit) {
+            samplerUnits.put(samplerName, unit);
+        }
     }
 
     private static final Map<Integer, Shader> SHADERS = new LinkedHashMap<>();
@@ -141,6 +160,17 @@ public final class GlShaders {
     private static int currentProgram;
 
     private GlShaders() {}
+
+    /**
+     * Whether shader objects are answered here instead of by a GL context.
+     *
+     * <p>The facade keeps GL's object model for both kinds of caller: the game's own shader layer, which reaches GL
+     * through {@code OpenGlHelper}, and a mod that hands over GLSL while the game runs. On a GL backend the real
+     * driver still answers those calls - this is only the branch for the case where there is no context to ask.</p>
+     */
+    public static boolean active() {
+        return !net.minecraftforge.client.render.RenderBackendSelection.get().isOpenGl();
+    }
 
     /**
      * Creates a shader object.
@@ -382,6 +412,16 @@ public final class GlShaders {
 
     /** {@code glUniform1i}: for a sampler this is the texture unit index; for anything else, four bytes. */
     public static void uniform1i(int location, int value) {
+        Uniform uniform = uniformAt(location);
+        if (uniform != null && uniform.sampler()) {
+            // A sampler has no place in the block: the value names a texture unit, and the backend resolves it when
+            // it binds descriptors. Writing it into the block would overwrite whichever member sits at offset 0.
+            Program program = programOf(location);
+            if (program != null) {
+                program.setSamplerUnit(uniform.name(), value);
+            }
+            return;
+        }
         writeInt(location, 0, value);
     }
 
@@ -409,6 +449,23 @@ public final class GlShaders {
 
     public static void uniform1(int location, FloatBuffer values) {
         writeFloats(location, values, 1);
+    }
+
+    /** {@code glUniform1iv}: integer vectors, used by the game for its ivec uniforms. */
+    public static void uniform1i(int location, IntBuffer values) {
+        writeInts(location, values, 1);
+    }
+
+    public static void uniform2i(int location, IntBuffer values) {
+        writeInts(location, values, 2);
+    }
+
+    public static void uniform3i(int location, IntBuffer values) {
+        writeInts(location, values, 3);
+    }
+
+    public static void uniform4i(int location, IntBuffer values) {
+        writeInts(location, values, 4);
     }
 
     public static void uniform2(int location, FloatBuffer values) {
@@ -455,6 +512,49 @@ public final class GlShaders {
             }
         }
         return out;
+    }
+
+    /** {@code glUniformMatrix2fv}: four floats, column-major. */
+    public static void uniformMatrix2(int location, boolean transpose, FloatBuffer matrices) {
+        writeMatrix(location, transpose, matrices, 2);
+    }
+
+    /** {@code glUniformMatrix3fv}: nine floats, column-major. */
+    public static void uniformMatrix3(int location, boolean transpose, FloatBuffer matrices) {
+        writeMatrix(location, transpose, matrices, 3);
+    }
+
+    private static void writeMatrix(int location, boolean transpose, FloatBuffer matrices, int order) {
+        Uniform uniform = uniformAt(location);
+        if (uniform == null || matrices == null) {
+            return;
+        }
+        Program program = programOf(location);
+        if (program == null) {
+            return;
+        }
+        int count = order * order;
+        float[] values = new float[count];
+        FloatBuffer view = matrices.duplicate();
+        view.rewind();
+        if (view.remaining() < count) {
+            return;
+        }
+        view.get(values);
+        if (transpose) {
+            float[] transposed = new float[count];
+            for (int row = 0; row < order; row++) {
+                for (int column = 0; column < order; column++) {
+                    transposed[column * order + row] = values[row * order + column];
+                }
+            }
+            values = transposed;
+        }
+        ByteBuffer target = ByteBuffer.wrap(program.blockBytes()).order(java.nio.ByteOrder.nativeOrder());
+        int base = uniform.offset();
+        for (int i = 0; i < count && base + i * 4 + 4 <= target.capacity(); i++) {
+            target.putFloat(base + i * 4, values[i]);
+        }
     }
 
     private static void writeInt(int location, int offset, int value) {
@@ -504,6 +604,27 @@ public final class GlShaders {
         }
     }
 
+    private static void writeInts(int location, IntBuffer values, int count) {
+        Uniform uniform = uniformAt(location);
+        if (uniform == null || values == null) {
+            return;
+        }
+        Program program = programOf(location);
+        if (program == null) {
+            return;
+        }
+        IntBuffer view = values.duplicate();
+        view.rewind();
+        ByteBuffer target = ByteBuffer.wrap(program.blockBytes()).order(java.nio.ByteOrder.nativeOrder());
+        int base = uniform.offset();
+        for (int i = 0; i < count && i < view.remaining(); i++) {
+            if (base + i * 4 + 4 > target.capacity()) {
+                break;
+            }
+            target.putInt(base + i * 4, view.get(i));
+        }
+    }
+
     /** The program whose uniform table holds {@code location}. Locations are per program, so this is a lookup. */
     private static Program programOf(int location) {
         for (Program program : PROGRAMS.values()) {
@@ -532,6 +653,34 @@ public final class GlShaders {
     }
 
     // endregion
+
+    /**
+     * {@code glGetAttribLocation}: the location an attribute was given.
+     *
+     * <p>Two sources, in the order GL itself uses them: a location the program asked for with
+     * {@code glBindAttribLocation}, and otherwise the one the module's vertex stage actually declares. -1 when neither
+     * has it, which is what GL returns for an attribute the shader does not read.</p>
+     */
+    public static int attribLocation(int program, CharSequence name) {
+        Program existing = PROGRAMS.get(program);
+        if (existing == null || name == null) {
+            return -1;
+        }
+        Integer bound = existing.attributeLocations.get(name.toString());
+        if (bound != null) {
+            return bound;
+        }
+        byte[] vertex = existing.stageModule(VERTEX_SHADER);
+        if (vertex == null) {
+            return -1;
+        }
+        for (SpirvReflection.StageVariable variable : SpirvReflection.stageInterface(vertex)) {
+            if (!variable.output() && variable.name().equals(name.toString())) {
+                return variable.location();
+            }
+        }
+        return -1;
+    }
 
     /** Test and backend support: drops everything, as a context loss would. */
     public static void reset() {
