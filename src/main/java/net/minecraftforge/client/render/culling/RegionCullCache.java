@@ -25,7 +25,12 @@ public final class RegionCullCache {
     public static final int REGION_SIZE_Y = 64;
     private static final double PAD = 2.0;
 
-    private final int[] cacheKeys = new int[TABLE_SIZE];
+    // Exact coordinates, not a packed key: a region is chunk >> 3, so a coordinate reaches about 234,000 at the world
+    // border and does not fit in 13 bits. Packing silently aliased distant regions onto each other, which could hand
+    // one region the OUTSIDE verdict computed for another and cull a whole region that was in view.
+    private final int[] cacheKeyX = new int[TABLE_SIZE];
+    private final int[] cacheKeyY = new int[TABLE_SIZE];
+    private final int[] cacheKeyZ = new int[TABLE_SIZE];
     private final int[] cacheFrames = new int[TABLE_SIZE];
     private final byte[] cacheState = new byte[TABLE_SIZE];
     private int currentFrame = -1;
@@ -44,10 +49,10 @@ public final class RegionCullCache {
      * @return one of {@link #FULLY_INSIDE}, {@link #PARTIALLY_INSIDE}, or {@link #OUTSIDE}
      */
     public int classify(int rx, int ry, int rz, ICamera camera) {
-        int key = packKey(rx, ry, rz);
-        int slot = hash(key) & MASK;
+        int slot = hash(rx, ry, rz) & MASK;
 
-        if (this.cacheFrames[slot] == this.currentFrame && this.cacheKeys[slot] == key) {
+        if (this.cacheFrames[slot] == this.currentFrame
+                && this.cacheKeyX[slot] == rx && this.cacheKeyY[slot] == ry && this.cacheKeyZ[slot] == rz) {
             return this.cacheState[slot];
         }
 
@@ -68,16 +73,17 @@ public final class RegionCullCache {
         }
 
         this.cacheFrames[slot] = this.currentFrame;
-        this.cacheKeys[slot] = key;
+        this.cacheKeyX[slot] = rx;
+        this.cacheKeyY[slot] = ry;
+        this.cacheKeyZ[slot] = rz;
         this.cacheState[slot] = (byte) state;
         return state;
     }
 
-    private static int packKey(int rx, int ry, int rz) {
-        return ((rx & 0x1FFF) << 19) | ((ry & 0x3F) << 13) | (rz & 0x1FFF);
-    }
-
-    private static int hash(int key) {
+    private static int hash(int rx, int ry, int rz) {
+        int key = rz;
+        key = key * 0x9E3779B1 + ry;
+        key = key * 0x9E3779B1 + rx;
         key ^= key >>> 16;
         key *= 0x85ebca6b;
         key ^= key >>> 13;

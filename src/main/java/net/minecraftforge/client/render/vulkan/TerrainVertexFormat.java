@@ -71,6 +71,19 @@ public final class TerrainVertexFormat {
     private TerrainVertexFormat() {}
 
     /**
+     * A section-local coordinate as signed fixed point, saturated.
+     *
+     * <p>The cast alone wraps: {@code (short) (70 * 512)} is negative, so a vertex written outside the [-64, 64) the
+     * format covers jumps to the opposite side of the chunk instead of being pinned at the edge. Vanilla keeps
+     * section coordinates inside that range, so this is a guard rather than a path - which is exactly why it has to
+     * be cheap and correct: nothing else would notice it firing.</p>
+     */
+    private static short fixed(float value) {
+        int scaled = Math.round(value * POSITION_SCALE);
+        return (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, scaled));
+    }
+
+    /**
      * Compacts {@code quadCount} quads from a native direct {@link ByteBuffer} (28-byte raw layout)
      * into a newly allocated compact 16-byte/vertex {@code byte[]} (64 bytes per quad).
      */
@@ -92,9 +105,9 @@ public final class TerrainVertexFormat {
                 short blockLight = MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET);
                 short skyLight = MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET + 2);
 
-                short sx = (short) Math.round(x * POSITION_SCALE);
-                short sy = (short) Math.round(y * POSITION_SCALE);
-                short sz = (short) Math.round(z * POSITION_SCALE);
+                short sx = fixed(x);
+                short sy = fixed(y);
+                short sz = fixed(z);
                 int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
                 int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
                 int lightPacked = bl | (sl << 8);
@@ -127,9 +140,9 @@ public final class TerrainVertexFormat {
                 short blockLight = srcBuffer.getShort(srcOffset + RAW_LIGHTMAP_OFFSET);
                 short skyLight = srcBuffer.getShort(srcOffset + RAW_LIGHTMAP_OFFSET + 2);
 
-                short sx = (short) Math.round(x * POSITION_SCALE);
-                short sy = (short) Math.round(y * POSITION_SCALE);
-                short sz = (short) Math.round(z * POSITION_SCALE);
+                short sx = fixed(x);
+                short sy = fixed(y);
+                short sz = fixed(z);
                 int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
                 int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
                 int lightPacked = bl | (sl << 8);
@@ -172,9 +185,9 @@ public final class TerrainVertexFormat {
             short blockLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET);
             short skyLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET + 2);
 
-            short sx = (short) Math.round(x * POSITION_SCALE);
-            short sy = (short) Math.round(y * POSITION_SCALE);
-            short sz = (short) Math.round(z * POSITION_SCALE);
+            short sx = fixed(x);
+            short sy = fixed(y);
+            short sz = fixed(z);
             int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
             int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
             int lightPacked = bl | (sl << 8);
@@ -219,9 +232,9 @@ public final class TerrainVertexFormat {
             short blockLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET);
             short skyLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET + 2);
 
-            short sx = (short) Math.round(x * POSITION_SCALE);
-            short sy = (short) Math.round(y * POSITION_SCALE);
-            short sz = (short) Math.round(z * POSITION_SCALE);
+            short sx = fixed(x);
+            short sy = fixed(y);
+            short sz = fixed(z);
             int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
             int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
             int lightPacked = bl | (sl << 8);

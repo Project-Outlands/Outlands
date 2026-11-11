@@ -10,7 +10,7 @@
  
      public RenderChunk(World worldIn, RenderGlobal renderGlobalIn, int indexIn)
      {
-@@ -87,6 +90,11 @@
+@@ -87,6 +90,25 @@
          }
      }
  
@@ -19,10 +19,24 @@
 +        return this.frameIndex;
 +    }
 +
++    // frameIndex answers "has the traversal queued this section", which is also true of sections the occlusion
++    // rasteriser then discarded. Entity visibility has to ask "was it actually submitted", so that is a second mark.
++    private int visibleFrameIndex = -1;
++
++    public void setVisibleFrameIndex(int frameIndexIn)
++    {
++        this.visibleFrameIndex = frameIndexIn;
++    }
++
++    public int getVisibleFrameIndex()
++    {
++        return this.visibleFrameIndex;
++    }
++
      public VertexBuffer getVertexBufferByLayer(int layer)
      {
          return this.vertexBuffers[layer];
-@@ -98,8 +106,12 @@
+@@ -98,8 +120,12 @@
                  || y != this.position.getY()
                  || z != this.position.getZ())
          {
@@ -35,7 +49,7 @@
              this.boundingBox = new AxisAlignedBB(x, y, z, x + 16, y + 16, z + 16);
  
              for (EnumFacing enumfacing : EnumFacing.values())
-@@ -154,6 +166,7 @@
+@@ -154,6 +180,7 @@
  
          VisGraph lvt_9_1_ = new VisGraph();
          HashSet lvt_10_1_ = Sets.newHashSet();
@@ -43,7 +57,7 @@
  
          if (!this.worldView.isEmpty())
          {
-@@ -171,27 +184,30 @@
+@@ -171,27 +198,30 @@
                      lvt_9_1_.setOpaqueCube(blockpos$mutableblockpos);
                  }
  
@@ -77,7 +91,7 @@
                  int j = blockrenderlayer1.ordinal();
  
                  if (block.getDefaultState().getRenderType() != EnumBlockRenderType.INVISIBLE)
-@@ -204,8 +220,14 @@
+@@ -204,8 +234,14 @@
                          this.preRenderBlocks(bufferbuilder, blockpos);
                      }
  
@@ -94,7 +108,7 @@
              }
  
              for (BlockRenderLayer blockrenderlayer : BlockRenderLayer.values())
-@@ -224,6 +246,30 @@
+@@ -224,6 +260,30 @@
              }
          }
  
@@ -125,7 +139,7 @@
          compiledchunk.setVisibility(lvt_9_1_.computeVisibility());
          this.lockCompileTask.lock();
  
-@@ -269,38 +315,40 @@
+@@ -269,38 +329,40 @@
      public ChunkCompileTaskGenerator makeCompileTaskChunk()
      {
          this.lockCompileTask.lock();
@@ -173,7 +187,7 @@
              {
                  if (this.compileTask != null && this.compileTask.getStatus() != ChunkCompileTaskGenerator.Status.DONE)
                  {
-@@ -312,11 +360,15 @@
+@@ -312,11 +374,15 @@
                  this.compileTask.setCompiledChunk(this.compiledChunk);
                  return this.compileTask;
              }
@@ -189,7 +203,7 @@
      }
  
      protected double getDistanceSq()
-@@ -393,6 +445,7 @@
+@@ -393,6 +459,7 @@
      {
          this.stopCompileTask();
          this.world = null;
@@ -197,7 +211,7 @@
  
          for (int i = 0; i < BlockRenderLayer.values().length; i++)
          {
-@@ -408,6 +461,26 @@
+@@ -408,6 +475,26 @@
          return this.position;
      }
  
@@ -224,7 +238,7 @@
      public void setNeedsUpdate(boolean immediate)
      {
          if (this.needsUpdate)
-@@ -434,6 +507,26 @@
+@@ -434,6 +521,26 @@
      {
          return this.needsUpdate && this.needsImmediateUpdate;
      }
