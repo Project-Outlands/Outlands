@@ -22,7 +22,7 @@ class TerrainMeshBuilderTest {
 
     /** A quad's four vertices, each filled with a distinguishable byte pattern so pass-through is observable. */
     private static byte[] quads(int quadCount) {
-        byte[] data = new byte[quadCount * 4 * TerrainVertexFormat.STRIDE];
+        byte[] data = new byte[quadCount * 4 * TerrainVertexFormat.RAW_STRIDE];
         for (int i = 0; i < data.length; i++) {
             data[i] = (byte) i;
         }
@@ -42,7 +42,7 @@ class TerrainMeshBuilderTest {
     void oneQuadBecomesFourVerticesAndTwoTriangles() {
         TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(quads(1), 1);
 
-        assertEquals(4 * TerrainVertexFormat.STRIDE, mesh.vertices().length, "four vertices, not six");
+        assertEquals(4 * TerrainVertexFormat.RAW_STRIDE, mesh.vertices().length, "four vertices, not six");
         assertEquals(6, mesh.indexCount());
         // GL_QUADS tessellates 0,1,2,3 as (0,1,2) and (0,2,3). Anything else reverses the winding and the face
         // disappears under back-face culling.
@@ -91,7 +91,7 @@ class TerrainMeshBuilderTest {
         TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(quads(quadCount), quadCount);
 
         int indexed = mesh.vertices().length + mesh.indices().length;
-        int expanded = quadCount * 6 * TerrainVertexFormat.STRIDE;
+        int expanded = quadCount * 6 * TerrainVertexFormat.RAW_STRIDE;
         assertTrue(indexed < expanded, "indexing must save the 4-to-6 expansion: " + indexed + " vs " + expanded);
     }
 
@@ -105,7 +105,7 @@ class TerrainMeshBuilderTest {
     @Test
     void aTruncatedQuadIsRejected() {
         // Half a vertex too short: the kind of thing a buffer with a stale count would produce.
-        byte[] input = new byte[4 * TerrainVertexFormat.STRIDE - 2];
+        byte[] input = new byte[4 * TerrainVertexFormat.RAW_STRIDE - 2];
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> TerrainMeshBuilder.build(input, 1));
         assertTrue(error.getMessage().contains("expected"), error.getMessage());

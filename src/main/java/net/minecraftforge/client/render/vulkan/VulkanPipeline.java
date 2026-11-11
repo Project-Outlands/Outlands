@@ -79,7 +79,7 @@ import static org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout;
 final class VulkanPipeline implements AutoCloseable {
 
     /** Vanilla's {@code DefaultVertexFormats.BLOCK}: 28 bytes, four attributes, no normal. */
-    static final int VERTEX_STRIDE = TerrainVertexFormat.STRIDE;
+    static final int VERTEX_STRIDE = TerrainVertexFormat.RAW_STRIDE;
 
     /**
      * Maximum push constant size across pipelines: 128 bytes (guaranteed minimum across all Vulkan devices).
@@ -297,13 +297,13 @@ final class VulkanPipeline implements AutoCloseable {
             // Raw 28-byte format (stream draws)
             attributes = VkVertexInputAttributeDescription.calloc(4, stack);
             attributes.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT)
-                    .offset(TerrainVertexFormat.POSITION_OFFSET);
+                    .offset(TerrainVertexFormat.RAW_POSITION_OFFSET);
             attributes.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
-                    .offset(TerrainVertexFormat.COLOR_OFFSET);
+                    .offset(TerrainVertexFormat.RAW_COLOR_OFFSET);
             attributes.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT)
-                    .offset(TerrainVertexFormat.UV_OFFSET);
+                    .offset(TerrainVertexFormat.RAW_UV_OFFSET);
             attributes.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_UNORM)
-                    .offset(TerrainVertexFormat.LIGHTMAP_OFFSET);
+                    .offset(TerrainVertexFormat.RAW_LIGHTMAP_OFFSET);
         }
 
         VkPipelineVertexInputStateCreateInfo vertexInput = VkPipelineVertexInputStateCreateInfo.calloc(stack)

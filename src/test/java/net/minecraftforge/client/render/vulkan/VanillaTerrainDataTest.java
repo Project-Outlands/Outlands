@@ -65,7 +65,7 @@ class VanillaTerrainDataTest {
 
     private static byte[] bytesOf(BufferBuilder builder) {
         ByteBuffer buffer = builder.getByteBuffer();
-        byte[] out = new byte[builder.getVertexCount() * TerrainVertexFormat.STRIDE];
+        byte[] out = new byte[builder.getVertexCount() * TerrainVertexFormat.RAW_STRIDE];
         ByteBuffer view = buffer.duplicate();
         view.position(0);
         view.get(out);
@@ -77,9 +77,9 @@ class VanillaTerrainDataTest {
         BufferBuilder builder = buildOneQuad();
 
         assertEquals(4, builder.getVertexCount(), "one quad is four vertices");
-        assertEquals(TerrainVertexFormat.STRIDE, builder.getVertexFormat().getSize(),
+        assertEquals(TerrainVertexFormat.RAW_STRIDE, builder.getVertexFormat().getSize(),
                 "the pipeline's stride must be the format's own size, not a guess");
-        assertEquals(4 * TerrainVertexFormat.STRIDE, bytesOf(builder).length);
+        assertEquals(4 * TerrainVertexFormat.RAW_STRIDE, bytesOf(builder).length);
     }
 
     @Test
@@ -90,20 +90,20 @@ class VanillaTerrainDataTest {
         // Each field read with the type vanilla actually writes, which is also the type the pipeline declares.
         // Reading colour as a float here was the first version of this test, and it produced NaN: the four colour
         // components are bytes, so a float read spans colour and the first half of the UV.
-        buffer.position(0 + TerrainVertexFormat.POSITION_OFFSET);
+        buffer.position(0 + TerrainVertexFormat.RAW_POSITION_OFFSET);
         assertEquals(0.0F, buffer.getFloat(), 0.0F, "position.x of the first vertex");
 
-        buffer.position(0 + TerrainVertexFormat.COLOR_OFFSET);
+        buffer.position(0 + TerrainVertexFormat.RAW_COLOR_OFFSET);
         assertEquals(64, buffer.get() & 0xFF, "colour.r of the first vertex, R8G8B8A8_UNORM");
         assertEquals(128, buffer.get() & 0xFF, "colour.g");
         assertEquals(192, buffer.get() & 0xFF, "colour.b");
         assertEquals(255, buffer.get() & 0xFF, "colour.a");
 
-        buffer.position(0 + TerrainVertexFormat.UV_OFFSET);
+        buffer.position(0 + TerrainVertexFormat.RAW_UV_OFFSET);
         assertEquals(0.0F, buffer.getFloat(), 0.0F, "u of the first vertex");
         assertEquals(0.5F, buffer.getFloat(), 0.0F, "v of the first vertex");
 
-        buffer.position(0 + TerrainVertexFormat.LIGHTMAP_OFFSET);
+        buffer.position(0 + TerrainVertexFormat.RAW_LIGHTMAP_OFFSET);
         // Block light first, then sky light: BufferBuilder.lightmap writes blockLight to offset 0 and skyLight to
         // offset 2. A shader that reads this as (sky, block) gets a dark world at noon and a bright one at night,
         // which is the kind of mistake that looks like a lighting bug rather than a format bug.
@@ -115,15 +115,15 @@ class VanillaTerrainDataTest {
     void thirdVertexCarriesItsOwnValues() {
         BufferBuilder builder = buildOneQuad();
         ByteBuffer buffer = builder.getByteBuffer().duplicate().order(ByteOrder.nativeOrder());
-        int base = 2 * TerrainVertexFormat.STRIDE;
+        int base = 2 * TerrainVertexFormat.RAW_STRIDE;
 
         // A quad after the first would be at a different base; here the point is that the stride lands exactly on
         // vertex boundaries, which is what makes any base offset correct.
-        buffer.position(base + TerrainVertexFormat.POSITION_OFFSET);
+        buffer.position(base + TerrainVertexFormat.RAW_POSITION_OFFSET);
         assertEquals(1.0F, buffer.getFloat(), 0.0F, "third vertex position.x");
         assertEquals(1.0F, buffer.getFloat(), 0.0F, "third vertex position.y");
 
-        buffer.position(base + TerrainVertexFormat.COLOR_OFFSET);
+        buffer.position(base + TerrainVertexFormat.RAW_COLOR_OFFSET);
         assertEquals(128, buffer.get() & 0xFF, "third vertex colour.r");
     }
 
@@ -135,7 +135,7 @@ class VanillaTerrainDataTest {
         TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(captured, 1);
 
         // The bytes are what vanilla wrote: no conversion, no reordering, no normal invented.
-        assertEquals(4 * TerrainVertexFormat.STRIDE, mesh.vertices().length);
+        assertEquals(4 * TerrainVertexFormat.RAW_STRIDE, mesh.vertices().length);
         assertArrayEquals(captured, mesh.vertices(), "vertex bytes pass through verbatim");
         assertEquals(6, mesh.indexCount(), "GL_QUADS becomes two triangles");
         assertTrue(mesh.index32() == false, "four vertices never need 32-bit indices");

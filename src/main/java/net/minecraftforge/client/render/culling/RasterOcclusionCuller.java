@@ -47,14 +47,23 @@ public final class RasterOcclusionCuller extends BoxOccluder {
         occludeFromPerspective(packedBox);
     }
 
+    /**
+     * Prepares the mask for one frame: sizes the buffer, clears it, and sets the view the boxes will be projected
+     * with.
+     *
+     * <p>{@code viewVersion} is the frame the caller is preparing, and it is passed through rather than replaced by an
+     * internal counter: the rasteriser uses it to decide when cached state from a previous view is stale, so a
+     * silently-ignored argument made that decision always true.</p>
+     */
     public void prepareScene(int viewVersion, double camX, double camY, double camZ, Matrix4fc vpMatrix, float testDistance) {
         if (vpMatrix == null) {
             return;
         }
 
+        this.viewSequence = viewVersion;
         chooseBufferSize(vpMatrix, testDistance);
         invalidate();
-        prepareScene(this.viewSequence++, camX, camY, camZ,
+        prepareScene(viewVersion, camX, camY, camZ,
                 Matrix4L::loadIdentity, m -> copyMatrix(vpMatrix, m));
     }
 

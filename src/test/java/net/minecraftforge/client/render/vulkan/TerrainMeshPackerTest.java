@@ -27,7 +27,7 @@ class TerrainMeshPackerTest {
     }
 
     private static TerrainMeshBuilder.Mesh mesh(int quadCount, byte tag) {
-        byte[] quads = new byte[quadCount * 4 * TerrainVertexFormat.STRIDE];
+        byte[] quads = new byte[quadCount * 4 * TerrainVertexFormat.RAW_STRIDE];
         for (int i = 0; i < quads.length; i++) {
             quads[i] = tag;
         }
@@ -56,7 +56,7 @@ class TerrainMeshPackerTest {
     void vertexBytesAreConcatenatedInOrder() {
         TerrainMeshPacker.Pack pack = TerrainMeshPacker.pack(List.of(entry(mesh(1, (byte) 7)), entry(mesh(1, (byte) 9))));
 
-        int perMesh = 4 * TerrainVertexFormat.STRIDE;
+        int perMesh = 4 * TerrainVertexFormat.RAW_STRIDE;
         assertEquals(perMesh * 2, pack.vertices().length);
         assertEquals(7, pack.vertices()[0], "first mesh's bytes come first");
         assertEquals(9, pack.vertices()[perMesh], "second mesh's bytes follow");

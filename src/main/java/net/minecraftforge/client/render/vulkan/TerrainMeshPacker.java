@@ -68,13 +68,13 @@ final class TerrainMeshPacker {
         int totalIndices = 0;
         for (Entry entry : entries) {
             TerrainMeshBuilder.Mesh mesh = entry.mesh();
-            totalVertices += mesh.vertices().length / TerrainVertexFormat.STRIDE;
+            totalVertices += mesh.vertices().length / TerrainVertexFormat.RAW_STRIDE;
             totalIndices += mesh.indexCount();
         }
         // The whole pack shares one index space, so one mesh that needs 32 bits forces the whole pack to.
         boolean index32 = totalVertices > 0xFFFF;
 
-        byte[] vertices = new byte[totalVertices * TerrainVertexFormat.STRIDE];
+        byte[] vertices = new byte[totalVertices * TerrainVertexFormat.RAW_STRIDE];
         ByteBuffer indices = ByteBuffer.allocate(totalIndices * (index32 ? Integer.BYTES : Short.BYTES))
                 .order(ByteOrder.nativeOrder());
         List<Slice> slices = new ArrayList<>(entries.size());
@@ -83,8 +83,8 @@ final class TerrainMeshPacker {
         int indexBase = 0;
         for (Entry entry : entries) {
             TerrainMeshBuilder.Mesh mesh = entry.mesh();
-            int vertexCount = mesh.vertices().length / TerrainVertexFormat.STRIDE;
-            System.arraycopy(mesh.vertices(), 0, vertices, vertexBase * TerrainVertexFormat.STRIDE,
+            int vertexCount = mesh.vertices().length / TerrainVertexFormat.RAW_STRIDE;
+            System.arraycopy(mesh.vertices(), 0, vertices, vertexBase * TerrainVertexFormat.RAW_STRIDE,
                     mesh.vertices().length);
 
             // Indices keep their chunk-relative values; the draw call supplies vertexOffset.

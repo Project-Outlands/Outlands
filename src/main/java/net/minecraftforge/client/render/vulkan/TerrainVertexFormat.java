@@ -52,12 +52,6 @@ public final class TerrainVertexFormat {
     /** UV unorm scale factor (65535.0f). */
     public static final float UV_SCALE = 65535.0f;
 
-    // Aliases for stream and legacy callers:
-    public static final int STRIDE = RAW_STRIDE;
-    public static final int POSITION_OFFSET = RAW_POSITION_OFFSET;
-    public static final int COLOR_OFFSET = RAW_COLOR_OFFSET;
-    public static final int UV_OFFSET = RAW_UV_OFFSET;
-    public static final int LIGHTMAP_OFFSET = RAW_LIGHTMAP_OFFSET;
     public static final int COLOR_BYTES = 4;
     public static final int LIGHTMAP_BYTES = 4;
 
@@ -84,177 +78,106 @@ public final class TerrainVertexFormat {
     }
 
     /**
-     * Compacts {@code quadCount} quads from a native direct {@link ByteBuffer} (28-byte raw layout)
-     * into a newly allocated compact 16-byte/vertex {@code byte[]} (64 bytes per quad).
+     * Compacts {@code quadCount} quads from vanilla's 28-byte layout into the 16-byte GPU layout.
+     *
+     * <p>Two loops, because reading is the only part that differs: a mapped buffer is read by address, a Java array
+     * through byte-view var handles. Everything after the read - the fixed-point position, the packed lightmap, the
+     * normalized texture coordinates - is the same arithmetic in both, and lives in one place.</p>
      */
-    public static byte[] compact(ByteBuffer srcBuffer, int quadCount) {
-        int dstSize = quadCount * COMPACT_QUAD_SIZE;
-        byte[] dst = new byte[dstSize];
-        ByteBuffer dstBuf = ByteBuffer.wrap(dst).order(ByteOrder.nativeOrder());
+    private static void compactDirect(long srcAddress, long dstAddress, int quadCount) {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
-
-        if (srcBuffer.isDirect()) {
-            long src = MemoryUtil.memAddress(srcBuffer);
-            for (int i = 0; i < vertexCount; i++) {
-                float x = MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET);
-                float y = MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 4);
-                float z = MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 8);
-                int color = MemoryUtil.memGetInt(src + RAW_COLOR_OFFSET);
-                float u = MemoryUtil.memGetFloat(src + RAW_UV_OFFSET);
-                float v = MemoryUtil.memGetFloat(src + RAW_UV_OFFSET + 4);
-                short blockLight = MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET);
-                short skyLight = MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET + 2);
-
-                short sx = fixed(x);
-                short sy = fixed(y);
-                short sz = fixed(z);
-                int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
-                int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
-                int lightPacked = bl | (sl << 8);
-
-                int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
-                int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
-
-                int base = i * COMPACT_STRIDE;
-                long posLight = ((long) (sx & 0xFFFF))
-                        | (((long) (sy & 0xFFFF)) << 16)
-                        | (((long) (sz & 0xFFFF)) << 32)
-                        | (((long) lightPacked) << 48);
-                dstBuf.putLong(base, posLight);
-
-                long uv = ((long) (u16 & 0xFFFF)) | (((long) (v16 & 0xFFFF)) << 16);
-                long uvColor = uv | (((long) color & 0xFFFFFFFFL) << 32);
-                dstBuf.putLong(base + 8, uvColor);
-
-                src += RAW_STRIDE;
-            }
-        } else {
-            int srcOffset = srcBuffer.position();
-            for (int i = 0; i < vertexCount; i++) {
-                float x = srcBuffer.getFloat(srcOffset + RAW_POSITION_OFFSET);
-                float y = srcBuffer.getFloat(srcOffset + RAW_POSITION_OFFSET + 4);
-                float z = srcBuffer.getFloat(srcOffset + RAW_POSITION_OFFSET + 8);
-                int color = srcBuffer.getInt(srcOffset + RAW_COLOR_OFFSET);
-                float u = srcBuffer.getFloat(srcOffset + RAW_UV_OFFSET);
-                float v = srcBuffer.getFloat(srcOffset + RAW_UV_OFFSET + 4);
-                short blockLight = srcBuffer.getShort(srcOffset + RAW_LIGHTMAP_OFFSET);
-                short skyLight = srcBuffer.getShort(srcOffset + RAW_LIGHTMAP_OFFSET + 2);
-
-                short sx = fixed(x);
-                short sy = fixed(y);
-                short sz = fixed(z);
-                int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
-                int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
-                int lightPacked = bl | (sl << 8);
-
-                int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
-                int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
-
-                int base = i * COMPACT_STRIDE;
-                long posLight = ((long) (sx & 0xFFFF))
-                        | (((long) (sy & 0xFFFF)) << 16)
-                        | (((long) (sz & 0xFFFF)) << 32)
-                        | (((long) lightPacked) << 48);
-                dstBuf.putLong(base, posLight);
-
-                long uv = ((long) (u16 & 0xFFFF)) | (((long) (v16 & 0xFFFF)) << 16);
-                long uvColor = uv | (((long) color & 0xFFFFFFFFL) << 32);
-                dstBuf.putLong(base + 8, uvColor);
-
-                srcOffset += RAW_STRIDE;
-            }
-        }
-        return dst;
-    }
-
-    /**
-     * Compacts {@code quadCount} quads from raw 28-byte {@code DefaultVertexFormats.BLOCK} array
-     * directly into mapped native memory at {@code dstAddress} (16 bytes per vertex, 64 bytes per quad).
-     */
-    public static void compact(byte[] raw, int quadCount, long dstAddress) {
-        int vertexCount = quadCount * VERTICES_PER_QUAD;
-        int srcOffset = 0;
+        long src = srcAddress;
         long dst = dstAddress;
         for (int i = 0; i < vertexCount; i++) {
-            float x = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET);
-            float y = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET + 4);
-            float z = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET + 8);
-            int color = (int) INT_VIEW.get(raw, srcOffset + RAW_COLOR_OFFSET);
-            float u = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_UV_OFFSET);
-            float v = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_UV_OFFSET + 4);
-            short blockLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET);
-            short skyLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET + 2);
-
-            short sx = fixed(x);
-            short sy = fixed(y);
-            short sz = fixed(z);
-            int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
-            int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
-            int lightPacked = bl | (sl << 8);
-
-            int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
-            int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
-
-            // 0..7: 3x s16 pos, 1x s16 light (2x u8)
-            long posLight = ((long) (sx & 0xFFFF))
-                    | (((long) (sy & 0xFFFF)) << 16)
-                    | (((long) (sz & 0xFFFF)) << 32)
-                    | (((long) lightPacked) << 48);
-            MemoryUtil.memPutLong(dst, posLight);
-
-            // 8..15: 2x u16 unorm UV, 4x u8 unorm Color (RGBA)
-            long uv = ((long) (u16 & 0xFFFF)) | (((long) (v16 & 0xFFFF)) << 16);
-            long uvColor = uv | (((long) color & 0xFFFFFFFFL) << 32);
-            MemoryUtil.memPutLong(dst + 8, uvColor);
-
-            srcOffset += RAW_STRIDE;
+            putVertex(dst,
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 4),
+                    MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 8),
+                    MemoryUtil.memGetInt(src + RAW_COLOR_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_UV_OFFSET),
+                    MemoryUtil.memGetFloat(src + RAW_UV_OFFSET + 4),
+                    MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET),
+                    MemoryUtil.memGetShort(src + RAW_LIGHTMAP_OFFSET + 2));
+            src += RAW_STRIDE;
             dst += COMPACT_STRIDE;
         }
     }
 
+    private static void compactArray(byte[] raw, long dstAddress, int quadCount) {
+        int vertexCount = quadCount * VERTICES_PER_QUAD;
+        int src = 0;
+        long dst = dstAddress;
+        for (int i = 0; i < vertexCount; i++) {
+            putVertex(dst,
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 4),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 8),
+                    (int) INT_VIEW.get(raw, src + RAW_COLOR_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_UV_OFFSET),
+                    (float) FLOAT_VIEW.get(raw, src + RAW_UV_OFFSET + 4),
+                    (short) SHORT_VIEW.get(raw, src + RAW_LIGHTMAP_OFFSET),
+                    (short) SHORT_VIEW.get(raw, src + RAW_LIGHTMAP_OFFSET + 2));
+            src += RAW_STRIDE;
+            dst += COMPACT_STRIDE;
+        }
+    }
+
+    /** Writes one 16-byte vertex: position and light in the first word, texture coordinates and colour in the second. */
+    private static void putVertex(long dst, float x, float y, float z, int color, float u, float v,
+                                  short blockLight, short skyLight) {
+        // Vanilla writes block light to the element's first short and sky light to the second - the opposite of the
+        // argument order of BufferBuilder.lightmap. The terrain shader reads them back in this order.
+        int light = Math.min(255, Math.max(0, blockLight & 0xFFFF))
+                | (Math.min(255, Math.max(0, skyLight & 0xFFFF)) << 8);
+        long posLight = ((long) (fixed(x) & 0xFFFF))
+                | (((long) (fixed(y) & 0xFFFF)) << 16)
+                | (((long) (fixed(z) & 0xFFFF)) << 32)
+                | (((long) light) << 48);
+        int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
+        int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
+        long uvColor = ((long) u16) | (((long) v16) << 16) | (((long) color & 0xFFFFFFFFL) << 32);
+
+        MemoryUtil.memPutLong(dst, posLight);
+        MemoryUtil.memPutLong(dst + 8, uvColor);
+    }
+
     /**
-     * Compacts {@code quadCount} quads from raw 28-byte {@code DefaultVertexFormats.BLOCK} array
-     * into a new 16-byte {@code byte[]} (used primarily for tests).
+     * Compacts quads from a buffer in vanilla's layout into a new byte array.
+     *
+     * <p>A Java array has no address, so the write goes through a direct scratch buffer and one bulk copy. That is
+     * the cost of the alloc-and-copy entry point; the arena path writes straight into mapped memory and pays nothing.
+     * (Addressing a heap {@code ByteBuffer} is not an option - the address it reports is not usable memory.)</p>
+     */
+    public static byte[] compact(ByteBuffer srcBuffer, int quadCount) {
+        ByteBuffer scratch = scratch(quadCount);
+        compactDirect(MemoryUtil.memAddress(srcBuffer), MemoryUtil.memAddress(scratch), quadCount);
+        return toArray(scratch, quadCount);
+    }
+
+    /**
+     * Compacts quads from a byte array in vanilla's layout into the given address, which must be mapped memory.
+     */
+    public static void compact(byte[] raw, int quadCount, long dstAddress) {
+        compactArray(raw, dstAddress, quadCount);
+    }
+
+    /**
+     * Compacts quads from a byte array in vanilla's layout, allocating the result.
      */
     public static byte[] compactToBytes(byte[] raw, int quadCount) {
-        int dstSize = quadCount * COMPACT_QUAD_SIZE;
-        byte[] dst = new byte[dstSize];
-        ByteBuffer buf = ByteBuffer.wrap(dst).order(ByteOrder.nativeOrder());
-        int vertexCount = quadCount * VERTICES_PER_QUAD;
-        int srcOffset = 0;
-        for (int i = 0; i < vertexCount; i++) {
-            float x = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET);
-            float y = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET + 4);
-            float z = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_POSITION_OFFSET + 8);
-            int color = (int) INT_VIEW.get(raw, srcOffset + RAW_COLOR_OFFSET);
-            float u = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_UV_OFFSET);
-            float v = (float) FLOAT_VIEW.get(raw, srcOffset + RAW_UV_OFFSET + 4);
-            short blockLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET);
-            short skyLight = (short) SHORT_VIEW.get(raw, srcOffset + RAW_LIGHTMAP_OFFSET + 2);
+        ByteBuffer scratch = scratch(quadCount);
+        compactArray(raw, MemoryUtil.memAddress(scratch), quadCount);
+        return toArray(scratch, quadCount);
+    }
 
-            short sx = fixed(x);
-            short sy = fixed(y);
-            short sz = fixed(z);
-            int bl = Math.min(255, Math.max(0, blockLight & 0xFFFF));
-            int sl = Math.min(255, Math.max(0, skyLight & 0xFFFF));
-            int lightPacked = bl | (sl << 8);
+    private static ByteBuffer scratch(int quadCount) {
+        return ByteBuffer.allocateDirect(quadCount * COMPACT_QUAD_SIZE).order(ByteOrder.nativeOrder());
+    }
 
-            int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
-            int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
-
-            int base = i * COMPACT_STRIDE;
-            long posLight = ((long) (sx & 0xFFFF))
-                    | (((long) (sy & 0xFFFF)) << 16)
-                    | (((long) (sz & 0xFFFF)) << 32)
-                    | (((long) lightPacked) << 48);
-            buf.putLong(base, posLight);
-
-            long uv = ((long) (u16 & 0xFFFF)) | (((long) (v16 & 0xFFFF)) << 16);
-            long uvColor = uv | (((long) color & 0xFFFFFFFFL) << 32);
-            buf.putLong(base + 8, uvColor);
-
-            srcOffset += RAW_STRIDE;
-        }
+    private static byte[] toArray(ByteBuffer scratch, int quadCount) {
+        byte[] dst = new byte[quadCount * COMPACT_QUAD_SIZE];
+        scratch.position(0);
+        scratch.get(dst);
         return dst;
     }
 }

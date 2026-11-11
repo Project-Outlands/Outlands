@@ -101,26 +101,41 @@ public final class FrameStates {
         return recordTerrainLayer(layer, 0.0, 0.0, 0.0);
     }
 
-    private static final it.unimi.dsi.fastutil.longs.LongArrayList[] LAYER_CHUNK_LISTS = new it.unimi.dsi.fastutil.longs.LongArrayList[] {
-            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
-            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
-            new it.unimi.dsi.fastutil.longs.LongArrayList(4096),
-            new it.unimi.dsi.fastutil.longs.LongArrayList(4096)
-    };
+    /** One visible-chunk list per render layer, indexed by the layer's ordinal. */
+    private static final it.unimi.dsi.fastutil.longs.LongArrayList[] LAYER_CHUNK_LISTS =
+            new it.unimi.dsi.fastutil.longs.LongArrayList[net.minecraft.util.BlockRenderLayer.values().length];
     private static int nextLayerListIdx = 0;
 
-    public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList(int layer) {
-        if (layer >= 0 && layer < LAYER_CHUNK_LISTS.length) {
-            it.unimi.dsi.fastutil.longs.LongArrayList list = LAYER_CHUNK_LISTS[layer];
-            list.clear();
-            return list;
+    static {
+        for (int i = 0; i < LAYER_CHUNK_LISTS.length; i++) {
+            LAYER_CHUNK_LISTS[i] = new it.unimi.dsi.fastutil.longs.LongArrayList(4096);
         }
-        return beginLayerChunkList();
     }
 
+    /**
+     * The visible-chunk list belonging to a render layer.
+     *
+     * <p>Keyed by the layer's ordinal, which is what the terrain layer and the chunk classification both use, so the
+     * three cannot disagree about how many layers there are.</p>
+     */
+    public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList(int layer) {
+        it.unimi.dsi.fastutil.longs.LongArrayList list = layerList(layer);
+        if (list == null) {
+            return beginLayerChunkList();
+        }
+        list.clear();
+        return list;
+    }
+
+    /**
+     * A scratch list for a caller that does not name a layer.
+     *
+     * <p>Rotates through the per-layer lists because a single shared one would be cleared by the next call while the
+     * previous caller still held it. Callers that know their layer should use {@link #beginLayerChunkList(int)}.</p>
+     */
     public static it.unimi.dsi.fastutil.longs.LongArrayList beginLayerChunkList() {
         it.unimi.dsi.fastutil.longs.LongArrayList list = LAYER_CHUNK_LISTS[nextLayerListIdx];
-        nextLayerListIdx = (nextLayerListIdx + 1) & 3;
+        nextLayerListIdx = (nextLayerListIdx + 1) % LAYER_CHUNK_LISTS.length;
         list.clear();
         return list;
     }
@@ -130,10 +145,11 @@ public final class FrameStates {
     }
 
     public static it.unimi.dsi.fastutil.longs.LongArrayList getLayerChunkList(int layer) {
-        if (layer >= 0 && layer < LAYER_CHUNK_LISTS.length) {
-            return LAYER_CHUNK_LISTS[layer];
-        }
-        return null;
+        return layerList(layer);
+    }
+
+    private static it.unimi.dsi.fastutil.longs.LongArrayList layerList(int layer) {
+        return layer >= 0 && layer < LAYER_CHUNK_LISTS.length ? LAYER_CHUNK_LISTS[layer] : null;
     }
 
     public static void clearLayerChunkLists() {

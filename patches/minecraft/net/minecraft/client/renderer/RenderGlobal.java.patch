@@ -1,6 +1,6 @@
 --- before/net/minecraft/client/renderer/RenderGlobal.java
 +++ after/net/minecraft/client/renderer/RenderGlobal.java
-@@ -105,6 +105,119 @@
+@@ -105,6 +105,112 @@
      private WorldClient world;
      private Set<RenderChunk> chunksToUpdate = Sets.newLinkedHashSet();
      private List<RenderGlobal.ContainerLocalRenderInformation> renderInfos = Lists.newArrayListWithCapacity(69696);
@@ -16,7 +16,7 @@
 +        }
 +
 +        it.unimi.dsi.fastutil.longs.LongArrayList[] layerLists = net.minecraftforge.client.render.state.backend.FrameStates.getLayerChunkLists();
-+        for (int l = 0; l < 4; l++)
++        for (int l = 0; l < layerLists.length; l++)
 +        {
 +            layerLists[l].clear();
 +        }
@@ -33,21 +33,14 @@
 +
 +            renderchunk.setVisibleFrameIndex(this.lastTerrainFrameCount);
 +            long pos = renderchunk.getPosition().toLong();
-+            if (!compiled.isLayerEmpty(BlockRenderLayer.SOLID))
++            // Indexed by the layer's own ordinal: the terrain layer and this classification both key on it, so a
++            // hard-coded list here would drift from the enum rather than fail.
++            for (BlockRenderLayer layer : BlockRenderLayer.values())
 +            {
-+                layerLists[0].add(pos);
-+            }
-+            if (!compiled.isLayerEmpty(BlockRenderLayer.CUTOUT_MIPPED))
-+            {
-+                layerLists[1].add(pos);
-+            }
-+            if (!compiled.isLayerEmpty(BlockRenderLayer.CUTOUT))
-+            {
-+                layerLists[2].add(pos);
-+            }
-+            if (!compiled.isLayerEmpty(BlockRenderLayer.TRANSLUCENT))
-+            {
-+                layerLists[3].add(pos);
++                if (!compiled.isLayerEmpty(layer))
++                {
++                    layerLists[layer.ordinal()].add(pos);
++                }
 +            }
 +        }
 +    }
@@ -120,7 +113,7 @@
      private final Set<TileEntity> setTileEntities = Sets.newHashSet();
      private ViewFrustum viewFrustum;
      private int starGLCallList = -1;
-@@ -428,13 +541,11 @@
+@@ -428,13 +534,11 @@
                      double d20 = 0.0;
                      double d21 = d18 * d16 - d19 * d15;
                      double d22 = d19 * d16 + d18 * d15;
@@ -139,7 +132,7 @@
                  }
              }
          }
-@@ -464,7 +575,10 @@
+@@ -464,7 +568,10 @@
          else
          {
              this.chunksToUpdate.clear();
@@ -150,7 +143,7 @@
  
              if (this.viewFrustum != null)
              {
-@@ -546,6 +660,7 @@
+@@ -546,6 +653,7 @@
      protected void stopChunkUpdates()
      {
          this.chunksToUpdate.clear();
@@ -158,7 +151,7 @@
          this.renderDispatcher.stopChunkUpdates();
      }
  
-@@ -562,8 +677,10 @@
+@@ -562,8 +670,10 @@
  
      public void renderEntities(Entity renderViewEntity, ICamera camera, float partialTicks)
      {
@@ -169,7 +162,7 @@
              this.renderEntitiesStartupCounter--;
          }
          else
-@@ -590,9 +707,12 @@
+@@ -590,9 +700,12 @@
                  this.mc.gameSettings,
                  partialTicks
              );
@@ -182,7 +175,7 @@
              Entity entity = this.mc.getRenderViewEntity();
              double d3 = entity.lastTickPosX + (entity.posX - entity.lastTickPosX) * partialTicks;
              double d4 = entity.lastTickPosY + (entity.posY - entity.lastTickPosY) * partialTicks;
-@@ -604,11 +724,15 @@
+@@ -604,11 +717,15 @@
              this.mc.entityRenderer.enableLightmap();
              this.world.profiler.endStartSection("global");
              List<Entity> list = this.world.getLoadedEntityList();
@@ -198,7 +191,7 @@
                  this.countEntitiesRendered++;
  
                  if (entity1.isInRangeToRender3d(d0, d1, d2))
-@@ -618,48 +742,102 @@
+@@ -618,48 +735,102 @@
              }
  
              this.world.profiler.endStartSection("entities");
@@ -332,7 +325,7 @@
                                  }
                              }
                          }
-@@ -671,12 +849,14 @@
+@@ -671,12 +842,14 @@
  
              if (!list2.isEmpty())
              {
@@ -349,7 +342,7 @@
              if (this.isRenderEntityOutlines() && (!list1.isEmpty() || this.entityOutlinesRendered))
              {
                  this.world.profiler.endStartSection("entityOutlines");
-@@ -716,14 +896,19 @@
+@@ -716,14 +889,19 @@
              this.world.profiler.endStartSection("blockentities");
              RenderHelper.enableStandardItemLighting();
  
@@ -373,7 +366,7 @@
                          TileEntityRendererDispatcher.instance.render(tileentity2, partialTicks, -1);
                      }
                  }
-@@ -733,9 +918,11 @@
+@@ -733,9 +911,11 @@
              {
                  for (TileEntity tileentity : this.setTileEntities)
                  {
@@ -385,7 +378,7 @@
  
              this.preRenderDamagedBlocks();
  
-@@ -903,15 +1090,44 @@
+@@ -903,15 +1083,44 @@
          if (!flag && this.displayListEntitiesDirty)
          {
              this.displayListEntitiesDirty = false;
@@ -433,7 +426,7 @@
                      renderchunk, null, 0
                  );
                  Set<EnumFacing> set1 = this.getVisibleFacings(blockpos1);
-@@ -946,17 +1162,32 @@
+@@ -946,17 +1155,32 @@
              else
              {
                  int i = blockpos1.getY() > 0 ? 248 : 8;
@@ -470,7 +463,7 @@
                          }
                      }
                  }
-@@ -969,28 +1200,92 @@
+@@ -969,28 +1193,92 @@
                  RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation1 = queue.poll();
                  RenderChunk renderchunk3 = renderglobal$containerlocalrenderinformation1.renderChunk;
                  EnumFacing enumfacing2 = renderglobal$containerlocalrenderinformation1.facing;
@@ -576,7 +569,7 @@
          }
  
          this.mc.profiler.endStartSection("captureFrustum");
-@@ -1002,34 +1297,42 @@
+@@ -1002,34 +1290,42 @@
          }
  
          this.mc.profiler.endStartSection("rebuildNear");
@@ -628,7 +621,7 @@
          this.mc.profiler.endSection();
      }
  
-@@ -1153,24 +1456,36 @@
+@@ -1153,24 +1449,36 @@
  
          this.mc.profiler.startSection("filterempty");
          int l = 0;
@@ -678,7 +671,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1493,18 @@
+@@ -1178,6 +1486,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -697,7 +690,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1518,14 @@
+@@ -1191,7 +1511,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -713,7 +706,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1652,13 @@
+@@ -1318,6 +1645,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -727,7 +720,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1841,21 @@
+@@ -1500,22 +1834,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -758,7 +751,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1885,7 @@
+@@ -1545,6 +1878,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -766,7 +759,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1925,13 @@
+@@ -1584,14 +1918,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -784,7 +777,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2300,8 @@
+@@ -1960,8 +2293,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -795,7 +788,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2335,8 @@
+@@ -1995,8 +2328,8 @@
                  }
              }
  
@@ -806,7 +799,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2390,7 @@
+@@ -2050,7 +2383,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -815,7 +808,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2430,13 @@
+@@ -2090,8 +2423,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -830,7 +823,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2696,11 @@
+@@ -2351,9 +2689,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -845,7 +838,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +3169,7 @@
+@@ -2822,7 +3162,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -854,7 +847,7 @@
                      this.world
                      .playSound(
                          blockPosIn,
-@@ -3038,16 +3385,22 @@
+@@ -3038,16 +3378,22 @@
      @SideOnly(Side.CLIENT)
      class ContainerLocalRenderInformation
      {

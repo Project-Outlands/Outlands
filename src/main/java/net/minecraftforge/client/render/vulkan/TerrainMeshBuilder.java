@@ -52,10 +52,10 @@ final class TerrainMeshBuilder {
         if (quadCount < 0) {
             throw new IllegalArgumentException("negative quad count: " + quadCount);
         }
-        int expected = quadCount * TerrainVertexFormat.VERTICES_PER_QUAD * TerrainVertexFormat.STRIDE;
+        int expected = quadCount * TerrainVertexFormat.VERTICES_PER_QUAD * TerrainVertexFormat.RAW_STRIDE;
         if (quads.length != expected) {
             throw new IllegalArgumentException("expected " + expected + " bytes for " + quadCount + " quads ("
-                    + TerrainVertexFormat.VERTICES_PER_QUAD + " vertices x " + TerrainVertexFormat.STRIDE
+                    + TerrainVertexFormat.VERTICES_PER_QUAD + " vertices x " + TerrainVertexFormat.RAW_STRIDE
                     + " bytes), got " + quads.length);
         }
 
