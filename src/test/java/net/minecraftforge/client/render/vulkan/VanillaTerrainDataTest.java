@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The data path fed by vanilla's real producer instead of hand-written bytes.
  *
- * <p><b>Why this test exists at all.</b> {@link TerrainMeshBuilderTest} writes its own bytes, so it proves the
- * conversion is self-consistent but not that it reads what the game actually emits. Every assumption the Vulkan
+ * <p><b>Why this test exists at all.</b> A hand-written byte array proves a conversion is self-consistent but not
+ * that it reads what the game actually emits. Every assumption the Vulkan
  * path makes - stride, offsets, component types, quad ordering, byte order - is an assumption about
  * {@code DefaultVertexFormats.BLOCK} and {@code BufferBuilder}, and those are the two things a wrong guess would
  * be invisible against. So this test drives the real {@link BufferBuilder} and reads the result back through the
@@ -128,16 +128,44 @@ class VanillaTerrainDataTest {
     }
 
     @Test
-    void realVanillaBytesSurviveTheQuadToTriangleSplit() {
+    void realVanillaBytesSurviveTheCompaction() {
         BufferBuilder builder = buildOneQuad();
         byte[] captured = bytesOf(builder);
 
-        TerrainMeshBuilder.Mesh mesh = TerrainMeshBuilder.build(captured, 1);
+        byte[] compact = TerrainVertexFormat.compact(
+                builder.getByteBuffer().duplicate().order(ByteOrder.nativeOrder()), 1);
 
-        // The bytes are what vanilla wrote: no conversion, no reordering, no normal invented.
-        assertEquals(4 * TerrainVertexFormat.RAW_STRIDE, mesh.vertices().length);
-        assertArrayEquals(captured, mesh.vertices(), "vertex bytes pass through verbatim");
-        assertEquals(6, mesh.indexCount(), "GL_QUADS becomes two triangles");
-        assertTrue(mesh.index32() == false, "four vertices never need 32-bit indices");
+        assertEquals(4 * TerrainVertexFormat.COMPACT_STRIDE, compact.length, "four vertices at sixteen bytes");
+
+        // Read back through the packing the shader relies on: three signed fixed-point coordinates at 1/512, then the
+        // two light bytes, in the same word; texture coordinates and colour in the second.
+        ByteBuffer out = ByteBuffer.wrap(compact).order(ByteOrder.nativeOrder());
+        for (int vertex = 0; vertex < 4; vertex++) {
+            int base = vertex * TerrainVertexFormat.COMPACT_STRIDE;
+            long posLight = out.getLong(base);
+            long uvColor = out.getLong(base + 8);
+
+            ByteBuffer source = ByteBuffer.wrap(captured).order(ByteOrder.nativeOrder());
+            int srcBase = vertex * TerrainVertexFormat.RAW_STRIDE;
+
+            assertEquals(Math.round(source.getFloat(srcBase + TerrainVertexFormat.RAW_POSITION_OFFSET)
+                            * TerrainVertexFormat.POSITION_SCALE),
+                    (short) (posLight & 0xFFFF), "vertex " + vertex + " position.x");
+            assertEquals(Math.round(source.getFloat(srcBase + TerrainVertexFormat.RAW_POSITION_OFFSET + 4)
+                            * TerrainVertexFormat.POSITION_SCALE),
+                    (short) ((posLight >> 16) & 0xFFFF), "vertex " + vertex + " position.y");
+            assertEquals(Math.round(source.getFloat(srcBase + TerrainVertexFormat.RAW_POSITION_OFFSET + 8)
+                            * TerrainVertexFormat.POSITION_SCALE),
+                    (short) ((posLight >> 32) & 0xFFFF), "vertex " + vertex + " position.z");
+
+            int light = (int) ((posLight >> 48) & 0xFFFF);
+            assertEquals(source.getShort(srcBase + TerrainVertexFormat.RAW_LIGHTMAP_OFFSET) & 0xFF,
+                    light & 0xFF, "vertex " + vertex + " block light stays in the low byte");
+            assertEquals(source.getShort(srcBase + TerrainVertexFormat.RAW_LIGHTMAP_OFFSET + 2) & 0xFF,
+                    (light >> 8) & 0xFF, "vertex " + vertex + " sky light stays in the high byte");
+
+            assertEquals(source.getInt(srcBase + TerrainVertexFormat.RAW_COLOR_OFFSET),
+                    (int) (uvColor >> 32), "vertex " + vertex + " colour is copied, not re-derived");
+        }
     }
 }
