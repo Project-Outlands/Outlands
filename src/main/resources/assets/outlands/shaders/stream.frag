@@ -66,10 +66,13 @@ void main() {
         light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
     }
 
-    vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
+    // The overlay is the lightmap unit's combine stage, so it modifies the light and not the finished colour:
+    // vanilla makes a hurt mob red by lighting it red, not by mixing red into its textures.
     if (pc.overlayColor.a > 0.0) {
-        baseColor.rgb = mix(baseColor.rgb, pc.overlayColor.rgb, pc.overlayColor.a);
+        light = mix(light, pc.overlayColor.rgb, pc.overlayColor.a);
     }
+
+    vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
     if (pc.fogMode > 0) {
         float f = computeFogFactor(inEyeDist);
         outColor = vec4(mix(pc.fogColor.rgb, baseColor.rgb, f), baseColor.a);

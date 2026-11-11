@@ -125,8 +125,31 @@ final class FrameStateVk implements FrameState {
     private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
     private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
     private final float[] overlayColor = new float[4];
-    private final float[] texEnvColor = new float[4];
-    private int texCombineRgb = 8448; // GL_MODULATE
+    /** GL_TEXTURE_ENV state, per texture unit: the combine stack is per unit, not global. */
+    private static final int TEXTURE_UNITS = 4;
+    private final float[][] texEnvColor = new float[TEXTURE_UNITS][4];
+    private final int[] texEnvMode = new int[TEXTURE_UNITS];
+    private final int[] texCombineRgb = new int[TEXTURE_UNITS];
+    private final int[] texSource0Rgb = new int[TEXTURE_UNITS];
+    private final int[] texSource1Rgb = new int[TEXTURE_UNITS];
+    private final int[] texSource2Rgb = new int[TEXTURE_UNITS];
+    private final int[] texOperand2Rgb = new int[TEXTURE_UNITS];
+
+    // GL enumerants the combine stack is expressed in. Spelled out because the bug this replaced was a wrong
+    // constant: 34164 is GL_CONSTANT, and GL_INTERPOLATE is 34165.
+    private static final int GL_TEXTURE_ENV = 0x2200;
+    private static final int GL_TEXTURE_ENV_MODE = 0x2200;
+    private static final int GL_TEXTURE_ENV_COLOR = 0x2201;
+    private static final int GL_COMBINE = 0x8570;
+    private static final int GL_COMBINE_RGB = 0x8571;
+    private static final int GL_INTERPOLATE = 0x8575;
+    private static final int GL_CONSTANT = 0x8576;
+    private static final int GL_PREVIOUS = 0x8578;
+    private static final int GL_SOURCE0_RGB = 0x8580;
+    private static final int GL_SOURCE1_RGB = 0x8581;
+    private static final int GL_SOURCE2_RGB = 0x8582;
+    private static final int GL_OPERAND2_RGB = 0x8592;
+    private static final int GL_SRC_ALPHA = 0x0302;
     private static final int FOG_DENSITY = 2914;   // GL_FOG_DENSITY
     private static final int FOG_START = 2915;     // GL_FOG_START
     private static final int FOG_END = 2916;       // GL_FOG_END
@@ -381,30 +404,70 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
-        if (target == 8960 && parameterName == 8705 && parameters.remaining() >= 4) {
-            int pos = parameters.position();
-            texEnvColor[0] = parameters.get(pos);
-            texEnvColor[1] = parameters.get(pos + 1);
-            texEnvColor[2] = parameters.get(pos + 2);
-            texEnvColor[3] = parameters.get(pos + 3);
-            updateOverlayColor();
+        if (target != GL_TEXTURE_ENV || parameterName != GL_TEXTURE_ENV_COLOR || parameters.remaining() < 4) {
+            return;
         }
+        int unit = textureUnit();
+        int pos = parameters.position();
+        for (int i = 0; i < 4; i++) {
+            texEnvColor[unit][i] = parameters.get(pos + i);
+        }
+        updateOverlayColor();
     }
 
     @Override
     public void texEnvi(int target, int parameterName, int parameter) {
-        if (target == 8960 && (parameterName == 8704 || parameterName == 34160 || parameterName == 34161)) {
-            texCombineRgb = parameter;
-            updateOverlayColor();
+        if (target != GL_TEXTURE_ENV) {
+            return;
         }
+        int unit = textureUnit();
+        switch (parameterName) {
+            case GL_TEXTURE_ENV_MODE -> texEnvMode[unit] = parameter;
+            case GL_COMBINE_RGB -> texCombineRgb[unit] = parameter;
+            case GL_SOURCE0_RGB -> texSource0Rgb[unit] = parameter;
+            case GL_SOURCE1_RGB -> texSource1Rgb[unit] = parameter;
+            case GL_SOURCE2_RGB -> texSource2Rgb[unit] = parameter;
+            case GL_OPERAND2_RGB -> texOperand2Rgb[unit] = parameter;
+            default -> { return; }
+        }
+        updateOverlayColor();
     }
 
+    private int textureUnit() {
+        int unit = activeTextureUnit();
+        return unit >= 0 && unit < TEXTURE_UNITS ? unit : 0;
+    }
+
+    /**
+     * Derives the light-colour overlay from the combine stack.
+     *
+     * <p>Vanilla does not tint a hurt mob's colour: it sets the <i>lightmap</i> unit to
+     * {@code GL_INTERPOLATE(constant, previous, constant)} with a red constant at alpha 0.3, so GL computes
+     * {@code mix(previousLight, red, 0.3)} and every fragment drawn afterwards has a red-shifted light. That is why
+     * this is the overlay of the light term and not of the final colour - applying it to the colour looks like a flat
+     * red wash instead of a mob lit red.</p>
+     *
+     * <p>Only the interpolate form is recognised. {@code GlStateManager.enableOutlineMode} configures the same unit
+     * with {@code GL_REPLACE} and the primary colour, which is the team-colour outline drawn by a handful of
+     * renderers; that is a different combine function and it is not implemented here, so it stays un-applied rather
+     * than being approximated into something that looks wrong.</p>
+     */
     private void updateOverlayColor() {
-        if (texCombineRgb == 34164) { // GL_INTERPOLATE
-            System.arraycopy(texEnvColor, 0, overlayColor, 0, 4);
-        } else {
-            overlayColor[3] = 0.0f;
+        for (int unit = 0; unit < TEXTURE_UNITS; unit++) {
+            if (texEnvMode[unit] == GL_COMBINE
+                    && texCombineRgb[unit] == GL_INTERPOLATE
+                    && texSource0Rgb[unit] == GL_CONSTANT
+                    && texSource1Rgb[unit] == GL_PREVIOUS
+                    && texSource2Rgb[unit] == GL_CONSTANT
+                    && texOperand2Rgb[unit] == GL_SRC_ALPHA) {
+                System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
+                return;
+            }
         }
+        overlayColor[0] = 0.0F;
+        overlayColor[1] = 0.0F;
+        overlayColor[2] = 0.0F;
+        overlayColor[3] = 0.0F;
     }
 
     @Override
