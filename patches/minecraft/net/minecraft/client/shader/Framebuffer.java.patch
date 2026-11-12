@@ -130,15 +130,28 @@
          if (OpenGlHelper.isFramebufferEnabled())
          {
              GlStateManager.bindTexture(0);
-@@ -187,6 +244,7 @@
+@@ -187,6 +244,20 @@
  
      public void bindFramebuffer(boolean p_147610_1_)
      {
-+        if (this.backend != null) { this.backend.bind(p_147610_1_); return; }
++        // Forge: the backend makes the attachment current, and the viewport is still ours to set. Leaving it out was a
++        // real bug rather than a simplification: the shim's viewport is part of the draw's recorded state, so a draw
++        // into a 256x256 target was still issued with the window's 854x480 viewport - the geometry came out stretched
++        // and shifted, and only the scissor kept it on the target at all.
++        if (this.backend != null)
++        {
++            this.backend.bind(p_147610_1_);
++
++            if (p_147610_1_)
++            {
++                GlStateManager.viewport(0, 0, this.framebufferWidth, this.framebufferHeight);
++            }
++            return;
++        }
          if (OpenGlHelper.isFramebufferEnabled())
          {
              OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, this.framebufferObject);
-@@ -200,6 +258,7 @@
+@@ -200,6 +271,7 @@
  
      public void unbindFramebuffer()
      {
@@ -146,7 +159,7 @@
          if (OpenGlHelper.isFramebufferEnabled())
          {
              OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, 0);
-@@ -221,6 +280,10 @@
+@@ -221,6 +293,10 @@
  
      public void framebufferRenderExt(int width, int height, boolean p_178038_3_)
      {
@@ -157,7 +170,7 @@
          if (OpenGlHelper.isFramebufferEnabled())
          {
              GlStateManager.colorMask(true, true, true, false);
-@@ -265,6 +328,9 @@
+@@ -265,6 +341,9 @@
  
      public void framebufferClear()
      {
@@ -167,7 +180,7 @@
          this.bindFramebuffer(true);
          GlStateManager.clearColor(this.framebufferColor[0], this.framebufferColor[1], this.framebufferColor[2], this.framebufferColor[3]);
          int i = 16384;
-@@ -278,4 +344,37 @@
+@@ -278,4 +357,37 @@
          GlStateManager.clear(i);
          this.unbindFramebuffer();
      }
