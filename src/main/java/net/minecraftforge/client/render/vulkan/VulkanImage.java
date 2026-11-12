@@ -18,6 +18,7 @@ import java.nio.LongBuffer;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_UNORM;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TILING_OPTIMAL;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_TYPE_2D;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_SAMPLED_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -96,6 +97,36 @@ final class VulkanImage implements AutoCloseable {
     }
 
     /**
+     * An image that is drawn into: the colour attachment of a render target.
+     *
+     * <p>Same lighting-up path as an uploaded texture - one image, one allocation, one view - but with
+     * {@code COLOR_ATTACHMENT} in its usage, which is the one thing a texture image cannot be given retroactively.
+     * {@code TRANSFER_SRC} is kept so a target can still be read back (a screenshot of an offscreen pass), and
+     * {@code SAMPLED} is the point: a render target is sampled by the next pass.</p>
+     */
+    static VulkanImage createColorAttachment(VkDevice device, VulkanContext context, int width, int height,
+                                             int format) {
+        return create(device, context, width, height, format,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+                        | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT, "colour attachment");
+    }
+
+    /**
+     * An image that is depth-tested against: the depth attachment of a render target.
+     *
+     * <p>Its aspect is DEPTH, and that difference is the whole reason this exists next to the colour one: a view of
+     * a depth image that claims COLOR is rejected by the validation layers, and a depth attachment without
+     * {@code DEPTH_STENCIL_ATTACHMENT} in its usage cannot be rendered to at all.</p>
+     */
+    static VulkanImage createDepth(VkDevice device, VulkanContext context, int width, int height, int format) {
+        return create(device, context, width, height, format,
+                org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                        | VK_IMAGE_USAGE_SAMPLED_BIT,
+                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT, "depth attachment");
+    }
+
+    /**
      * Creates an image with an explicit format.
      *
      * <p>Used for textures that receive a framebuffer copy: the framebuffer holds sRGB-encoded values, so the image
@@ -103,8 +134,19 @@ final class VulkanImage implements AutoCloseable {
      * the convention every other uploaded texture already follows.</p>
      */
     static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format) {
+        // TRANSFER_SRC as well, so the upload verification can read the image back. Without it the copy is invalid -
+        // the validation layers named it as VUID-vkCmdCopyImageToBuffer-srcImage-00186 - and an invalid copy that
+        // happens to work is not a verification.
+        return create(device, context, width, height, format,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                        | VK_IMAGE_USAGE_SAMPLED_BIT,
+                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT, "texture");
+    }
+
+    private static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format,
+                                      int usage, int aspect, String what) {
         if (width <= 0 || height <= 0) {
-            throw new IllegalArgumentException("an image needs a positive size, got " + width + "x" + height);
+            throw new IllegalArgumentException("an " + what + " needs a positive size, got " + width + "x" + height);
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkImageCreateInfo createInfo = VkImageCreateInfo.calloc(stack)
@@ -115,11 +157,7 @@ final class VulkanImage implements AutoCloseable {
                     .arrayLayers(1)
                     .samples(VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK_IMAGE_TILING_OPTIMAL)
-                    // TRANSFER_SRC as well, so the upload verification can read the image back. Without it the copy
-                    // is invalid - the validation layers named it as VUID-vkCmdCopyImageToBuffer-srcImage-00186 - and
-                    // an invalid copy that happens to work is not a verification.
-                    .usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
-                            | VK_IMAGE_USAGE_SAMPLED_BIT)
+                    .usage(usage)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
                     // Left UNDEFINED so the first upload's barrier does not have to claim contents it never had.
                     .initialLayout(org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED);
@@ -142,7 +180,7 @@ final class VulkanImage implements AutoCloseable {
                 memory = memoryOut.get(0);
                 VkCheck.check(vkBindImageMemory(device, image, memory, 0L), "vkBindImageMemory");
 
-                view = createView(device, image, stack, format);
+                view = createView(device, image, stack, format, aspect);
                 return new VulkanImage(device, image, memory, view, width, height, format);
             } catch (RuntimeException e) {
                 if (view != 0L) {
@@ -157,14 +195,14 @@ final class VulkanImage implements AutoCloseable {
         }
     }
 
-    private static long createView(VkDevice device, long image, MemoryStack stack, int format) {
+    private static long createView(VkDevice device, long image, MemoryStack stack, int format, int aspect) {
         org.lwjgl.vulkan.VkImageViewCreateInfo viewInfo = org.lwjgl.vulkan.VkImageViewCreateInfo.calloc(stack)
                 .sType$Default()
                 .image(image)
                 .viewType(VK_IMAGE_VIEW_TYPE_2D)
                 .format(format);
         VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
-                .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                .aspectMask(aspect)
                 .baseMipLevel(0)
                 .levelCount(1)
                 .baseArrayLayer(0)

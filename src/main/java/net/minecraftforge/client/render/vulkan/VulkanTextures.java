@@ -57,6 +57,19 @@ final class VulkanTextures implements AutoCloseable {
     private final TextureBackend source;
 
     private final Int2ObjectMap<Entry> entries = new Int2ObjectOpenHashMap<>();
+
+    /**
+     * Textures whose image is owned elsewhere, by a render target.
+     *
+     * <p>A render target's colour attachment is written by drawing into it, not by uploading pixels, so it has no
+     * {@code TextureImage} to stage from - and copying it into a texture of our own would double the memory and add a
+     * copy per frame. It is registered here by view instead, and resolved like any other texture: the handle the game
+     * binds is the key.</p>
+     *
+     * <p>The descriptor set is allocated once per image and reused, because a target's view does not change unless it
+     * is resized.</p>
+     */
+    private final Int2ObjectMap<External> externals = new Int2ObjectOpenHashMap<>();
     /** Samplers, keyed by the GL parameters that produced them. Vanilla uses a handful of combinations. */
     private final Long2LongMap samplers = new Long2LongOpenHashMap();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
@@ -70,12 +83,29 @@ final class VulkanTextures implements AutoCloseable {
     private boolean whiteUploaded;
 
     /**
+     * Whether this cache has been shut down.
+     *
+     * <p>Render targets outlive the renderer: the game deletes its framebuffers after the display is gone. Their
+     * handles and images are gone at that point, so releasing one is a no-op rather than a use-after-free.</p>
+     */
+    private boolean closed;
+
+    /**
      * A texture that is on the device and up to date.
      *
      * @param uploadedVersion the texture version the image currently holds
      * @param descriptorSet   the set that binds it, reused for every draw that samples this texture
      */
     private record Entry(VulkanImage image, long sampler, long descriptorSet, long uploadedVersion) {}
+
+    /**
+     * A texture backed by an image this class does not own.
+     *
+     * @param view     the colour attachment's view
+     * @param sampler  the sampler the game's filter settings produced
+     * @param set      the descriptor set that binds view and sampler together
+     */
+    private record External(long view, long sampler, long set, int width, int height) {}
 
     @SuppressWarnings("unchecked")
     /**
@@ -144,6 +174,11 @@ final class VulkanTextures implements AutoCloseable {
         ensureWhiteUploaded(commandBuffer, slot);
         if (textureId == 0) {
             return whiteSet;
+        }
+        External external = externals.get(textureId);
+        if (external != null) {
+            // A render target: its image is written by drawing, so there is nothing to upload and nothing to stage.
+            return external.set();
         }
         TextureImage image = source.image(textureId);
         if (image == null) {
@@ -337,6 +372,62 @@ final class VulkanTextures implements AutoCloseable {
     }
 
     /**
+     * Reserves a texture handle for a render target, before its image exists.
+     *
+     * <p>The handle comes from the texture backend's own namespace, so it cannot collide with a texture the game
+     * creates later - which a hand-picked number could. Until {@link #attachExternal} is called, sampling it gives the
+     * white stand-in, which is also what a GL framebuffer texture with no storage does.</p>
+     */
+    int createExternal() {
+        return source.create();
+    }
+
+    /**
+     * Points a reserved handle at a render target's colour attachment.
+     *
+     * <p>Called again on resize (new view, same handle) and when the game changes the filter (new sampler, same view);
+     * the set is reallocated in both cases because the old one would still name the old image or sampler. Descriptor
+     * sets are not freed individually - the pool owns them - so this leaks one set per resize, which is bounded by how
+     * often the game resizes a framebuffer.</p>
+     */
+    void attachExternal(int textureId, long view, int width, int height, long sampler) {
+        if (closed) {
+            return;
+        }
+        long set = descriptors.allocate(view, sampler);
+        externals.put(textureId, new External(view, sampler, set, width, height));
+    }
+
+    /**
+     * Releases a reserved handle.
+     *
+     * <p>{@code source.delete} is called as well: the id came from that backend's allocator, and leaving it registered
+     * would make the game's own {@code deleteTexture} on a resurrected id mean something it does not.</p>
+     */
+    void releaseExternal(int textureId) {
+        if (closed) {
+            return;
+        }
+        externals.remove(textureId);
+        source.delete(textureId);
+    }
+
+    /** Whether a handle is registered as a render target's colour attachment. */
+    boolean hasExternal(int textureId) {
+        return externals.containsKey(textureId);
+    }
+
+    /**
+     * A sampler for a render target, from the GL filter the game asked for.
+     *
+     * <p>Only the filter matters here: a framebuffer texture is sampled at its own size with no mip chain, and
+     * clamping is what stops a pass reading past the edge of the image it is processing.</p>
+     */
+    long renderTargetSampler(int glFilter) {
+        return sampler(glFilter, glFilter, 33071, 33071);
+    }
+
+    /**
      * A sampler for the given GL sampler parameters.
      *
      * <p>Repeat is the default for the wrapping modes and linear for the filters, because that is what GL's own
@@ -383,6 +474,7 @@ final class VulkanTextures implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
         for (int slot = 0; slot < pendingStaging.length; slot++) {
             releaseSlot(slot);
         }
@@ -394,6 +486,8 @@ final class VulkanTextures implements AutoCloseable {
             entry.image().close();
         }
         entries.clear();
+        // The images behind these belong to render targets, which destroy them; only the sets go with the pool.
+        externals.clear();
         for (long sampler : samplers.values()) {
             vkDestroySampler(context.device(), sampler, null);
         }

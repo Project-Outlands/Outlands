@@ -3,57 +3,112 @@ package net.minecraftforge.client.render.target;
 /**
  * A render target on the Vulkan backend.
  *
+ * <p><b>Two kinds of framebuffer, one class.</b> The game's main framebuffer <i>is</i> the swapchain's colour image -
+ * the frame is already painting it - while every other framebuffer owns an image of its own. The difference is passed
+ * in at construction by the one caller that knows it ({@link FramebufferBackends#forNonGlWindow()}). Conflating them
+ * would either copy the whole frame into the window every frame, or render the game into an image nobody shows.</p>
+ *
  * <p><b>What is implemented.</b> The state the game is allowed to ask about without a frame: size, colour, filter,
- * stencil flag. Nothing is allocated on the device, because the backend's attachments are owned by the frame's
- * render graph rather than by the framebuffer - that is the point of the seam, not a gap in it.</p>
+ * stencil flag, and the texture handle of an offscreen target's colour attachment - the last of which is allocated here
+ * against the device, through {@link RenderTargets}, because that is who owns the image.</p>
  *
- * <p><b>What throws, and why that is not a regression.</b> {@link #clear}, {@link #bind}, {@link #unbind} and
- * {@link #render} say what the frame being recorded should do. No frame is being recorded when
- * {@code Minecraft.init} creates the main framebuffer, so there is nowhere to put the command. Saying so is a
- * work item; succeeding silently would mean a black window with no explanation, which is what the previous version
- * of this code did by crashing in native GL instead.</p>
+ * <p><b>What still throws, and why that is not a regression.</b> {@link #clear}, {@link #bind}, {@link #unbind} and
+ * {@link #render} say what the frame being recorded should do. For the window's target they already mean something
+ * (the frame starts on that image), so they are answered. For an offscreen target they mean "end this rendering
+ * instance, transition the two images, open another one" - a target switch - which the frame recorder does not record
+ * yet. Saying so is the remaining work item; succeeding silently would draw the game into an image nothing shows,
+ * which is the failure mode with no exception attached.</p>
  *
- * <p><b>Why none of these are no-ops.</b> A no-op {@code clear} would leave the target's contents undefined and
- * blame the wrong subsystem. The rule from the plan - no silent degradation - applies here exactly.</p>
+ * <p><b>Why none of these are no-ops.</b> A no-op {@code clear} would leave a target's contents undefined and blame the
+ * wrong subsystem. The rule from the plan - no silent degradation - applies here exactly.</p>
  */
 final class FramebufferVk implements FramebufferBackend {
+
+    private static final org.apache.logging.log4j.Logger LOGGER =
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render");
+
+    /** Whether this is the game's main framebuffer, whose colour attachment is the window's image. */
+    private final boolean window;
 
     private int width;
     private int height;
     private boolean useDepth;
     private boolean stencil;
-    private int filter;
+    private int filter = 9729;
     private float red = 1.0F;
     private float green = 1.0F;
     private float blue = 1.0F;
     private float alpha;
+
+    /** The offscreen target, or {@code null} for the window's. */
+    private RenderTarget target;
+
+    FramebufferVk(boolean window) {
+        this.window = window;
+    }
 
     @Override
     public void create(int width, int height, boolean useDepth) {
         this.width = width;
         this.height = height;
         this.useDepth = useDepth;
+        if (window) {
+            // Nothing to allocate: the attachments are the swapchain's, and they are resized with it.
+            LOGGER.info("window framebuffer {}x{}: the swapchain image, no target allocated", width, height);
+            return;
+        }
+        if (target == null) {
+            target = factory().create(width, height, useDepth);
+            target.setFilter(filter);
+        } else {
+            target.resize(width, height, useDepth);
+        }
+    }
+
+    private static RenderTargets.Factory factory() {
+        RenderTargets.Factory factory = RenderTargets.current();
+        if (factory == null) {
+            throw new IllegalStateException("a framebuffer that is not the window's was created before the renderer"
+                    + " installed a device, so there is nothing to allocate its attachments on. This is a renderer"
+                    + " that failed to initialise, not a problem with the request.");
+        }
+        return factory;
+    }
+
+    @Override
+    public int textureId() {
+        // The window's colour is not sampleable by handle: it is the swapchain image, and the frame is painting it.
+        return target == null ? 0 : target.textureId();
     }
 
     @Override
     public void delete() {
+        if (target != null) {
+            target.close();
+            target = null;
+        }
         this.width = 0;
         this.height = 0;
     }
 
     @Override
     public void bind(boolean setViewport) {
+        if (!window) {
+            throw needsTargetSwitch("bind " + width + "x" + height);
+        }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
             throw needsFrame("bind");
         }
-        // The window's image is the only colour target this backend has, and the game's main framebuffer is that
-        // target. A second framebuffer has nowhere to go and is rejected below rather than drawn to the screen.
+        // The window's image is what the frame is already painting, so binding it is the frame's default target.
         recording.targetDefault(width, height, setViewport);
     }
 
     @Override
     public void unbind() {
+        if (!window) {
+            throw needsTargetSwitch("unbind " + width + "x" + height);
+        }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
             throw needsFrame("unbind");
@@ -64,6 +119,9 @@ final class FramebufferVk implements FramebufferBackend {
 
     @Override
     public void clear() {
+        if (!window) {
+            throw needsTargetSwitch("clear " + width + "x" + height + " (depth=" + useDepth + ")");
+        }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
             throw needsFrame("clear (" + width + "x" + height + ", depth=" + useDepth + ")");
@@ -78,15 +136,18 @@ final class FramebufferVk implements FramebufferBackend {
     /**
      * Draws this target's colour attachment over the current one.
      *
-     * <p><b>A no-op by construction, not a missing feature.</b> This backend has one colour target: the window's
-     * image, which is also the game's main framebuffer. Drawing that image onto itself is the identity, so the
-     * offscreen indirection GL needs - render to a texture, then blit the texture to the screen - does not exist
-     * here to be replicated. Any other target never got this far: binding one is rejected.</p>
+     * <p><b>A no-op for the window, not a missing feature.</b> This backend has one colour target for the window: the
+     * image the game calls the main framebuffer. Drawing that image onto itself is the identity, so the offscreen
+     * indirection GL needs - render to a texture, then blit the texture to the screen - does not exist here to be
+     * replicated. An offscreen target's composite is real work and belongs with the target switch, below.</p>
      */
     @Override
     public void render(int width, int height, boolean disableBlend) {
         if (FrameRecordings.current() == null) {
             throw needsFrame("render " + width + "x" + height);
+        }
+        if (!window) {
+            throw needsTargetSwitch("composite " + width + "x" + height);
         }
     }
 
@@ -105,27 +166,54 @@ final class FramebufferVk implements FramebufferBackend {
     @Override
     public void setFilter(int glFilter) {
         this.filter = glFilter;
+        if (target != null) {
+            target.setFilter(glFilter);
+        }
     }
 
+    /**
+     * Nothing to do, and that is the honest answer rather than a stub.
+     *
+     * <p>An offscreen target's colour attachment is registered under its handle when it is created, so it can be
+     * sampled at any time without binding anything. The game calls this because GL needs it; here the handle already
+     * names the image.</p>
+     */
     @Override
     public void bindTexture() {
-        throw needsFrame("bindTexture");
     }
 
+    /** Counterpart of {@link #bindTexture()}. */
     @Override
     public void unbindTexture() {
-        throw needsFrame("unbindTexture");
     }
 
+    /**
+     * Stencil is not implemented, and asking for it says so.
+     *
+     * <p>Recording the flag and carrying on would give a mod a target whose stencil it cannot use, and the symptom
+     * would be a mask that does nothing - a picture that is wrong with no error anywhere. Nothing in vanilla asks for
+     * one; the entity outline uses alpha, not stencil.</p>
+     */
     @Override
     public void setStencil(boolean enabled) {
-        this.stencil = enabled;
+        if (enabled) {
+            throw new UnsupportedOperationException(
+                    "stencil attachments are not implemented on the Vulkan backend. A target created without one and a"
+                            + " shader that writes to it would produce a mask nobody applies. See"
+                            + " docs/vulkan-backend-plan.md 11.6.");
+        }
+        this.stencil = false;
     }
 
     @Override
     public void checkComplete() {
-        // Nothing to check until attachments exist. Reported at bind/clear instead of here, because at creation
-        // time there is genuinely nothing incomplete - the target has not been built yet.
+        // Nothing to check: Vulkan has no framebuffer-completeness concept, and every attachment this backend makes
+        // has the same extent as its target by construction.
+    }
+
+    /** The target this framebuffer owns, for tests and for the frame recorder that will draw into it. */
+    RenderTarget target() {
+        return target;
     }
 
     private static UnsupportedOperationException needsFrame(String what) {
@@ -133,5 +221,13 @@ final class FramebufferVk implements FramebufferBackend {
                 "cannot " + what + " on the Vulkan backend yet: no frame is being recorded, so there is no command"
                         + " buffer to put the command in. Needed: a recording context on the render graph node, and"
                         + " render-target attachments the graph owns. See docs/vulkan-backend-plan.md 8.4.2.");
+    }
+
+    private static UnsupportedOperationException needsTargetSwitch(String what) {
+        return new UnsupportedOperationException(
+                "cannot " + what + " on the Vulkan backend yet: the target exists and its attachment is allocated, but"
+                        + " switching the frame's rendering instance from one target to another is not recorded yet."
+                        + " Needed: a TargetBind operation in the frame's command stream, which ends the instance,"
+                        + " transitions both images and opens another one. See docs/vulkan-backend-plan.md 11.4 S2.");
     }
 }

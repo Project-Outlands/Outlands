@@ -61,6 +61,7 @@ public final class VulkanBackend implements RenderBackend {
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
     /** Replays the game's own draws into the frame's rendering instance. */
     private VulkanStream stream;
+    private VulkanRenderTargets renderTargets;
     private long window;
     private boolean failed;
 
@@ -150,6 +151,18 @@ public final class VulkanBackend implements RenderBackend {
                     descriptors, textureCache);
             stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat(),
                     descriptors, textureCache);
+            // Framebuffers the game creates after this point - the shader groups among them - get their attachments
+            // from here. Their formats are the swapchain's, because every pipeline in this renderer is built for that
+            // one format (see docs/vulkan-backend-plan.md 11.3 D1).
+            renderTargets = new VulkanRenderTargets(context, textureCache, swapchain.imageFormat(),
+                    swapchain.depthFormat());
+            net.minecraftforge.client.render.target.RenderTargets.install(renderTargets);
+            if (Boolean.getBoolean("outlands.render.selftest.targets")) {
+                // Allocates a target on the real device: the one part of this that a unit test cannot prove is that
+                // the validation layers accept a COLOR_ATTACHMENT|SAMPLED image and a DEPTH-aspect view, and that the
+                // handle it registers is the one the texture cache resolves.
+                selfTestRenderTargets();
+            }
             stream.setTerrain(terrainLayer);
             swapchain.setStream(stream);
             swapchain.setTextures(textureCache);
@@ -201,6 +214,23 @@ public final class VulkanBackend implements RenderBackend {
         }
     }
 
+    /** Creates, resizes and releases a render target, reporting what the device said. Gated by a system property. */
+    private void selfTestRenderTargets() {
+        net.minecraftforge.client.render.target.RenderTarget target = renderTargets.create(256, 256, true);
+        boolean registered = textureCache.hasExternal(target.textureId());
+        LOGGER.info("selftest: target {}x{} depth={} texture={} registered={}",
+                target.width(), target.height(), target.useDepth(), target.textureId(), registered);
+        if (!registered) {
+            throw new IllegalStateException("selftest: the target's handle was not registered, so nothing could"
+                    + " sample it");
+        }
+        target.resize(512, 384, true);
+        LOGGER.info("selftest: after resize {}x{}, same handle={}",
+                target.width(), target.height(), textureCache.hasExternal(target.textureId()));
+        target.close();
+        LOGGER.info("selftest: after close registered={}", textureCache.hasExternal(target.textureId()));
+    }
+
     @Override
     public void setSwapInterval(int interval) {
         if (swapchain != null) {
@@ -239,6 +269,12 @@ public final class VulkanBackend implements RenderBackend {
     @Override
     public void close() {
         net.minecraftforge.client.render.target.FrameRecordings.install(null);
+        if (renderTargets != null) {
+            // The framebuffers that hold these targets outlive the backend - the game deletes its own after the
+            // display goes away - so what is withdrawn here is only the ability to allocate more.
+            net.minecraftforge.client.render.target.RenderTargets.uninstall(renderTargets);
+            renderTargets = null;
+        }
         ChunkMeshCapture.disable();
         if (swapchain != null) {
             swapchain.close();

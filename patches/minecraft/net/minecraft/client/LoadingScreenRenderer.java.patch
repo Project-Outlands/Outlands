@@ -1,6 +1,19 @@
 --- before/net/minecraft/client/LoadingScreenRenderer.java
 +++ after/net/minecraft/client/LoadingScreenRenderer.java
-@@ -143,6 +143,10 @@
+@@ -28,7 +28,11 @@
+     {
+         this.mc = mcIn;
+         this.scaledResolution = new ScaledResolution(mcIn);
+-        this.framebuffer = new Framebuffer(mcIn.displayWidth, mcIn.displayHeight, false);
++        // Forge: the window's target. This framebuffer is a full-window overlay - cleared, drawn over the whole
++        // window, and composited back at exactly the window's size with no depth - so rendering to a separate image
++        // and blitting it is the identity. Saying so here keeps it off the offscreen path, which a renderer that owns
++        // its attachments would otherwise have to give a real image and a target switch it does not need.
++        this.framebuffer = new Framebuffer(mcIn.displayWidth, mcIn.displayHeight, false, true);
+         this.framebuffer.setFramebufferFilter(9728);
+     }
+ 
+@@ -143,6 +147,10 @@
                      GlStateManager.clear(16640);
                  }
  
@@ -11,7 +24,7 @@
                  Tessellator tessellator = Tessellator.getInstance();
                  BufferBuilder bufferbuilder = tessellator.getBuffer();
                  this.mc.getTextureManager().bindTexture(Gui.OPTIONS_BACKGROUND);
-@@ -187,6 +191,12 @@
+@@ -187,6 +195,12 @@
                  this.mc
                  .fontRenderer
                  .drawStringWithShadow(this.message, (k - this.mc.fontRenderer.getStringWidth(this.message)) / 2, l / 2 - 4 + 8, 16777215);

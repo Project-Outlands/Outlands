@@ -26,6 +26,17 @@ public interface FramebufferBackend {
      */
     void create(int width, int height, boolean useDepth);
 
+    /**
+     * The texture handle the game binds to sample this target's colour attachment.
+     *
+     * <p>{@code ShaderManager} reads {@code Framebuffer.framebufferTexture} directly and binds that number, so the
+     * handle has to come from the same namespace the game binds ordinary textures in. The window's target has none: its
+     * colour is the swapchain image, which the frame is already painting.</p>
+     *
+     * @return the handle, or {@code 0} when this target has no sampleable colour of its own
+     */
+    int textureId();
+
     /** Releases the target. Safe to call when nothing was allocated. */
     void delete();
 
