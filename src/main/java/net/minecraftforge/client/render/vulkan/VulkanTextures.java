@@ -243,6 +243,9 @@ final class VulkanTextures implements AutoCloseable {
             // the level at a possibly different size. The sampler survives, so only the image and its set change.
             entry.image().close();
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
+            // The old set named an image that no longer exists, so it goes back to the pool rather than being retired
+            // with it: a resized texture happens on every window resize for every GUI texture.
+            descriptors.free(entry.descriptorSet());
             long set = descriptors.allocate(created.view(), entry.sampler());
             entry = new Entry(created, entry.sampler(), set, -1L);
             entries.put(textureId, entry);

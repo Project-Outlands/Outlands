@@ -56,7 +56,7 @@ final class VulkanDescriptors implements AutoCloseable {
      * every entity texture a frame touches, times the frames in flight. Comfortably above what the game loads, small
      * enough that the pool itself is a rounding error.</p>
      */
-    private static final int MAX_SETS = 1024;
+    private static final int MAX_SETS = 16384;
 
     private final VkDevice device;
     private final long setLayout;
@@ -65,6 +65,15 @@ final class VulkanDescriptors implements AutoCloseable {
     private final long pool;
     private final long[] lightmapSets = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
     private int allocated;
+    /**
+     * Sets whose texture is gone, ready to be reused.
+     *
+     * <p>A set names an image, so it cannot be reused while its image is alive; when the image goes, the set is only
+     * a pool slot again. Kept as a fastutil {@code LongArrayList} because the alternative is boxing a long per entry
+     * for no reason. Reuse is safe without waiting on a fence: a set is only freed when the texture that owned it was
+     * replaced or deleted, and that texture's last use was a recorded draw in an earlier frame.</p>
+     */
+    private final it.unimi.dsi.fastutil.longs.LongArrayList freeSets = new it.unimi.dsi.fastutil.longs.LongArrayList();
 
     VulkanDescriptors(VkDevice device) {
         this.device = device;
@@ -195,7 +204,21 @@ final class VulkanDescriptors implements AutoCloseable {
      * @throws VkCheck.VulkanException when the pool is exhausted, which means more textures were sampled than
      *                                 {@link #MAX_SETS} allows
      */
+    /** Gives a set back to the pool. Its image must be gone or going. */
+    void free(long set) {
+        if (set != 0L) {
+            freeSets.add(set);
+        }
+    }
+
     long allocate(long imageView, long sampler) {
+        if (!freeSets.isEmpty()) {
+            long reused = freeSets.popLong();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                writeSet(reused, imageView, sampler, stack);
+            }
+            return reused;
+        }
         if (allocated >= MAX_SETS) {
             throw new VkCheck.VulkanException("descriptor pool exhausted: " + MAX_SETS
                     + " texture sets are already allocated. Each sampled texture uses one per frame in flight.");
@@ -232,6 +255,18 @@ final class VulkanDescriptors implements AutoCloseable {
             allocated++;
             return set;
         }
+    }
+
+    /** Points an existing set at an image, which is what reusing one means. */
+    private void writeSet(long set, long imageView, long sampler, MemoryStack stack) {
+        VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+        imageInfo.get(0).sampler(sampler).imageView(imageView)
+                .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+        write.get(0).sType$Default().dstSet(set).dstBinding(0).dstArrayElement(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(1)
+                .pImageInfo(imageInfo);
+        vkUpdateDescriptorSets(device, write, null);
     }
 
     @Override
