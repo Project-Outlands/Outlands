@@ -572,10 +572,14 @@ public final class VulkanBackend implements RenderBackend {
             float cx = minecraft.displayWidth * 0.5F;
             float cy = minecraft.displayHeight * 0.5F;
             float half = 40.0F;
-            buffer.pos(cx - half, cy + half, 0.0).color(255, 255, 255, 76).endVertex();
-            buffer.pos(cx + half, cy + half, 0.0).color(255, 255, 255, 76).endVertex();
-            buffer.pos(cx + half, cy - half, 0.0).color(255, 255, 255, 76).endVertex();
-            buffer.pos(cx - half, cy - half, 0.0).color(255, 255, 255, 76).endVertex();
+            // Opaque, because that is what the outline material produces: GlStateManager.enableOutlineMode makes the
+            // lightmap unit replace the light with the team colour and take its alpha from the texture, so the
+            // silhouette lands fully opaque and entity_sobel has an alpha step to trace. Drawing it at alpha 0.3 made
+            // the composite a 9% wash (alpha times alpha) and told us nothing about whether it arrived.
+            buffer.pos(cx - half, cy + half, 0.0).color(255, 255, 255, 255).endVertex();
+            buffer.pos(cx + half, cy + half, 0.0).color(255, 255, 255, 255).endVertex();
+            buffer.pos(cx + half, cy - half, 0.0).color(255, 255, 255, 255).endVertex();
+            buffer.pos(cx - half, cy - half, 0.0).color(255, 255, 255, 255).endVertex();
             tessellator.draw();
 
             // 2. The four passes, and the composite RenderGlobal.renderEntityOutlineFramebuffer does afterwards. With

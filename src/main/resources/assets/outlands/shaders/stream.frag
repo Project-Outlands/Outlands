@@ -21,7 +21,8 @@ layout(push_constant) uniform PushConstants {
     float fogStart;
     float fogEnd;
     float fogDensity;
-    float pad;
+    /** 1 when the overlay is outline mode, 0 when it is the hurt-flash mix. */
+    float overlayMode;
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -58,12 +59,25 @@ void main() {
     }
 
     vec3 light;
+    float lightAlpha = 1.0;
     if (inLightmap.x > 0.5 || inLightmap.y > 0.5) {
         light = vec3(1.0);
     } else {
         vec2 rawCoord = inLightmap * 65535.0;
         vec2 lightUv = (rawCoord + 8.0) / 256.0;
-        light = texture(lightmap, clamp(lightUv, 0.0, 1.0)).rgb;
+        vec4 sampled = texture(lightmap, clamp(lightUv, 0.0, 1.0));
+        light = sampled.rgb;
+        lightAlpha = sampled.a;
+    }
+
+    // Outline mode: GlStateManager.enableOutlineMode sets the lightmap unit's combine to GL_REPLACE with the team
+    // colour, and takes the alpha from the texture. So the light is replaced instead of mixed, and the alpha of the
+    // silhouette comes from the lightmap rather than from the vertex colour - which is what gives the entity-outline
+    // chain an alpha step to trace. Nothing here invents a colour: an opaque lightmap leaves alpha at 1.
+    if (pc.overlayMode > 0.5) {
+        outColor = vec4(sample4.rgb * inColor.rgb * pc.overlayColor.rgb,
+                sample4.a * inColor.a * lightAlpha);
+        return;
     }
 
     // The overlay is the lightmap unit's combine stage, so it modifies the light and not the finished colour:

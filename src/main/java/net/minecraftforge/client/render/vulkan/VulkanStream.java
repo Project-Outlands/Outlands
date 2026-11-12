@@ -162,6 +162,8 @@ final class VulkanStream implements AutoCloseable {
     private float lastPushedFogDensity = -1.0F;
     private final float[] lastPushedFogColor = new float[4];
     private final float[] lastPushedOverlayColor = new float[4];
+    /** The overlay mode last pushed, as 0.0 or 1.0, so a change of mode re-pushes. */
+    private float lastPushedOverlayMode = -1.0F;
     private long lastPushedLayout = 0L;
 
     static final int STATIC_QUAD_CAPACITY = 65_536;
@@ -693,6 +695,7 @@ final class VulkanStream implements AutoCloseable {
                 float curFogDensity = ds.fogDensity();
                 float[] curFogColor = ds.fogColor();
                 float[] curOverlayColor = ds.overlayColor();
+        float curOverlayMode = ds.overlayMode() == 1 ? 1.0F : 0.0F;
 
                 boolean needPush = curLayout != lastPushedLayout
                         || curAlphaRef != lastPushedAlphaRef
@@ -705,6 +708,7 @@ final class VulkanStream implements AutoCloseable {
                                 || curFogColor[1] != lastPushedFogColor[1]
                                 || curFogColor[2] != lastPushedFogColor[2]
                                 || curFogColor[3] != lastPushedFogColor[3]))
+                        || curOverlayMode != lastPushedOverlayMode
                         || curOverlayColor[3] != lastPushedOverlayColor[3]
                         || (curOverlayColor[3] > 0.0f && (curOverlayColor[0] != lastPushedOverlayColor[0]
                                 || curOverlayColor[1] != lastPushedOverlayColor[1]
@@ -728,7 +732,9 @@ final class VulkanStream implements AutoCloseable {
                     push.put(28, curFogStart);
                     push.put(29, curFogEnd);
                     push.put(30, curFogDensity);
-                    push.put(31, 0.0F); // pad
+                    // The one spare float carries the overlay mode: 1 means outline mode, where the fragment stage
+                    // replaces the light with the overlay's colour and takes its alpha from the lightmap.
+                    push.put(31, curOverlayMode);
                     constants.position(0);
                     constants.limit(128);
                     vkCmdPushConstants(commandBuffer, curLayout,
@@ -744,6 +750,7 @@ final class VulkanStream implements AutoCloseable {
                     lastPushedFogDensity = curFogDensity;
                     System.arraycopy(curFogColor, 0, lastPushedFogColor, 0, 4);
                     System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
+                    lastPushedOverlayMode = curOverlayMode;
                     lastPushedLayout = curLayout;
                 }
                 if (textureSets[indexOfOp] != boundSet || streamSetsStale) {

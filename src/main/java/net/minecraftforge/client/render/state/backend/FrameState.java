@@ -216,6 +216,16 @@ public interface FrameState {
 
     default void texEnvi(int target, int parameterName, int parameter) {}
 
+    /**
+     * Which combine stage the overlay colour describes: 0 for the hurt-flash interpolate, 1 for outline mode.
+     *
+     * <p>Defaulted rather than declared because only one backend reports it: the fixed-function outline material is a
+     * shim-path question, and anything that does not answer is asking for the interpolate form.</p>
+     */
+    default int overlayMode() {
+        return 0;
+    }
+
     default float[] overlayColor() {
         return new float[] {0.0f, 0.0f, 0.0f, 0.0f};
     }

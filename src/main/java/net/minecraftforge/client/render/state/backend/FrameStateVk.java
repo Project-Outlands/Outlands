@@ -452,8 +452,24 @@ final class FrameStateVk implements FrameState {
      * renderers; that is a different combine function and it is not implemented here, so it stays un-applied rather
      * than being approximated into something that looks wrong.</p>
      */
+    /** 1 when the overlay is outline mode, 0 for the hurt-flash interpolate. */
+    private int overlayMode;
+
+    @Override
+    public int overlayMode() {
+        return overlayMode;
+    }
+
     private void updateOverlayColor() {
         for (int unit = 0; unit < TEXTURE_UNITS; unit++) {
+            // Outline mode: GlStateManager.enableOutlineMode sets this unit to GL_REPLACE with the constant colour as
+            // source 0, so the light becomes the team colour and the silhouette's alpha comes from the lightmap. That
+            // is how a glowing entity gets a shape for entity_sobel to trace - the colour is replaced, nothing is mixed.
+            if (texEnvMode[unit] == GL_COMBINE && texCombineRgb[unit] == 7681 /* GL_REPLACE */) {
+                System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
+                overlayMode = 1;
+                return;
+            }
             if (texEnvMode[unit] == GL_COMBINE
                     && texCombineRgb[unit] == GL_INTERPOLATE
                     && texSource0Rgb[unit] == GL_CONSTANT
@@ -461,9 +477,11 @@ final class FrameStateVk implements FrameState {
                     && texSource2Rgb[unit] == GL_CONSTANT
                     && texOperand2Rgb[unit] == GL_SRC_ALPHA) {
                 System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
+                overlayMode = 0;
                 return;
             }
         }
+        overlayMode = 0;
         overlayColor[0] = 0.0F;
         overlayColor[1] = 0.0F;
         overlayColor[2] = 0.0F;

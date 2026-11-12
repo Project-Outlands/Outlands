@@ -55,6 +55,8 @@ public final class DrawState {
     private float fogDensity;
     private final float[] fogColor = new float[4];
     private final float[] overlayColor = new float[4];
+    /** 1 when {@link #overlayColor} is outline mode (replace the light, alpha from the lightmap), 0 for a mix. */
+    private int overlayMode;
     /**
      * The shader program the draw was issued under, or null for the fixed-function path.
      *
@@ -194,6 +196,7 @@ public final class DrawState {
         this.fogDensity = other.fogDensity;
         System.arraycopy(other.fogColor, 0, this.fogColor, 0, 4);
         System.arraycopy(other.overlayColor, 0, this.overlayColor, 0, 4);
+        this.overlayMode = other.overlayMode;
         this.program = other.program;
         if (other.programBlock.length != this.programBlock.length) {
             this.programBlock = new byte[other.programBlock.length];
@@ -296,6 +299,7 @@ public final class DrawState {
 
         captureProgram();
 
+        this.overlayMode = state.overlayMode();
         float[] oc = state.overlayColor();
         if (oc != null && oc.length >= 4) {
             System.arraycopy(oc, 0, this.overlayColor, 0, 4);
@@ -361,6 +365,9 @@ public final class DrawState {
     public int[] programSamplers() { return programSamplers; }
 
     public float[] overlayColor() { return overlayColor; }
+
+    /** 1 when the overlay replaces the light (outline mode), 0 when it mixes into it (hurt flash). */
+    public int overlayMode() { return overlayMode; }
 
     public float[] mvp() { return mvp; }
     public boolean depthTest() { return depthTest; }
