@@ -73,6 +73,10 @@ public final class GlShaders {
         private byte[] blockBytes = new byte[0];
         private int blockBinding;
         private int blockSet;
+        /** The samplers, ordered by set and binding: the order a descriptor set's bindings are written in. */
+        private List<Uniform> samplerUniforms = List.of();
+        /** The vertex stage's input locations, ascending: what the pipeline's vertex input has to cover. */
+        private int[] vertexInputLocations = new int[0];
         /**
          * The texture unit each sampler was last pointed at, by uniform name.
          *
@@ -128,6 +132,39 @@ public final class GlShaders {
         /** The uniform block's bytes: what the game has written through glUniform*, laid out as the module expects. */
         public byte[] blockBytes() {
             return blockBytes;
+        }
+
+        /** The block's size in bytes, which is the range a uniform buffer binding has to cover. */
+        public int blockSize() {
+            return blockBytes.length;
+        }
+
+        /** Whether the program declares a uniform block at all. A fragment-only program that samples says no. */
+        public boolean hasBlock() {
+            return blockBytes.length > 0;
+        }
+
+        /**
+         * The samplers, ordered by set and binding.
+         *
+         * <p>Ordered rather than declared because that is the order a pipeline layout's bindings appear in, and a
+         * descriptor set written in a different order binds the wrong image to the wrong name - silently, since every
+         * binding is a texture. This is the list the backend builds its descriptor set from.</p>
+         */
+        public List<Uniform> samplerUniforms() {
+            return samplerUniforms;
+        }
+
+        /**
+         * The locations the vertex stage reads from the vertex buffer, ascending and without duplicates.
+         *
+         * <p>GL never had to ask this: {@code glVertexPointer} and friends defined the layout at draw time, and an
+         * attribute the shader did not read was simply not fetched. Vulkan bakes the vertex input into the pipeline, so
+         * the declared inputs are what the pipeline has to provide - and a program that reads a location the
+         * normalised stream has no attribute for has to be rejected rather than fed something arbitrary.</p>
+         */
+        public int[] vertexInputLocations() {
+            return vertexInputLocations;
         }
 
         /** The SPIR-V of a stage, or null when the program has no such stage. */
@@ -357,6 +394,40 @@ public final class GlShaders {
             }
         }
         existing.blockBytes = new byte[blockSize];
+
+        // One entry per (set, binding), because that is what a descriptor set layout is: a binding, not a name. Both
+        // stages may declare the same sampler - a shader that samples in the vertex stage as well - and the two
+        // reflections describe the same binding. Keeping both would make a layout with two bindings at one index.
+        Map<Long, Uniform> samplers = new LinkedHashMap<>();
+        for (Uniform uniform : existing.uniforms) {
+            if (!uniform.sampler()) {
+                continue;
+            }
+            long key = ((long) uniform.descriptorSet() << 32) | (uniform.binding() & 0xFFFFFFFFL);
+            Uniform previous = samplers.putIfAbsent(key, uniform);
+            if (previous != null && !previous.name().equals(uniform.name())) {
+                LOGGER.warn("program {}: {} and {} are both at set {} binding {}, so only {} can be bound",
+                        program, previous.name(), uniform.name(), uniform.descriptorSet(), uniform.binding(),
+                        previous.name());
+            }
+        }
+        List<Uniform> ordered = new ArrayList<>(samplers.values());
+        ordered.sort(java.util.Comparator.<Uniform>comparingInt(Uniform::descriptorSet)
+                .thenComparingInt(Uniform::binding));
+        existing.samplerUniforms = List.copyOf(ordered);
+
+        byte[] vertexModule = existing.stageModule(VERTEX_SHADER);
+        if (vertexModule == null) {
+            existing.vertexInputLocations = new int[0];
+        } else {
+            java.util.TreeSet<Integer> locations = new java.util.TreeSet<>();
+            for (SpirvReflection.StageVariable variable : SpirvReflection.stageInterface(vertexModule)) {
+                if (!variable.output()) {
+                    locations.add(variable.location());
+                }
+            }
+            existing.vertexInputLocations = locations.stream().mapToInt(Integer::intValue).toArray();
+        }
         existing.linked = true;
     }
 

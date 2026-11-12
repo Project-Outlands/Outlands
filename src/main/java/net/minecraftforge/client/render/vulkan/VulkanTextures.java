@@ -171,25 +171,60 @@ final class VulkanTextures implements AutoCloseable {
      * @return the set to bind, or the white set when the handle holds no data yet
      */
     long descriptorSet(int textureId, VkCommandBuffer commandBuffer, int slot) {
-        ensureWhiteUploaded(commandBuffer, slot);
-        if (textureId == 0) {
-            return whiteSet;
+        Entry entry = ensure(textureId, commandBuffer, slot);
+        if (entry == null) {
+            External external = externals.get(textureId);
+            return external != null ? external.set() : whiteSet;
         }
-        External external = externals.get(textureId);
-        if (external != null) {
-            // A render target: its image is written by drawing, so there is nothing to upload and nothing to stage.
-            return external.set();
+        return entry.descriptorSet();
+    }
+
+    /**
+     * The image view and sampler {@code textureId} resolves to, uploading it first if this is its first use.
+     *
+     * <p>This is what a shader program's own sampler bindings need: a program's descriptor set is built from its
+     * reflected (set, binding) pairs, so the backend has to be able to write one binding at a time. The single-image
+     * set {@link #descriptorSet} returns cannot serve two samplers at once, which is exactly what a post-processing
+     * pass has.</p>
+     *
+     * @return the stand-in's view and sampler when the handle holds no data yet, which is what GL sampling an
+     *         unwritten texture looks like
+     */
+    ImageBinding binding(int textureId, VkCommandBuffer commandBuffer, int slot) {
+        Entry entry = ensure(textureId, commandBuffer, slot);
+        if (entry == null) {
+            External external = externals.get(textureId);
+            return external != null ? new ImageBinding(external.view(), external.sampler())
+                    : new ImageBinding(white.view(), whiteSampler);
+        }
+        return new ImageBinding(entry.image().view(), entry.sampler());
+    }
+
+    /** One sampler binding: the image it reads and the sampler that filters it. */
+    record ImageBinding(long view, long sampler) {}
+
+    /**
+     * Brings a texture's image up to date and returns its entry.
+     *
+     * <p>Null means "nothing of its own to sample": either a render target, which the caller resolves through
+     * {@link #externals}, or a texture that was created but never written. Both cases used to return the white set
+     * directly, and only the resolution differs between the two callers, so the upload work lives here.</p>
+     */
+    private Entry ensure(int textureId, VkCommandBuffer commandBuffer, int slot) {
+        ensureWhiteUploaded(commandBuffer, slot);
+        if (textureId == 0 || externals.containsKey(textureId)) {
+            return null;
         }
         TextureImage image = source.image(textureId);
         if (image == null) {
             // Created but never written: vanilla does this for render targets and for textures it fills later.
-            return whiteSet;
+            return null;
         }
 
         Entry entry = entries.get(textureId);
         if (entry != null && entry.uploadedVersion() == image.version()
                 && entry.image().width() == image.width() && entry.image().height() == image.height()) {
-            return entry.descriptorSet();
+            return entry;
         }
 
         // Both uploaded files and framebuffer copies hold sRGB-encoded bytes - PNGs because that is what a PNG is,
@@ -223,7 +258,7 @@ final class VulkanTextures implements AutoCloseable {
         }
 
         entries.put(textureId, new Entry(entry.image(), entry.sampler(), entry.descriptorSet(), image.version()));
-        return entry.descriptorSet();
+        return entry;
     }
 
     private VulkanBuffer acquireStaging(long byteSize) {

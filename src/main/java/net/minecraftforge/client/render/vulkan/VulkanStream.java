@@ -97,6 +97,23 @@ final class VulkanStream implements AutoCloseable {
     /** The game's lightmap texture, or zero while it has not been created. */
     private int lightmapTexture;
     /**
+     * The programs the game linked, or {@code null} before the backend has built them.
+     *
+     * <p>A draw that carries a program is drawn with it rather than with the stream's own shader: the program is the
+     * game's, its uniforms are the game's, and the only thing the two paths share is the vertex data.</p>
+     */
+    private VulkanPrograms programs;
+    /**
+     * The highest vertex attribute location the normalised stream provides.
+     *
+     * <p>Position, colour, UV and lightmap, in that order - the four attributes of
+     * {@code DefaultVertexFormats.BLOCK}, which {@link VertexConverter} normalises every input format into. A program
+     * that declares an input above this has nothing to feed it.</p>
+     */
+    static final int MAX_ATTRIBUTE_LOCATION = 3;
+    /** Which index buffer is bound, kept across draws so it is rebound only when it changes. */
+    private long boundIndexBuffer;
+    /**
      * Descriptor sets resolved for the frame being recorded, by texture handle.
      *
      * <p>Filled by {@link #prepareTextures} <i>before</i> the rendering instance opens, because resolving a texture
@@ -184,7 +201,13 @@ final class VulkanStream implements AutoCloseable {
         int opsSize = ops.size();
         for (int i = 0; i < opsSize; i++) {
             FrameDraws.Operation op = ops.get(i);
-            if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
+            if (op instanceof FrameDraws.Draw draw && draw.state().program() != null) {
+                // A program's samplers are its own bindings, and their textures have to be uploaded before the
+                // rendering instance opens for the same reason every other texture does.
+                for (int texture : draw.state().programSamplers()) {
+                    resolve(texture, commandBuffer, slot);
+                }
+            } else if (op instanceof FrameDraws.Draw draw && draw.state().samplesTexture()) {
                 resolve(draw.state().texture(), commandBuffer, slot);
             } else if (op instanceof FrameDraws.FramebufferCopy copy) {
                 // The destination has to exist before the copy can write into it, and it is resolved here for the
@@ -225,6 +248,11 @@ final class VulkanStream implements AutoCloseable {
     /** Told who owns the render targets, so a recorded switch can find its attachments. */
     void setRenderTargets(VulkanRenderTargets targets) {
         this.renderTargets = targets;
+    }
+
+    /** Told who owns the programs the game links, so a draw with one can be recorded with it. */
+    void setPrograms(VulkanPrograms programs) {
+        this.programs = programs;
     }
 
     /**
@@ -357,7 +385,7 @@ final class VulkanStream implements AutoCloseable {
             java.nio.FloatBuffer push = constants.asFloatBuffer();
             long boundSet = 0L;
             long boundPipeline = 0L;
-            long boundIndexBuffer = 0L;
+            boundIndexBuffer = 0L;
             // Scissor is dynamic state, so it is set only when a draw asks for a different rectangle. The starting
             // value is the whole viewport, which is what an unclipped frame uses.
             org.lwjgl.vulkan.VkViewport.Buffer viewport = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
@@ -531,6 +559,32 @@ final class VulkanStream implements AutoCloseable {
 
                 // Read once per draw: an offscreen target inverts the viewport, hence the winding, hence the front face.
                 boolean targetFlipsWinding = current.flipsVertically();
+                // Both rectangles are in the *bound target's* coordinates: GL's viewport and scissor count their y
+                // from the bottom of whichever framebuffer is current, so the flip has to use that target's height.
+                // Using the window's was a real bug: a 256-high viewport inside a 480-high frame was placed at
+                // y = 480 - 256 = 224 in a 256-tall target, leaving one eighth of it visible - a 96x96 quad came out
+                // 96x32, which is exactly what the composite self-test showed.
+                int targetWidth = current.width();
+                int targetHeight = current.height();
+                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
+                        targetFlipsWinding);
+                applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), targetWidth, targetHeight);
+
+                if (ds.program() != null) {
+                    // A program of the game's own: its pipeline, its block, its samplers. Nothing the stream has
+                    // cached applies to it, and everything it binds has to be rebound for the next streamed draw.
+                    if (programs == null) {
+                        throw new IllegalStateException("a draw carries program " + ds.program().id()
+                                + " but no program cache is installed");
+                    }
+                    programs.record(commandBuffer, slot, ds, topo, targetFlipsWinding);
+                    issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
+                    boundPipeline = 0L;
+                    boundSet = 0L;
+                    lastPushedLayout = 0L;
+                    continue;
+                }
+
                 VulkanPipeline pipeline;
                 if (cachedPipeline != null && topo == cachedTopology && targetFlipsWinding == cachedFlipsWinding
                         && ds.depthTest() == cachedDepthTest && ds.depthWrite() == cachedDepthWrite
@@ -631,35 +685,37 @@ final class VulkanStream implements AutoCloseable {
                     System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
                     lastPushedLayout = curLayout;
                 }
-                // Both rectangles are in the *bound target's* coordinates: GL's viewport and scissor count their y
-                // from the bottom of whichever framebuffer is current, so the flip has to use that target's height.
-                // Using the window's was a real bug: a 256-high viewport inside a 480-high frame was placed at
-                // y = 480 - 256 = 224 in a 256-tall target, leaving one eighth of it visible - a 96x96 quad came out
-                // 96x32, which is exactly what the composite self-test showed.
-                int targetWidth = current.width();
-                int targetHeight = current.height();
-                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
-                        current.flipsVertically());
-                applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), targetWidth, targetHeight);
                 if (textureSets[indexOfOp] != boundSet) {
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
                             stack.longs(textureSets[indexOfOp]), null);
                     boundSet = textureSets[indexOfOp];
                 }
-                if (shape.needsIndexing()) {
-                    boolean staticQuad = isStaticQuad(shape, draw.vertexCount());
-                    long neededIndexBuffer = staticQuad ? staticQuadIndexBuffer.handle() : indexBuffers[slot].handle();
-                    if (boundIndexBuffer != neededIndexBuffer) {
-                        vkCmdBindIndexBuffer(commandBuffer, neededIndexBuffer, 0L,
-                                org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
-                        boundIndexBuffer = neededIndexBuffer;
-                    }
-                    vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffsets[indexOfOp],
-                            offsets[indexOfOp] / VertexConverter.STRIDE, 0);
-                } else {
-                    vkCmdDraw(commandBuffer, draw.vertexCount(), 1, offsets[indexOfOp] / VertexConverter.STRIDE, 0);
-                }
+                issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
             }
+        }
+    }
+
+    /**
+     * Binds the index buffer if the draw needs one and issues it, at the offset its vertices were packed to.
+     *
+     * <p>Shared by the two paths on purpose: a program draw differs in its pipeline and descriptors, not in how a
+     * triangle fan becomes indices or where its vertices live. Duplicating this would let the two drift apart in the
+     * one place where a mistake is a misaligned mesh rather than an error.</p>
+     */
+    private void issueDraw(VkCommandBuffer commandBuffer, FrameDraws.Draw draw, PrimitiveShape shape,
+                           int vertexOffset, int indexOffset, int slot) {
+        if (shape.needsIndexing()) {
+            boolean staticQuad = isStaticQuad(shape, draw.vertexCount());
+            long neededIndexBuffer = staticQuad ? staticQuadIndexBuffer.handle() : indexBuffers[slot].handle();
+            if (boundIndexBuffer != neededIndexBuffer) {
+                vkCmdBindIndexBuffer(commandBuffer, neededIndexBuffer, 0L,
+                        org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
+                boundIndexBuffer = neededIndexBuffer;
+            }
+            vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffset,
+                    vertexOffset / VertexConverter.STRIDE, 0);
+        } else {
+            vkCmdDraw(commandBuffer, draw.vertexCount(), 1, vertexOffset / VertexConverter.STRIDE, 0);
         }
     }
 
@@ -842,6 +898,9 @@ final class VulkanStream implements AutoCloseable {
     void prepareFrame(int slot) {
         if (terrain != null) {
             terrain.prepareFrame(slot);
+        }
+        if (programs != null) {
+            programs.prepareFrame(slot);
         }
     }
 

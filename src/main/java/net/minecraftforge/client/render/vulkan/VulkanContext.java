@@ -154,6 +154,21 @@ final class VulkanContext {
         }
     }
 
+    /**
+     * The alignment a dynamic uniform buffer offset has to be a multiple of.
+     *
+     * <p>Both a descriptor's own offset and a dynamic offset are checked against this, and the limit is per device -
+     * 64 on many, 256 on others. Getting it from the device rather than assuming 256 costs one query and removes the
+     * class of failure where it works on the machine it was written on.</p>
+     */
+    int minUniformBufferOffsetAlignment() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            vkGetPhysicalDeviceProperties(physicalDevice, properties);
+            return (int) properties.limits().minUniformBufferOffsetAlignment();
+        }
+    }
+
     String deviceName() {
         return deviceName;
     }

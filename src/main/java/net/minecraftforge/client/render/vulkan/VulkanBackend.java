@@ -55,6 +55,7 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanContext context;
     private VulkanSwapchain swapchain;
     private VulkanTerrainLayer terrainLayer;
+    private VulkanPrograms programs;
     private VulkanDescriptors descriptors;
     private VulkanTextures textureCache;
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
@@ -68,6 +69,21 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanRenderTargets renderTargets;
     private net.minecraft.client.shader.Framebuffer selfTestFramebuffer;
     private boolean selfTestReported;
+    /** Whether to draw a quad through a program the GL facade compiled and linked. See {@link #selfTestProgram()}. */
+    private final boolean selfTestProgram =
+            Boolean.getBoolean("outlands.render.selftest.program");
+    private int selfTestProgramId;
+    private int selfTestProgramTexture;
+    private boolean selfTestProgramReported;
+    /**
+     * Frame to save a screenshot on, under {@code -Doutlands.render.shot.frame=N} (1-based), or 0 for none.
+     *
+     * <p>The backend can read its own window's image back, and doing so on a chosen frame is the only way to look at
+     * what a headless run actually drew: the desktop's screenshot tools do not necessarily see a Vulkan window, and a
+     * picture in a file is a far better argument than a log line that says the draw was recorded.</p>
+     */
+    private final int screenshotFrame = Integer.getInteger("outlands.render.shot.frame", 0);
+    private int framesPresented;
     private long window;
     private boolean failed;
 
@@ -157,6 +173,8 @@ public final class VulkanBackend implements RenderBackend {
                     descriptors, textureCache);
             stream = new VulkanStream(context.device(), context, swapchain.imageFormat(), swapchain.depthFormat(),
                     descriptors, textureCache);
+            programs = new VulkanPrograms(context, swapchain.imageFormat(), swapchain.depthFormat(), textureCache);
+            stream.setPrograms(programs);
             // Framebuffers the game creates after this point - the shader groups among them - get their attachments
             // from here. Their formats are the swapchain's, because every pipeline in this renderer is built for that
             // one format (see docs/vulkan-backend-plan.md 11.3 D1).
@@ -207,6 +225,15 @@ public final class VulkanBackend implements RenderBackend {
             }
             if (selfTestComposite) {
                 selfTestComposite();
+            }
+            if (selfTestProgram) {
+                selfTestProgram();
+            }
+            framesPresented++;
+            if (screenshotFrame > 0 && framesPresented == screenshotFrame) {
+                net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
+                net.minecraftforge.client.render.screenshot.Screenshots.request(minecraft.displayWidth,
+                        minecraft.displayHeight, "shot-frame" + framesPresented + ".png");
             }
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.
@@ -309,6 +336,147 @@ public final class VulkanBackend implements RenderBackend {
         }
     }
 
+    /**
+     * The vertices and fragment the program self-test compiles, written the way a mod would hand them over.
+     *
+     * <p>Deliberately GLSL a mod could write: a plain {@code uniform vec4 Tint} and a sampler with an explicit binding.
+     * The plain uniform is what the preprocessor has to collect into a block - Vulkan has no loose uniforms - and the
+     * explicit {@code (set = 1, binding = 0)} is the convention the game's own shaders follow for textures.</p>
+     *
+     * <p><b>The quad's y is Vulkan's, not the game's.</b> This shader writes clip coordinates straight from the vertex
+     * position, so there is no projection matrix to convert: clip y=-1 is the top row of the window, which is why the
+     * top-left vertex carries v=0. A shader of the game's that multiplies by {@code ProjMat} instead lands mirrored -
+     * that is the orientation question the outline chain has to answer, and it is not one a self-test should guess
+     * at.</p>
+     */
+    private static final String SELF_TEST_VERTEX = """
+            #version 450
+            layout(location = 0) in vec4 Position;
+            layout(location = 2) in vec2 TexCoord;
+            layout(location = 0) out vec2 vUv;
+            void main() {
+                gl_Position = vec4(Position.xy, 0.0, 1.0);
+                vUv = TexCoord;
+            }
+            """;
+
+    private static final String SELF_TEST_FRAGMENT = """
+            #version 450
+            uniform vec4 Tint;
+            layout(set = 1, binding = 0) uniform sampler2D DiffuseSampler;
+            layout(location = 0) in vec2 vUv;
+            layout(location = 0) out vec4 fragColor;
+            void main() {
+                fragColor = vec4(texture(DiffuseSampler, vUv).rgb, 1.0) * Tint;
+            }
+            """;
+
+    /**
+     * Draws the left half of the window through a program the facade compiled, linked and bound.
+     *
+     * <p>Gated by {@code -Doutlands.render.selftest.program=true}. What it proves, none of which a unit test can: a
+     * GLSL string becomes a module, modules become a pipeline with a layout derived from the module's own decorations,
+     * the game's {@code glUniform*} writes land at the offsets the compiler chose, and a sampler named
+     * {@code DiffuseSampler} reaches the texture the game bound to the unit it was pointed at.</p>
+     *
+     * <p>The alpha of the tint is 0.75 on purpose. If the uniform block never arrived the quad is transparent and only
+     * the log shows why; if it arrived, the menu or the world shows through the left half. That makes "the uniform
+     * works" a difference in the picture rather than a claim in a log line.</p>
+     */
+    private void selfTestProgram() {
+        try {
+            if (selfTestProgramId == 0) {
+                selfTestProgramId = createSelfTestProgram();
+            }
+            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
+            net.minecraft.util.ResourceLocation panorama =
+                    new net.minecraft.util.ResourceLocation("textures/gui/title/background/panorama_0.png");
+            minecraft.getTextureManager().bindTexture(panorama);
+            if (selfTestProgramTexture == 0) {
+                selfTestProgramTexture = minecraft.getTextureManager().getTexture(panorama).getGlTextureId();
+            }
+
+            net.minecraftforge.client.render.shader.GlShaders.useProgram(selfTestProgramId);
+            int tint = net.minecraftforge.client.render.shader.GlShaders.uniformLocation(selfTestProgramId, "Tint");
+            net.minecraftforge.client.render.shader.GlShaders.uniform4f(tint, 1.0F, 1.0F, 1.0F, 0.75F);
+
+            net.minecraft.client.renderer.GlStateManager.disableCull();
+            net.minecraft.client.renderer.GlStateManager.disableDepth();
+            net.minecraft.client.renderer.GlStateManager.enableBlend();
+            net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
+                    net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
+                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                    net.minecraft.client.renderer.GlStateManager.SourceFactor.ONE,
+                    net.minecraft.client.renderer.GlStateManager.DestFactor.ZERO);
+            net.minecraft.client.renderer.GlStateManager.enableTexture2D();
+
+            net.minecraft.client.renderer.Tessellator tessellator =
+                    net.minecraft.client.renderer.Tessellator.getInstance();
+            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
+            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_TEX);
+            // The left half, with the image's row 0 (v=0) at clip y=-1, which is the window's top row.
+            buffer.pos(-1.0, -1.0, 0.0).tex(0.0, 0.0).endVertex();
+            buffer.pos(0.0, -1.0, 0.0).tex(1.0, 0.0).endVertex();
+            buffer.pos(0.0, 1.0, 0.0).tex(1.0, 1.0).endVertex();
+            buffer.pos(-1.0, 1.0, 0.0).tex(0.0, 1.0).endVertex();
+            tessellator.draw();
+
+            net.minecraftforge.client.render.shader.GlShaders.useProgram(0);
+        } catch (RuntimeException e) {
+            if (!selfTestProgramReported) {
+                selfTestProgramReported = true;
+                LOGGER.error("selftest: the program draw failed", e);
+            }
+        }
+    }
+
+    /** Compiles and links the self-test program, and reports the layout the modules produced. */
+    private int createSelfTestProgram() {
+        int program = net.minecraftforge.client.render.shader.GlShaders.createProgram();
+        int vertex = net.minecraftforge.client.render.shader.GlShaders.createShader(
+                net.minecraftforge.client.render.shader.GlShaders.VERTEX_SHADER);
+        int fragment = net.minecraftforge.client.render.shader.GlShaders.createShader(
+                net.minecraftforge.client.render.shader.GlShaders.FRAGMENT_SHADER);
+        net.minecraftforge.client.render.shader.GlShaders.shaderSource(vertex, SELF_TEST_VERTEX);
+        net.minecraftforge.client.render.shader.GlShaders.shaderSource(fragment, SELF_TEST_FRAGMENT);
+        net.minecraftforge.client.render.shader.GlShaders.compileShader(vertex);
+        net.minecraftforge.client.render.shader.GlShaders.compileShader(fragment);
+        if (net.minecraftforge.client.render.shader.GlShaders.shaderStatus(vertex,
+                net.minecraftforge.client.render.shader.GlShaders.COMPILE_STATUS) == 0) {
+            throw new IllegalStateException("selftest: the program's vertex stage did not compile:\n"
+                    + net.minecraftforge.client.render.shader.GlShaders.shaderLog(vertex));
+        }
+        if (net.minecraftforge.client.render.shader.GlShaders.shaderStatus(fragment,
+                net.minecraftforge.client.render.shader.GlShaders.COMPILE_STATUS) == 0) {
+            throw new IllegalStateException("selftest: the program's fragment stage did not compile:\n"
+                    + net.minecraftforge.client.render.shader.GlShaders.shaderLog(fragment));
+        }
+        net.minecraftforge.client.render.shader.GlShaders.attachShader(program, vertex);
+        net.minecraftforge.client.render.shader.GlShaders.attachShader(program, fragment);
+        net.minecraftforge.client.render.shader.GlShaders.linkProgram(program);
+        if (net.minecraftforge.client.render.shader.GlShaders.programStatus(program,
+                net.minecraftforge.client.render.shader.GlShaders.LINK_STATUS) == 0) {
+            throw new IllegalStateException("selftest: the program did not link:\n"
+                    + net.minecraftforge.client.render.shader.GlShaders.programLog(program));
+        }
+
+        int sampler = net.minecraftforge.client.render.shader.GlShaders.uniformLocation(program, "DiffuseSampler");
+        if (sampler < 0) {
+            throw new IllegalStateException("selftest: the program has no DiffuseSampler, so nothing would be"
+                    + " sampled");
+        }
+        net.minecraftforge.client.render.shader.GlShaders.uniform1i(sampler, 0);
+
+        net.minecraftforge.client.render.shader.GlShaders.Program linked =
+                net.minecraftforge.client.render.shader.GlShaders.program(program);
+        LOGGER.info("selftest: program {} linked, block {} bytes at set {} binding {}, vertex inputs {}, samplers {}",
+                program, linked.blockSize(), linked.blockSet(), linked.blockBinding(),
+                java.util.Arrays.toString(linked.vertexInputLocations()),
+                linked.samplerUniforms().stream()
+                        .map(u -> u.name() + "@" + u.descriptorSet() + ":" + u.binding()).toList());
+        return program;
+    }
+
     /** Prints one line of the self-test's operation trace. */
     static void logOperation(String kind, String detail) {
         LOGGER.info("selftest: op {} {}", kind, detail);
@@ -387,6 +555,10 @@ public final class VulkanBackend implements RenderBackend {
         if (terrainLayer != null) {
             terrainLayer.close();
             terrainLayer = null;
+        }
+        if (programs != null) {
+            programs.close();
+            programs = null;
         }
         if (stream != null) {
             stream.close();

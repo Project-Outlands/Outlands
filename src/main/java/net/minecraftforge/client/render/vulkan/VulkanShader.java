@@ -45,12 +45,22 @@ final class VulkanShader implements AutoCloseable {
      * @throws IllegalStateException if the resource is missing, empty, or not a multiple of four bytes
      */
     static VulkanShader load(VkDevice device, String resource) {
-        byte[] bytes = read(resource);
+        return create(device, read(resource), resource);
+    }
+
+    /**
+     * Creates a module from SPIR-V that arrived some other way than a resource.
+     *
+     * <p>The game's own shaders reach the backend as GLSL strings, compiled in process by the GL facade; that is what
+     * needs this entry point. The bytes still have to be a whole number of words, so the check is the same one a
+     * resource gets rather than a weaker one for a path that "was already checked".</p>
+     */
+    static VulkanShader create(VkDevice device, byte[] bytes, String name) {
         if (bytes.length == 0) {
-            throw new IllegalStateException(resource + " is empty");
+            throw new IllegalStateException(name + " is empty");
         }
         if (bytes.length % 4 != 0) {
-            throw new IllegalStateException(resource + " is " + bytes.length
+            throw new IllegalStateException(name + " is " + bytes.length
                     + " bytes, which is not a whole number of 32-bit SPIR-V words");
         }
 
@@ -63,7 +73,7 @@ final class VulkanShader implements AutoCloseable {
                         .pCode(spirv);
                 LongBuffer moduleOut = stack.mallocLong(1);
                 VkCheck.check(vkCreateShaderModule(device, createInfo, null, moduleOut),
-                        "vkCreateShaderModule(" + resource + ")");
+                        "vkCreateShaderModule(" + name + ")");
                 return new VulkanShader(device, moduleOut.get(0));
             }
         } finally {

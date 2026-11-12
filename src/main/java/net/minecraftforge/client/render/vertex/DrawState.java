@@ -55,6 +55,25 @@ public final class DrawState {
     private float fogDensity;
     private final float[] fogColor = new float[4];
     private final float[] overlayColor = new float[4];
+    /**
+     * The shader program the draw was issued under, or null for the fixed-function path.
+     *
+     * <p><b>Snapshotted like every other piece of state, and for the same reason.</b> {@code glUseProgram} is global
+     * state: a frame that records "draw, then switch program, then draw" would apply the second program to both draws
+     * if this were read at replay time. It is not part of {@code glPushAttrib} in GL either, which is why it is
+     * captured here rather than tracked with the enable bits.</p>
+     */
+    private net.minecraftforge.client.render.shader.GlShaders.Program program;
+    /**
+     * The program's uniform block as it stood at the draw, and the textures its samplers read.
+     *
+     * <p>Both are copied rather than referenced. The block is one array per program that every later
+     * {@code glUniform*} write lands in - the outline chain sets {@code BlurDir} between two passes - so holding the
+     * array would give every draw in the frame the last values written. The sampler textures are resolved from the
+     * texture unit each sampler was pointed at, for the same reason: the unit binding is global state too.</p>
+     */
+    private byte[] programBlock = new byte[0];
+    private int[] programSamplers = new int[0];
 
     public DrawState() {}
 
@@ -175,6 +194,15 @@ public final class DrawState {
         this.fogDensity = other.fogDensity;
         System.arraycopy(other.fogColor, 0, this.fogColor, 0, 4);
         System.arraycopy(other.overlayColor, 0, this.overlayColor, 0, 4);
+        this.program = other.program;
+        if (other.programBlock.length != this.programBlock.length) {
+            this.programBlock = new byte[other.programBlock.length];
+        }
+        System.arraycopy(other.programBlock, 0, this.programBlock, 0, other.programBlock.length);
+        if (other.programSamplers.length != this.programSamplers.length) {
+            this.programSamplers = new int[other.programSamplers.length];
+        }
+        System.arraycopy(other.programSamplers, 0, this.programSamplers, 0, other.programSamplers.length);
     }
 
     public void captureFrom(net.minecraftforge.client.render.state.backend.FrameState state) {
@@ -266,6 +294,8 @@ public final class DrawState {
             this.fogDensity = 1.0f;
         }
 
+        captureProgram();
+
         float[] oc = state.overlayColor();
         if (oc != null && oc.length >= 4) {
             System.arraycopy(oc, 0, this.overlayColor, 0, 4);
@@ -284,6 +314,51 @@ public final class DrawState {
         SCRATCH_CURRENT.captureFrom(state);
         return SCRATCH_CURRENT;
     }
+
+    /**
+     * Snapshots the active program, its uniform block and the textures its samplers read.
+     *
+     * <p>A sampler that was never pointed at a unit reads unit 0, which is what GL does: {@code glUniform1i} on a
+     * sampler is the only way to move it, and the default value of an unset sampler uniform is 0.</p>
+     */
+    private void captureProgram() {
+        net.minecraftforge.client.render.shader.GlShaders.Program active =
+                net.minecraftforge.client.render.shader.GlShaders.program(
+                        net.minecraftforge.client.render.shader.GlShaders.currentProgram());
+        this.program = active;
+        if (active == null) {
+            this.programBlock = new byte[0];
+            this.programSamplers = new int[0];
+            return;
+        }
+
+        byte[] block = active.blockBytes();
+        if (block.length != this.programBlock.length) {
+            this.programBlock = new byte[block.length];
+        }
+        System.arraycopy(block, 0, this.programBlock, 0, block.length);
+
+        java.util.List<net.minecraftforge.client.render.shader.GlShaders.Uniform> samplers =
+                active.samplerUniforms();
+        if (samplers.size() != this.programSamplers.length) {
+            this.programSamplers = new int[samplers.size()];
+        }
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        for (int i = 0; i < samplers.size(); i++) {
+            int unit = active.samplerUnit(samplers.get(i).name());
+            this.programSamplers[i] = textures == null ? 0 : textures.boundTexture(unit < 0 ? 0 : unit);
+        }
+    }
+
+    /** The program this draw was issued under, or null for the fixed-function one. */
+    public net.minecraftforge.client.render.shader.GlShaders.Program program() { return program; }
+
+    /** The program's uniform block at the time of the draw. Empty when there is no program. */
+    public byte[] programBlock() { return programBlock; }
+
+    /** The texture handle each of the program's samplers read, in {@code samplerUniforms()} order. */
+    public int[] programSamplers() { return programSamplers; }
 
     public float[] overlayColor() { return overlayColor; }
 

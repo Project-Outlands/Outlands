@@ -119,6 +119,27 @@ final class VulkanPipeline implements AutoCloseable {
                     GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS, false);
         }
 
+        /**
+         * The state a recorded draw was issued with.
+         *
+         * <p>Shared by the stream path and the program path, so a program draw and a fixed-function draw that differ
+         * only in their shader cannot end up with different blending: the mask and the enable bits are read from the
+         * same place, in the same order, by both.</p>
+         *
+         * @param flipped whether the draw goes into a target whose viewport is inverted, which inverts the winding
+         */
+        static PipelineState of(VK10Topology topology, net.minecraftforge.client.render.vertex.DrawState state,
+                                boolean flipped) {
+            boolean[] mask = state.colorMask();
+            int channels = (mask[0] ? VK_COLOR_COMPONENT_R_BIT : 0)
+                    | (mask[1] ? VK_COLOR_COMPONENT_G_BIT : 0)
+                    | (mask[2] ? VK_COLOR_COMPONENT_B_BIT : 0)
+                    | (mask[3] ? VK_COLOR_COMPONENT_A_BIT : 0);
+            return new PipelineState(topology, state.depthTest(), state.depthWrite(), state.depthFunc(),
+                    state.blend(), state.cull(), state.blendSourceRgb(), state.blendDestinationRgb(),
+                    state.blendSourceAlpha(), state.blendDestinationAlpha(), channels, flipped);
+        }
+
         /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
         static PipelineState translucentTerrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, 515, true, true,
@@ -220,12 +241,37 @@ final class VulkanPipeline implements AutoCloseable {
      */
     static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
                                  int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state) {
-        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state, false);
+        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state,
+                false, null);
+    }
+
+    /**
+     * Builds a pipeline whose vertex input declares only the attributes {@code locations} names.
+     *
+     * <p>Needed for a program of the game's own: its vertex stage reads whichever of the four normalised attributes it
+     * declares, and a description that also declares the others is not an error but is reported by the validation
+     * layers as "not consumed by vertex shader" - twice per program. A program also knows its own list, so passing it
+     * in is both quieter and more honest than declaring everything and hoping nobody tests the difference.</p>
+     *
+     * @param locations the attribute locations the vertex stage reads, ascending, each in 0..3
+     */
+    static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                 int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state,
+                                 int[] locations) {
+        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state,
+                false, locations);
     }
 
     private static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
                                          int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state,
                                          boolean isTerrain) {
+        return create(device, vertex, fragment, colorFormat, depthFormat, pipelineLayout, descriptorSetLayout, state,
+                isTerrain, null);
+    }
+
+    private static VulkanPipeline create(VkDevice device, VulkanShader vertex, VulkanShader fragment, int colorFormat,
+                                         int depthFormat, long pipelineLayout, long descriptorSetLayout, PipelineState state,
+                                         boolean isTerrain, int[] locations) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             boolean ownsLayout = pipelineLayout == VK_NULL_HANDLE;
             long layout = pipelineLayout;
@@ -248,7 +294,8 @@ final class VulkanPipeline implements AutoCloseable {
 
             long pipeline = 0L;
             try {
-                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, isTerrain, stack);
+                pipeline = createPipeline(device, layout, vertex, fragment, colorFormat, depthFormat, state, isTerrain,
+                        locations, stack);
                 return new VulkanPipeline(device, layout, ownsLayout, pipeline);
             } catch (RuntimeException e) {
                 if (pipeline != 0L) {
@@ -264,7 +311,7 @@ final class VulkanPipeline implements AutoCloseable {
 
     private static long createPipeline(VkDevice device, long layout, VulkanShader vertex, VulkanShader fragment,
                                        int colorFormat, int depthFormat, PipelineState state, boolean isTerrain,
-                                       MemoryStack stack) {
+                                       int[] locations, MemoryStack stack) {
         VkPipelineShaderStageCreateInfo.Buffer stages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
         stages.get(0)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
@@ -294,6 +341,14 @@ final class VulkanPipeline implements AutoCloseable {
                     .offset(TerrainVertexFormat.COMPACT_UV_OFFSET);
             attributes.get(2).location(2).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM)
                     .offset(TerrainVertexFormat.COMPACT_COLOR_OFFSET);
+        } else if (locations != null) {
+            // Only what this program's vertex stage reads, at the offsets and formats of the normalised stream.
+            attributes = VkVertexInputAttributeDescription.calloc(Math.max(1, locations.length), stack);
+            attributes.limit(locations.length);
+            for (int i = 0; i < locations.length; i++) {
+                attributes.get(i).location(locations[i]).binding(0)
+                        .format(rawFormat(locations[i])).offset(rawOffset(locations[i]));
+            }
         } else {
             // Raw 28-byte format (stream draws)
             attributes = VkVertexInputAttributeDescription.calloc(4, stack);
@@ -394,6 +449,29 @@ final class VulkanPipeline implements AutoCloseable {
             throw new VkCheck.VulkanException("vkCreateGraphicsPipelines returned " + status);
         }
         return pipelineOut.get(0);
+    }
+
+    /** The Vulkan format of the normalised stream's attribute at {@code location}. */
+    private static int rawFormat(int location) {
+        return switch (location) {
+            case 0 -> VK_FORMAT_R32G32B32_SFLOAT;
+            case 1 -> VK_FORMAT_R8G8B8A8_UNORM;
+            case 2 -> VK_FORMAT_R32G32_SFLOAT;
+            case 3 -> VK_FORMAT_R16G16_UNORM;
+            default -> throw new IllegalStateException("the normalised vertex stream has no attribute at location "
+                    + location + " (it provides position, colour, uv and lightmap at 0..3)");
+        };
+    }
+
+    private static int rawOffset(int location) {
+        return switch (location) {
+            case 0 -> TerrainVertexFormat.RAW_POSITION_OFFSET;
+            case 1 -> TerrainVertexFormat.RAW_COLOR_OFFSET;
+            case 2 -> TerrainVertexFormat.RAW_UV_OFFSET;
+            case 3 -> TerrainVertexFormat.RAW_LIGHTMAP_OFFSET;
+            default -> throw new IllegalStateException("the normalised vertex stream has no attribute at location "
+                    + location);
+        };
     }
 
     @Override
