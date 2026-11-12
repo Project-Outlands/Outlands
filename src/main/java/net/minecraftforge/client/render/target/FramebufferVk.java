@@ -1,5 +1,7 @@
 package net.minecraftforge.client.render.target;
 
+import net.minecraftforge.client.render.vertex.FrameDraws;
+
 /**
  * A render target on the Vulkan backend.
  *
@@ -92,9 +94,19 @@ final class FramebufferVk implements FramebufferBackend {
     }
 
     @Override
+    public boolean isWindow() {
+        return window;
+    }
+
+    @Override
     public void bind(boolean setViewport) {
         if (!window) {
-            throw needsTargetSwitch("bind " + width + "x" + height);
+            // A recorded switch, in its place in the frame's sequence: the backend ends the instance it is in, moves
+            // both images to their layouts and opens another one over this target.
+            if (!FrameDraws.recordTargetBind(target.textureId(), width, height, setViewport)) {
+                throw needsFrame("bind " + width + "x" + height);
+            }
+            return;
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
@@ -107,7 +119,11 @@ final class FramebufferVk implements FramebufferBackend {
     @Override
     public void unbind() {
         if (!window) {
-            throw needsTargetSwitch("unbind " + width + "x" + height);
+            // Back to the window's image, which is where a frame starts and usually ends.
+            if (!FrameDraws.recordTargetBind(0, width, height, false)) {
+                throw needsFrame("unbind " + width + "x" + height);
+            }
+            return;
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
@@ -120,7 +136,10 @@ final class FramebufferVk implements FramebufferBackend {
     @Override
     public void clear() {
         if (!window) {
-            throw needsTargetSwitch("clear " + width + "x" + height + " (depth=" + useDepth + ")");
+            // The patched Framebuffer runs its own body for a target with an image: bind, GlStateManager.clear,
+            // unbind - all three of which are recorded operations. Reaching here means something bypassed that.
+            throw new IllegalStateException("clear() on an offscreen framebuffer reached the backend directly;"
+                    + " Framebuffer.framebufferClear runs its own body for these, through FrameStateVk's clear");
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
@@ -136,6 +155,12 @@ final class FramebufferVk implements FramebufferBackend {
     /**
      * Draws this target's colour attachment over the current one.
      *
+     * <p><b>The vanilla body does this one, for a target with an image.</b> {@code framebufferRenderExt} binds the
+     * target's texture, sets up an ortho projection and draws a {@code POSITION_TEX_COLOR} quad through the
+     * Tessellator - and every one of those calls already routes through the shim, so the composite is an ordinary
+     * streamed draw sampling the target by its handle. Only the window's is answered here, where it is the
+     * identity.</p>
+     *
      * <p><b>A no-op for the window, not a missing feature.</b> This backend has one colour target for the window: the
      * image the game calls the main framebuffer. Drawing that image onto itself is the identity, so the offscreen
      * indirection GL needs - render to a texture, then blit the texture to the screen - does not exist here to be
@@ -147,7 +172,8 @@ final class FramebufferVk implements FramebufferBackend {
             throw needsFrame("render " + width + "x" + height);
         }
         if (!window) {
-            throw needsTargetSwitch("composite " + width + "x" + height);
+            throw new IllegalStateException("composite of an offscreen framebuffer reached the backend directly;"
+                    + " Framebuffer.framebufferRenderExt draws it through the stream path");
         }
     }
 

@@ -64,6 +64,8 @@ final class VulkanStream implements AutoCloseable {
     private final int colorFormat;
     private final int depthFormat;
     private final Map<VulkanPipeline.PipelineState, VulkanPipeline> pipelines = new HashMap<>();
+    /** The render targets a recorded switch can name, or {@code null} before the backend installs them. */
+    private VulkanRenderTargets renderTargets;
     /** {@code GL_GREATER}, the alpha test comparison vanilla sets when it enables the test. */
     private static final int GL_GREATER = 516;
 
@@ -219,8 +221,13 @@ final class VulkanStream implements AutoCloseable {
      * <p>Called inside the rendering instance the frame already opened, so the colour and depth attachments are
      * whatever that instance targets.</p>
      */
+    /** Told who owns the render targets, so a recorded switch can find its attachments. */
+    void setRenderTargets(VulkanRenderTargets targets) {
+        this.renderTargets = targets;
+    }
+
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
-                int viewportHeight, FrameRenderTarget target) {
+                int viewportHeight, FrameRenderTarget windowTarget) {
         draws.clear();
         for (int i = 0; i < ops.size(); i++) {
             if (ops.get(i) instanceof FrameDraws.Draw d) {
@@ -351,14 +358,35 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
+            // What the instance is currently open over. A frame starts on the window's image and every switch moves it.
+            FrameRenderTarget current = windowTarget;
             for (FrameDraws.Operation op : ops) {
+                if (op instanceof FrameDraws.TargetBind bind) {
+                    vkCmdEndRendering(commandBuffer);
+                    // The target being left has finished its pass: this is the only point where its contents are
+                    // complete and it is still in the attachment layout, so it moves to the sampled layout here.
+                    current.prepareForSampling(commandBuffer);
+                    FrameRenderTarget next = bind.target() == 0 ? windowTarget : resolveTarget(bind);
+                    next.prepareForRendering(commandBuffer);
+                    next.beginRendering(commandBuffer);
+                    current = next;
+                    // A new instance starts with the hardware viewport, scissor, pipeline and descriptor sets
+                    // undefined, so every cached value is dropped rather than assumed.
+                    appliedViewport[0] = Integer.MIN_VALUE;
+                    appliedScissor[0] = Integer.MIN_VALUE;
+                    boundSet = 0L;
+                    boundPipeline = 0L;
+                    boundIndexBuffer = 0L;
+                    lastPushedLayout = 0L;
+                    continue;
+                }
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
                     // and reopened with LOAD afterwards. Splitting is the only way to keep both the source content
                     // and the ordering vanilla asked for; Vulkan forbids the copy itself inside a render pass.
                     vkCmdEndRendering(commandBuffer);
-                    textures.copyFromFramebuffer(commandBuffer, copy, target, slot);
-                    target.beginRendering(commandBuffer);
+                    textures.copyFromFramebuffer(commandBuffer, copy, current, slot);
+                    current.beginRendering(commandBuffer);
                     // beginRenderingInstance resets the hardware viewport and scissor to the full extent of the window.
                     // Invalidate the cache so the next draw restores its own viewport and scissor instead of falsely
                     // assuming the hardware state is still what it was before the copy.
@@ -411,16 +439,21 @@ final class VulkanStream implements AutoCloseable {
                                     .depth((float) clearOp.depth()).stencil(0);
                             atIdx++;
                         }
+                        // The rectangle is in the coordinates of whatever target is bound *now*, which after a
+                        // switch is that target's extent - not the window's. Using the frame's extent drew clears
+                        // outside the instance and the validation layers rejected them.
+                        int targetWidth = current.width();
+                        int targetHeight = current.height();
                         int x = 0;
                         int y = 0;
-                        int width = viewportWidth;
-                        int height = viewportHeight;
+                        int width = targetWidth;
+                        int height = targetHeight;
                         if (clearOp.scissorEnabled()) {
                             int[] box = clearOp.scissorBox();
                             x = Math.max(0, box[0]);
-                            y = Math.max(0, viewportHeight - box[1] - box[3]);
-                            width = Math.min(box[2], viewportWidth - x);
-                            height = Math.min(box[3], viewportHeight - y);
+                            y = Math.max(0, targetHeight - box[1] - box[3]);
+                            width = Math.min(box[2], targetWidth - x);
+                            height = Math.min(box[3], targetHeight - y);
                         }
                         if (width > 0 && height > 0) {
                             org.lwjgl.vulkan.VkClearRect.Buffer clearRects =
@@ -671,6 +704,22 @@ final class VulkanStream implements AutoCloseable {
     }
 
 
+
+    /**
+     * The target a recorded switch names.
+     *
+     * <p>A missing target is a released one - a framebuffer deleted while a draw list still referred to it - and
+     * continuing would draw into freed memory, so it is an exception that names the handle.</p>
+     */
+    private FrameRenderTarget resolveTarget(FrameDraws.TargetBind bind) {
+        FrameRenderTarget target = renderTargets == null ? null : renderTargets.byTextureId(bind.target());
+        if (target == null) {
+            throw new IllegalStateException("the frame asked to draw into render target " + bind.target() + " ("
+                    + bind.width() + "x" + bind.height() + "), which does not exist any more. A framebuffer was"
+                    + " deleted while a draw list still referred to it.");
+        }
+        return target;
+    }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {
         return pipelines.computeIfAbsent(state,

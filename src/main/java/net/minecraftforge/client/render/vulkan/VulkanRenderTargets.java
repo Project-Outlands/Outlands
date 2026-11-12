@@ -25,8 +25,31 @@ final class VulkanRenderTargets implements RenderTargets.Factory {
         this.depthFormat = depthFormat;
     }
 
+    /**
+     * The live targets, by the texture handle the game samples them with.
+     *
+     * <p>This is how a recorded target switch finds its attachments again: the frame's command stream carries the
+     * handle (a number, so the list stays backend-neutral) and the recorder resolves it here. A closed target is
+     * removed, so a switch to one is a missing entry and reported as such rather than drawing into freed memory.</p>
+     */
+    private final java.util.Map<Integer, VulkanRenderTarget> byTexture = new java.util.concurrent.ConcurrentHashMap<>();
+
     @Override
     public RenderTarget create(int width, int height, boolean useDepth) {
-        return new VulkanRenderTarget(context, textures, colorFormat, depthFormat, width, height, useDepth);
+        VulkanRenderTarget target =
+                new VulkanRenderTarget(context, textures, colorFormat, depthFormat, width, height, useDepth);
+        target.ownedBy(this);
+        byTexture.put(target.textureId(), target);
+        return target;
+    }
+
+    /** The target a handle refers to, or {@code null} when no live target has it. */
+    VulkanRenderTarget byTextureId(int textureId) {
+        return byTexture.get(textureId);
+    }
+
+    /** Called by a target when it is released. */
+    void forget(int textureId) {
+        byTexture.remove(textureId);
     }
 }

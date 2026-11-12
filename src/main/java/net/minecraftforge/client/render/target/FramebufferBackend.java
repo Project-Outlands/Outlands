@@ -27,6 +27,16 @@ public interface FramebufferBackend {
     void create(int width, int height, boolean useDepth);
 
     /**
+     * Whether this is the game's main framebuffer, whose colour attachment is the window's image.
+     *
+     * <p>The patched {@code Framebuffer} asks before it does anything that only makes sense for a target with its own
+     * image: clearing, binding the texture, compositing. For the window those are all the identity, so they keep the
+     * backend's own answers; for anything else the vanilla bodies run and route through the shim like every other
+     * draw.</p>
+     */
+    boolean isWindow();
+
+    /**
      * The texture handle the game binds to sample this target's colour attachment.
      *
      * <p>{@code ShaderManager} reads {@code Framebuffer.framebufferTexture} directly and binds that number, so the

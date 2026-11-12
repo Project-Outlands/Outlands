@@ -80,6 +80,11 @@ final class VulkanImage implements AutoCloseable {
         return format;
     }
 
+    /** The image itself, for a barrier. Drawing goes through the view; layouts are a property of the image. */
+    long image() {
+        return image;
+    }
+
     long view() {
         return view;
     }

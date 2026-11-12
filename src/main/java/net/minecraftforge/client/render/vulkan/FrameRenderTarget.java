@@ -16,6 +16,24 @@ interface FrameRenderTarget {
     /** Begins a rendering instance over this frame's attachments, preserving what is already there. */
     void beginRendering(VkCommandBuffer commandBuffer);
 
+    /**
+     * Makes this target's attachments valid to draw into.
+     *
+     * <p>A target that has been sampled by a shader is in the read-only layout, and one that was just created is in
+     * {@code UNDEFINED}; neither can be a colour attachment. Called before {@link #beginRendering} on every switch into
+     * this target. The window's implementation is empty - its attachments are put in place once per frame.</p>
+     */
+    void prepareForRendering(VkCommandBuffer commandBuffer);
+
+    /**
+     * Makes this target's colour attachment valid to sample.
+     *
+     * <p>Called when the frame switches away from this target, because that is the last moment the image is still in
+     * the attachment layout and the first moment its contents are finished. The window's implementation is empty: its
+     * image is presented, not sampled.</p>
+     */
+    void prepareForSampling(VkCommandBuffer commandBuffer);
+
     /** The colour image being drawn into, in the layout the instance leaves it in. */
     long colorImage();
 

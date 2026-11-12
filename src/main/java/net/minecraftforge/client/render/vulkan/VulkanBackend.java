@@ -59,9 +59,15 @@ public final class VulkanBackend implements RenderBackend {
     private VulkanTextures textureCache;
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
+
+    /** Whether to draw into an offscreen target and composite it back every frame. See {@link #selfTestComposite()}. */
+    private final boolean selfTestComposite =
+            "composite".equals(System.getProperty("outlands.render.selftest.targets"));
     /** Replays the game's own draws into the frame's rendering instance. */
     private VulkanStream stream;
     private VulkanRenderTargets renderTargets;
+    private net.minecraft.client.shader.Framebuffer selfTestFramebuffer;
+    private boolean selfTestReported;
     private long window;
     private boolean failed;
 
@@ -157,6 +163,7 @@ public final class VulkanBackend implements RenderBackend {
             renderTargets = new VulkanRenderTargets(context, textureCache, swapchain.imageFormat(),
                     swapchain.depthFormat());
             net.minecraftforge.client.render.target.RenderTargets.install(renderTargets);
+            stream.setRenderTargets(renderTargets);
             if (Boolean.getBoolean("outlands.render.selftest.targets")) {
                 // Allocates a target on the real device: the one part of this that a unit test cannot prove is that
                 // the validation layers accept a COLOR_ATTACHMENT|SAMPLED image and a DEPTH-aspect view, and that the
@@ -198,6 +205,9 @@ public final class VulkanBackend implements RenderBackend {
             if (stream != null && frameState != null) {
                 stream.setLightmapTexture(frameState.lightmapTexture());
             }
+            if (selfTestComposite) {
+                selfTestComposite();
+            }
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.
             swapchain.setPendingDraws(net.minecraftforge.client.render.vertex.FrameDraws.drain());
@@ -211,6 +221,77 @@ public final class VulkanBackend implements RenderBackend {
             failed = true;
             LOGGER.error("Vulkan frame failed; stopping presentation", e);
             close();
+        }
+    }
+
+    /**
+     * A framebuffer drawn into and composited back, once per frame, through the game's own code paths.
+     *
+     * <p>Gated by {@code -Doutlands.render.selftest.targets=composite}. What it proves is what a unit test cannot: the
+     * frame ends its rendering instance, moves the target's images between layouts, draws into them off-screen and
+     * composites the result over the window - on the real device, with the validation layers listening. A red square in
+     * the window's top-left corner is the expected picture; the square's position is also the orientation check, since
+     * a composited image that comes back upside down puts the square in the wrong corner.</p>
+     *
+     * <p><b>Why the vanilla objects.</b> {@code Framebuffer} is what the game uses: {@code framebufferClear} binds,
+     * clears and unbinds, and {@code framebufferRender} binds the target's texture and draws one textured quad through
+     * the Tessellator. Driving those means the test exercises the paths a shader group will use, rather than a
+     * parallel implementation that could agree with itself and disagree with the game.</p>
+     */
+    private void selfTestComposite() {
+        try {
+            if (selfTestFramebuffer == null) {
+                selfTestFramebuffer = new net.minecraft.client.shader.Framebuffer(256, 256, true);
+                selfTestFramebuffer.setFramebufferColor(1.0F, 0.0F, 0.0F, 1.0F);
+                selfTestFramebuffer.setFramebufferFilter(9728);
+                LOGGER.info("selftest: composite framebuffer {}x{} texture {}",
+                        selfTestFramebuffer.framebufferTextureWidth, selfTestFramebuffer.framebufferTextureHeight,
+                        selfTestFramebuffer.framebufferTexture);
+            }
+            selfTestFramebuffer.framebufferClear();
+            selfTestMarker();
+            selfTestFramebuffer.framebufferRender(256, 256);
+        } catch (RuntimeException e) {
+            // Reported once rather than every frame: the point of the self-test is a diagnosable state, not a log flood.
+            if (!selfTestReported) {
+                selfTestReported = true;
+                LOGGER.error("selftest: composite of an offscreen target failed", e);
+            }
+        }
+    }
+
+    /**
+     * Draws a green square at the target's top-left, through the ordinary vertex path.
+     *
+     * <p>The point is orientation: a target cleared to one colour cannot show whether the composite flipped it, but a
+     * marker in a corner can. The quad is drawn in the game's own coordinates - an ortho over the target's size with y
+     * pointing down, exactly as {@code framebufferRenderExt} sets up for its own quad - so if the composite is faithful
+     * the marker appears in the same corner of the window as it had in the target, and a flip shows up as the opposite
+     * corner.</p>
+     */
+    private void selfTestMarker() {
+        selfTestFramebuffer.bindFramebuffer(true);
+        try {
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.ortho(0.0, 256.0, 256.0, 0.0, 1000.0, 3000.0);
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
+            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
+            net.minecraft.client.renderer.GlStateManager.disableDepth();
+
+            net.minecraft.client.renderer.Tessellator tessellator =
+                    net.minecraft.client.renderer.Tessellator.getInstance();
+            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
+            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
+            buffer.pos(0.0, 96.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(96.0, 96.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(96.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(0.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
+            tessellator.draw();
+        } finally {
+            selfTestFramebuffer.unbindFramebuffer();
         }
     }
 
@@ -269,6 +350,10 @@ public final class VulkanBackend implements RenderBackend {
     @Override
     public void close() {
         net.minecraftforge.client.render.target.FrameRecordings.install(null);
+        if (selfTestFramebuffer != null) {
+            selfTestFramebuffer.deleteFramebuffer();
+            selfTestFramebuffer = null;
+        }
         if (renderTargets != null) {
             // The framebuffers that hold these targets outlive the backend - the game deletes its own after the
             // display goes away - so what is withdrawn here is only the ability to allocate more.

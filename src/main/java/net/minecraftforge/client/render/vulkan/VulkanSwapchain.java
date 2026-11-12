@@ -210,6 +210,19 @@ final class VulkanSwapchain {
                     org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_LOAD);
         }
 
+        /**
+         * Nothing to do: the frame's first instance already transitioned these attachments, and nothing moves them
+         * out of the attachment layout while the frame is running except a framebuffer copy, which puts them back.
+         */
+        @Override
+        public void prepareForRendering(VkCommandBuffer commandBuffer) {
+        }
+
+        /** Nothing to sample: the window's image is presented, not read by a shader. */
+        @Override
+        public void prepareForSampling(VkCommandBuffer commandBuffer) {
+        }
+
         @Override
         public long colorImage() {
             return images[imageIndex];
@@ -438,75 +451,27 @@ final class VulkanSwapchain {
     }
 
     private void beginRenderingInstance(VkCommandBuffer commandBuffer, int imageIndex, int colorLoadOp) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
-            // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over. A resumed
-            // instance ignores it, because a load op of LOAD does not consult the clear value.
-            float[] requested = recording != null
-                    ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
-            VkClearValue clearColor = VkClearValue.calloc(stack);
-            // Alpha is forced to 1, whatever the game asked for.
-            //
-            // The window is opaque, so the framebuffer's alpha is composited nowhere - except by the one thing that
-            // reads it back: the main menu's blur copies a region of the framebuffer into a texture and draws it with
-            // SRC_ALPHA blending. With a destination alpha of 0 every blurred layer is fully transparent and the
-            // sharp panorama underneath shows instead, which is exactly what this renderer was doing while the GL
-            // client showed a blurred background. Measured: the copied region's alpha was 0 in every frame.
-            //
-            // GL reaches alpha 1 by a different route - its default framebuffer reports opaque - so writing 1 here
-            // reproduces that, which is what makes the blur visible.
-            clearColor.color().float32(0, requested[0]).float32(1, requested[1]).float32(2, requested[2])
-                    .float32(3, 1.0F);
-            VkRenderingAttachmentInfo.Buffer colorAttachment = VkRenderingAttachmentInfo.calloc(1, stack);
-            colorAttachment.get(0)
-                    .sType$Default()
-                    .imageView(imageViews[imageIndex])
-                    .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
-                    .loadOp(colorLoadOp)
-                    .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                    .clearValue(clearColor);
-
-            VkClearValue clearDepth = VkClearValue.calloc(stack);
-            clearDepth.depthStencil()
-                    .depth((float) (recording != null ? recording.pendingClearDepth() : 1.0)).stencil(0);
-            VkRenderingAttachmentInfo depthAttachment = VkRenderingAttachmentInfo.calloc(stack)
-                    .sType$Default()
-                    .imageView(depthImageView)
-                    .imageLayout(VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
-                    // LOADed on resume as well: the blur reads colour, but a depth clear mid-frame would discard the
-                    // occlusion the earlier draws established for anything drawn afterwards.
-                    .loadOp(colorLoadOp)
-                    // STOREd, not discarded, for the same reason. A frame is not one instance: each framebuffer copy
-                    // in the main menu's blur closes the instance and opens another with LOAD. DONT_CARE leaves the
-                    // depth contents undefined when the instance ends, so the reopened instance loads depth nobody
-                    // wrote - and whether the panorama drawn into the corner survives that is up to the driver. The
-                    // symptom was a menu background that was a sharp off-screen panorama on one run and a blurred
-                    // flat colour on the next, from identical code.
-                    .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                    .clearValue(clearDepth);
-
-            VkRect2D renderArea = VkRect2D.calloc(stack);
-            renderArea.offset().x(0).y(0);
-            renderArea.extent().width(extentWidth).height(extentHeight);
-
-            VkRenderingInfo renderingInfo = VkRenderingInfo.calloc(stack)
-                    .sType$Default()
-                    .renderArea(renderArea)
-                    .layerCount(1)
-                    .pColorAttachments(colorAttachment)
-                    .pDepthAttachment(depthAttachment);
-            vkCmdBeginRendering(commandBuffer, renderingInfo);
-
-            // Viewport and scissor are dynamic state, so a resize never needs a new pipeline - and a resumed
-            // instance starts with them undefined, so they are set here rather than once per frame.
-            VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
-            viewport.get(0).x(0.0f).y(0.0f).width(extentWidth).height(extentHeight).minDepth(0.0f).maxDepth(1.0f);
-            vkCmdSetViewport(commandBuffer, 0, viewport);
-            VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
-            scissor.get(0).offset().x(0).y(0);
-            scissor.get(0).extent().width(extentWidth).height(extentHeight);
-            vkCmdSetScissor(commandBuffer, 0, scissor);
-        }
+        // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
+        // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over. A resumed instance
+        // ignores it, because a load op of LOAD does not consult the clear value.
+        float[] requested = recording != null
+                ? recording.pendingClearColor() : new float[] {0.0F, 0.0F, 0.0F, 1.0F};
+        // Alpha is forced to 1 for the window, whatever the game asked for.
+        //
+        // The window is opaque, so the framebuffer's alpha is composited nowhere - except by the one thing that reads
+        // it back: the main menu's blur copies a region of the framebuffer into a texture and draws it with
+        // SRC_ALPHA blending. With a destination alpha of 0 every blurred layer is fully transparent and the sharp
+        // panorama underneath shows instead, which is exactly what this renderer was doing while the GL client showed
+        // a blurred background. Measured: the copied region's alpha was 0 in every frame.
+        //
+        // GL reaches alpha 1 by a different route - its default framebuffer reports opaque - so writing 1 here
+        // reproduces that, which is what makes the blur visible. An offscreen target is the other way round: its alpha
+        // is what the entity outline's edge detection reads, so it keeps whatever the game cleared it to.
+        float depth = (float) (recording != null ? recording.pendingClearDepth() : 1.0);
+        // Depth is LOADed on resume as well: the blur reads colour, but a depth clear mid-frame would discard the
+        // occlusion the earlier draws established for anything drawn afterwards.
+        RenderInstance.begin(commandBuffer, imageViews[imageIndex], depthImageView, extentWidth, extentHeight,
+                colorLoadOp, requested, true, colorLoadOp, depth);
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {

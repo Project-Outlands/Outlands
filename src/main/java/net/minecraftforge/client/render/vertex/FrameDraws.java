@@ -27,7 +27,7 @@ import java.util.List;
 public final class FrameDraws {
 
     /** One thing the frame asked a backend to do, in the order it asked. */
-    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer, Clear {}
+    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer, Clear, TargetBind {}
 
     /**
      * One recorded draw: its vertices plus the state it was issued with.
@@ -120,6 +120,20 @@ public final class FrameDraws {
             }
         }
     }
+
+    /**
+     * A change of what the frame is drawing into, at its place in the sequence.
+     *
+     * <p><b>Why this is an operation and not a new frame.</b> Vanilla switches render targets while it builds a frame -
+     * a shadow or post-processing chain writes into one image, reads it, writes the next. The backend records such a
+     * frame later, in one command buffer, so the switch has to travel with the draws as another entry in the sequence:
+     * it means "end the rendering instance, move both images to their new layouts, open another one over this target".</p>
+     *
+     * <p><b>{@code target} is the texture handle</b> - the same number the game samples the target by - and {@code 0}
+     * means the window's image, which is where a frame starts and where it usually returns. A handle rather than an
+     * object because this list is backend-neutral: a GL backend replays the same sequence with {@code glBindFramebuffer}.</p>
+     */
+    public record TargetBind(int target, int width, int height, boolean setViewport) implements Operation {}
 
     /**
      * An attachment clear requested mid-frame.
@@ -279,6 +293,22 @@ public final class FrameDraws {
         }
         synchronized (LOCK) {
             ACTIVE_DRAWS.add(new Clear(mask, color, depth, scissorEnabled, scissorBox));
+        }
+        return true;
+    }
+
+    /**
+     * Adds a render-target switch at this point in the sequence.
+     *
+     * @param target the target's texture handle, or {@code 0} for the window's image
+     * @return {@code false} when nothing is collecting, which means there is no frame to switch inside
+     */
+    public static boolean recordTargetBind(int target, int width, int height, boolean setViewport) {
+        if (!collecting) {
+            return false;
+        }
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.add(new TargetBind(target, width, height, setViewport));
         }
         return true;
     }

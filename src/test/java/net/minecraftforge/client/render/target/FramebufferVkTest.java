@@ -1,5 +1,7 @@
 package net.minecraftforge.client.render.target;
 
+import net.minecraftforge.client.render.vertex.FrameDraws;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -144,25 +146,33 @@ class FramebufferVkTest {
     }
 
     @Test
-    void anOffscreenTargetSaysWhatIsMissingInsteadOfPretending() {
-        // The failure this prevents: silently treating an offscreen target as the window, which draws the game's
-        // picture into an image nothing shows and looks like a black screen with no explanation.
+    void anOffscreenTargetsBindAndUnbindAreRecordedAsSwitches() {
+        // What the frame recorder replays: end the instance, move both images between layouts, open another one.
+        // The handle travels in the operation, and 0 means the window's image - where a frame starts and returns.
         TestRecording recording = new TestRecording();
         FrameRecordings.install(recording);
+        FrameDraws.beginCollecting();
         try {
             FramebufferVk framebuffer = new FramebufferVk(false);
             framebuffer.create(300, 200, true);
+            int handle = framebuffer.textureId();
 
-            UnsupportedOperationException bind = assertThrows(UnsupportedOperationException.class,
-                    () -> framebuffer.bind(true));
-            assertTrue(bind.getMessage().contains("TargetBind"), "the message names the missing piece: " + bind.getMessage());
-            assertNotNull(framebuffer.target(), "the attachment itself is allocated, only the switch is missing");
+            framebuffer.bind(true);
+            framebuffer.unbind();
 
-            assertThrows(UnsupportedOperationException.class, framebuffer::clear);
-            assertThrows(UnsupportedOperationException.class, framebuffer::unbind);
-            assertThrows(UnsupportedOperationException.class, () -> framebuffer.render(300, 200, false));
-            assertTrue(!recording.targetDefault, "and none of it was recorded as the window's");
+            List<FrameDraws.Operation> ops = List.copyOf(FrameDraws.drain());
+            assertEquals(2, ops.size(), "one switch in, one out: " + ops);
+            assertTrue(ops.get(0) instanceof FrameDraws.TargetBind, "the first is the switch into the target");
+            FrameDraws.TargetBind into = (FrameDraws.TargetBind) ops.get(0);
+            assertEquals(handle, into.target());
+            assertEquals(300, into.width());
+            assertEquals(200, into.height());
+            assertTrue(into.setViewport(), "bindFramebuffer(true) asks for the viewport too");
+            assertTrue(ops.get(1) instanceof FrameDraws.TargetBind, "and the second is the switch back");
+            assertEquals(0, ((FrameDraws.TargetBind) ops.get(1)).target(), "0 is the window's image");
+            assertTrue(!recording.targetDefault, "none of it was recorded as the window's own target");
         } finally {
+            FrameDraws.beginCollecting();
             FrameRecordings.install(null);
         }
     }
@@ -178,9 +188,10 @@ class FramebufferVkTest {
 
     @Test
     void bindingAnOffscreenTargetWithNoFrameSaysSo() {
-        // Two different missing pieces, two different messages: the attachment exists, but there is no recording.
+        // Nothing is collecting, so there is no frame to put the switch in. Saying that is better than appending to a
+        // list nobody will replay.
         FrameRecordings.install(null);
-        FramebufferVk framebuffer = new FramebufferVk(true);
+        FramebufferVk framebuffer = new FramebufferVk(false);
         framebuffer.create(100, 100, false);
         UnsupportedOperationException failure = assertThrows(UnsupportedOperationException.class,
                 () -> framebuffer.bind(false));
