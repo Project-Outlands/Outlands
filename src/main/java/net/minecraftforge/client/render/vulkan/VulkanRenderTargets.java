@@ -48,6 +48,12 @@ final class VulkanRenderTargets implements RenderTargets.Factory {
         return byTexture.get(textureId);
     }
 
+    /** The layout a target's colour image is in, or -1 when the handle is not a target. */
+    int layoutOf(int textureId) {
+        VulkanRenderTarget target = byTexture.get(textureId);
+        return target == null ? -1 : target.currentLayout();
+    }
+
     /** Called by a target when it is released. */
     void forget(int textureId) {
         byTexture.remove(textureId);

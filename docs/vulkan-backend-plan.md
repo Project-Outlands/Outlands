@@ -2107,6 +2107,28 @@ viewport 翻转会翻转绕序，而"需要几面顺时针"取决于**总镜像�
 所以 `PipelineState` 的 front face 参数应当传 `current.flipsVertically()`，与 y 翻转分开。第一版把两者当成
 同一个布尔，blit 的 quad 直接被背面剔除掉（"画了但什么都没出现"）。
 
+#### S5 进行中：目标采样与端到端
+
+已经落地的部分（`docs` 这一节之前的 S1/S2 已给出目标与采样，S5 补的是"帧内被采样的目标一定在采样布局"这条不变量）：
+
+- `VulkanStream.resolve`（每帧开头、渲染实例打开之前）对**每个将被采样的目标**调一次 `prepareForSampling`。
+  帧内的布局迁移本来只由 `TargetBind` 的"离开方"负责，而一条绘制可以采样一个**本帧从未被离开过**的目标——
+  outline 链第一趟就读"实体画进去的那个目标"，那一帧它还没被任何切换离开过，于是它仍在 `UNDEFINED`。
+  validation 给的正是 `VUID-vkCmdDraw-None-09600`（"期待 SHADER_READ_ONLY_OPTIMAL，实际 UNDEFINED"）。
+  修法不是特判 outline，而是把不变量放在解析阶段：帧开始时凡是会被采样的目标都在采样布局。
+- 自检（`-Doutlands.render.selftest.outline=true`）用**真的** `shaders/post/entity_outline.json` 跑整条四趟链，
+  并在 `close()` 里删掉自己建的 group/framebuffer，否则关设备时 validation 会报
+  `VUID-vkDestroyDevice-device-05137`（对象没先释放）。
+
+现在的状态：四趟链跑通、目标布局正确、validation 零 error（关闭时那条已修）。**画面里仍看不到描边**，
+下一步排查顺序（都已具备工具）：
+
+1. 把 `final` 目标的内容读回来存成 PNG（`vkCmdCopyImageToBuffer` 对目标也适用，`Screenshots` 的读回路径可复用），
+   直接看链的输出：是"silhouette 没进目标"、"sobel 的 alpha 边为 0"、还是"blur 把 alpha 弄没了"。
+2. 若 silhouette 没进目标，检查 `renderOutlines` 那条路（实体用 `GlStateManager.color(...,0.3)` 画，颜色/alpha 全靠
+   固定管线状态，而 `glColorMaterial` 目前是显式不实现的）。
+3. 若链的输出正常而合成看不到，检查 `framebufferRenderExt` 的 uv/blend（它是流式路径，已知方向正确）。
+
 #### S5 目标作为 sampler + 端到端（大小：中）
 
 - 目标图像在 `unbind` 时转 `SHADER_READ_ONLY`，`descriptorSet(target.textureId)` 直接返回其 set。

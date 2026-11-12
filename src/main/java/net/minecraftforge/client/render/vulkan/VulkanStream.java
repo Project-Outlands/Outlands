@@ -236,6 +236,18 @@ final class VulkanStream implements AutoCloseable {
     }
 
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
+        if (renderTargets != null) {
+            // A target that will be sampled this frame is moved to the sampled layout here, before the rendering
+            // instance opens. Every in-frame transition belongs to a recorded TargetBind, and those cover a target
+            // being left - but a draw can sample a target that nothing bound this frame (the outline chain's first
+            // pass reads the framebuffer the entities were drawn into, which on the frame it is first used has never
+            // been left by a switch). Without this, that draw sampled an image still in UNDEFINED layout, which is
+            // what the validation layers reported as VUID-vkCmdDraw-None-09600.
+            VulkanRenderTarget sampled = renderTargets.byTextureId(texture);
+            if (sampled != null) {
+                sampled.prepareForSampling(commandBuffer);
+            }
+        }
         if (!resolved.containsKey(texture)) {
             long set = textures.descriptorSet(texture, commandBuffer, slot);
             resolved.put(texture, set);

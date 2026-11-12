@@ -727,6 +727,22 @@ public final class VulkanBackend implements RenderBackend {
             selfTestFramebuffer.deleteFramebuffer();
             selfTestFramebuffer = null;
         }
+        // The self-test objects are the backend's own, so they are released here. Anything the game created is a
+        // different matter: it deletes its framebuffers after the display is gone, which is why the factory is only
+        // withdrawn below rather than taking the targets with it.
+        if (selfTestOutlineGroup != null) {
+            selfTestOutlineGroup.deleteShaderGroup();
+            selfTestOutlineGroup = null;
+            selfTestOutlineTarget = null;
+        }
+        if (selfTestBlitShader != null) {
+            selfTestBlitShader.deleteShader();
+            selfTestBlitShader = null;
+        }
+        if (selfTestBlitIn != null) {
+            selfTestBlitIn.deleteFramebuffer();
+            selfTestBlitIn = null;
+        }
         if (renderTargets != null) {
             // The framebuffers that hold these targets outlive the backend - the game deletes its own after the
             // display goes away - so what is withdrawn here is only the ability to allocate more.

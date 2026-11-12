@@ -84,8 +84,10 @@ final class VulkanRenderTarget implements RenderTarget, FrameRenderTarget {
         this.currentLayout = org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
         this.depthInAttachmentLayout = false;
         textures.attachExternal(textureId, color.view(), width, height, textures.renderTargetSampler(glFilter));
-        LOGGER.info("render target {}x{} (depth={}) -> texture {}, format {}",
-                width, height, useDepth, textureId, colorFormat);
+        // The image handle is in the line because the validation layers report images, not handles: correlating a
+        // "this image is in the wrong layout" message with a target needs both numbers in the same place.
+        LOGGER.info("render target {}x{} (depth={}) -> texture {}, image 0x{}, format {}",
+                width, height, useDepth, textureId, Long.toHexString(color.image()), colorFormat);
     }
 
     /**
