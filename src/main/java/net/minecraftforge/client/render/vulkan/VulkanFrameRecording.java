@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.vulkan;
 
 import net.minecraftforge.client.render.target.FrameRecording;
+import net.minecraftforge.client.render.vertex.FrameDraws;
 
 /**
  * The requests vanilla makes of a frame, held until the frame is actually recorded.
@@ -30,6 +31,14 @@ final class VulkanFrameRecording implements FrameRecording {
         this.targetDefault = true;
         this.width = width;
         this.height = height;
+        // The window's image is where a frame starts, so asking for it is usually nothing to record. It stops being
+        // nothing the moment something switched away: from there on, every operation is still being recorded into the
+        // target that was left, and only this switch says otherwise. Without it the entity outline's composite was
+        // recorded into its own target - it sampled the image it was writing to, which is both invisible on screen and
+        // the layout mismatch the validation layers then reported.
+        if (FrameDraws.recordingTarget() != 0) {
+            FrameDraws.recordTargetBind(0, width, height, setViewport);
+        }
     }
 
     @Override

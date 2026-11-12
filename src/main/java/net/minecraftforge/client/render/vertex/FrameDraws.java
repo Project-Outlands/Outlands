@@ -152,6 +152,9 @@ public final class FrameDraws {
 
     private static final Object LOCK = new Object();
     private static final List<Operation> ACTIVE_DRAWS = new ArrayList<>(1024);
+
+    /** The target the recorded operations currently draw into; {@code 0} is the window's image. */
+    private static int recordingTarget;
     private static final List<Operation> DRAINED_DRAWS = new ArrayList<>(1024);
     private static final List<Draw> DRAW_POOL = new ArrayList<>(1024);
     private static int poolCursor = 0;
@@ -174,6 +177,7 @@ public final class FrameDraws {
         synchronized (LOCK) {
             ACTIVE_DRAWS.clear();
             poolCursor = 0;
+            recordingTarget = 0;
             collecting = true;
         }
     }
@@ -309,8 +313,23 @@ public final class FrameDraws {
         }
         synchronized (LOCK) {
             ACTIVE_DRAWS.add(new TargetBind(target, width, height, setViewport));
+            recordingTarget = target;
         }
         return true;
+    }
+
+    /**
+     * The target the operations recorded so far are drawing into, or {@code 0} for the window's image.
+     *
+     * <p>Needed because the window's image is the frame's default and binding it therefore records nothing on its own:
+     * a frame that switches into a target and back out has to know whether the way back is already implied or whether
+     * it has to be recorded. Without this, everything drawn after a switch back was still recorded into the target it
+     * had left - the composite of the entity outline went into the very framebuffer it was sampling.</p>
+     */
+    public static int recordingTarget() {
+        synchronized (LOCK) {
+            return recordingTarget;
+        }
     }
 
     /** How many operations are waiting. Diagnostics. */

@@ -100,6 +100,8 @@ public final class VulkanBackend implements RenderBackend {
     private net.minecraft.client.shader.ShaderGroup selfTestOutlineGroup;
     private net.minecraft.client.shader.Framebuffer selfTestOutlineTarget;
     private boolean selfTestOutlineReported;
+    /** Whether the target's contents have been read back to a file. Once is enough, and it costs a fence wait. */
+    private boolean selfTestOutlineCaptured;
     private net.minecraft.client.shader.Framebuffer selfTestBlitIn;
     private net.minecraft.client.shader.Shader selfTestBlitShader;
     private boolean selfTestBlitReported;
@@ -604,6 +606,24 @@ public final class VulkanBackend implements RenderBackend {
                 LOGGER.info("selftest: outline chain rendered (silhouette {}x{} at {},{} in a {}x{} frame)",
                         2 * half, 2 * half, (int) (cx - half), (int) (cy - half),
                         minecraft.displayWidth, minecraft.displayHeight);
+                // The target's own contents, read back into screenshots/, because the composite cannot answer the
+                // question this test exists for: a black window means either the silhouette never arrived or it was
+                // lost on the way out, and only the target itself distinguishes those two.
+                if (!selfTestOutlineCaptured && renderTargets != null) {
+                    VulkanRenderTarget capture =
+                            renderTargets.byTextureId(selfTestOutlineTarget.framebufferTexture);
+                    if (capture == null) {
+                        LOGGER.warn("selftest: the outline target's handle {} has no render target to read back",
+                                selfTestOutlineTarget.framebufferTexture);
+                    } else {
+                        selfTestOutlineCaptured = true;
+                        swapchain.captureTarget(capture, selfTestOutlineRaw
+                                ? "selftest-outline-raw.png" : "selftest-outline.png");
+                        LOGGER.info("selftest: reading the outline target {}x{} back to screenshots/{}",
+                                capture.width(), capture.height(), selfTestOutlineRaw
+                                        ? "selftest-outline-raw.png" : "selftest-outline.png");
+                    }
+                }
             }
         } catch (Exception e) {
             if (!selfTestOutlineReported) {

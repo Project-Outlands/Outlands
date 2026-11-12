@@ -53,6 +53,16 @@ interface FrameRenderTarget {
     /** The colour image being drawn into, in the layout the instance leaves it in. */
     long colorImage();
 
+    /**
+     * Records a copy of the colour attachment into host memory, for the diagnostics.
+     *
+     * <p>Only a real target implements it: the window's image is presented and read back by the screenshot path,
+     * which copies the swapchain image rather than going through this interface.</p>
+     *
+     * @param destination host-visible memory of at least {@code width * height * 4} bytes
+     */
+    void copyTo(VkCommandBuffer commandBuffer, long destination);
+
     /** The colour image's view, for the copy's subresource range. */
     long colorImageView();
 

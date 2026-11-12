@@ -174,6 +174,20 @@ final class VulkanSwapchain {
     private int screenshotWidth;
     private int screenshotHeight;
 
+    /**
+     * A render target whose contents the next frame is to be read back, for the self-tests.
+     *
+     * <p>A target's picture can only be read from inside a frame: the draws that painted it are commands in this
+     * frame's buffer. So the request is registered before {@link #drawFrame} and satisfied the same way a screenshot
+     * is - a copy into host memory after the last draw, then a file once the frame's fence has signalled.</p>
+     */
+    private FrameRenderTarget pendingCapture;
+    private String pendingCaptureName;
+    /** The capture the frame being recorded is copying out, until its fence has been waited on. */
+    private FrameRenderTarget captureTarget;
+    private String captureName;
+    private VulkanBuffer captureBuffer;
+
     private int extentHeight;
 
     private long[] images = new long[0];
@@ -232,6 +246,11 @@ final class VulkanSwapchain {
         @Override
         public long colorImage() {
             return images[imageIndex];
+        }
+
+        /** The window cannot be a capture target: the screenshot path reads its image directly. */
+        @Override
+        public void copyTo(VkCommandBuffer commandBuffer, long destination) {
         }
 
         @Override
@@ -310,6 +329,18 @@ final class VulkanSwapchain {
         this.pendingDraws = draws;
     }
 
+    /**
+     * Asks for a render target's contents to be written to a PNG at the end of the next frame.
+     *
+     * <p>For the outline self-test: the chain can be run to completion with a perfectly empty hand and nothing about
+     * the composite says so, which is why the target itself has to be readable. Called before
+     * {@link #setPendingDraws}, so the order the request is made in is the order the frame it describes is drawn in.</p>
+     */
+    void captureTarget(FrameRenderTarget target, String name) {
+        pendingCapture = target;
+        pendingCaptureName = name;
+    }
+
     void drawFrame(long window) {
         if (!outOfDate && windowSizeChanged(window)) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
@@ -360,6 +391,7 @@ final class VulkanSwapchain {
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
             // waiting here costs the player nothing.
             finishScreenshot(frame);
+            finishTargetCapture(frame);
         }
 
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
@@ -456,6 +488,51 @@ final class VulkanSwapchain {
         }
     }
 
+    /**
+     * Records a copy of a render target's colour attachment into host memory.
+     *
+     * <p>After the screenshot copy and still outside the rendering instance: the copy may not be recorded inside a
+     * pass, and the target's contents are final once the composite has read them.</p>
+     */
+    private void recordTargetCopy(VkCommandBuffer commandBuffer, MemoryStack stack) {
+        FrameRenderTarget target = captureTarget;
+        long bytes = (long) target.width() * target.height() * 4L;
+        if (bytes <= 0 || bytes > Integer.MAX_VALUE) {
+            net.minecraftforge.client.render.screenshot.Screenshots.failed(
+                    net.minecraftforge.client.render.screenshot.Screenshots.file(captureName, target.width(),
+                            target.height()),
+                    "a " + target.width() + "x" + target.height() + " target is not a size this backend can read back");
+            captureTarget = null;
+            captureName = null;
+            return;
+        }
+        captureBuffer = VulkanBuffer.createReadback(device, context, (int) bytes);
+        // No barrier on the buffer afterwards: the host read waits on the frame's fence, which is the same guarantee
+        // the screenshot path relies on.
+        target.copyTo(commandBuffer, captureBuffer.handle());
+    }
+
+    /** Writes out a captured target once the frame that copied it has finished. */
+    private void finishTargetCapture(int frame) {
+        if (captureTarget == null || captureBuffer == null) {
+            return;
+        }
+        FrameRenderTarget target = captureTarget;
+        String name = captureName;
+        captureTarget = null;
+        captureName = null;
+        try {
+            VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
+            byte[] bgra = captureBuffer.read(target.width() * target.height() * 4);
+            net.minecraftforge.client.render.screenshot.Screenshots.deliverWithAlpha(
+                    net.minecraftforge.client.render.screenshot.Screenshots.file(name, target.width(), target.height()),
+                    bgra, target.width(), target.height());
+        } finally {
+            captureBuffer.close();
+            captureBuffer = null;
+        }
+    }
+
     private void beginRenderingInstance(VkCommandBuffer commandBuffer, int imageIndex, int colorLoadOp) {
         // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
         // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over. A resumed instance
@@ -484,6 +561,12 @@ final class VulkanSwapchain {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
+        // A capture request belongs to this frame rather than to the next one: it names a target the draws recorded
+        // into this buffer just painted.
+        captureTarget = pendingCapture;
+        captureName = pendingCaptureName;
+        pendingCapture = null;
+        pendingCaptureName = null;
         VkCheck.check(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer");
         VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
                 .sType$Default()
@@ -565,6 +648,9 @@ final class VulkanSwapchain {
         pendingScreenshot = null;
         if (screenshot != null) {
             recordScreenshotCopy(commandBuffer, imageIndex, screenshot, stack);
+        }
+        if (captureTarget != null) {
+            recordTargetCopy(commandBuffer, stack);
         }
 
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
