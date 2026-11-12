@@ -137,7 +137,7 @@ final class FrameStateVk implements FrameState {
 
     // GL enumerants the combine stack is expressed in. Spelled out because the bug this replaced was a wrong
     // constant: 34164 is GL_CONSTANT, and GL_INTERPOLATE is 34165.
-    private static final int GL_TEXTURE_ENV = 0x2200;
+    private static final int GL_TEXTURE_ENV = 0x2300;
     private static final int GL_TEXTURE_ENV_MODE = 0x2200;
     private static final int GL_TEXTURE_ENV_COLOR = 0x2201;
     private static final int GL_COMBINE = 0x8570;

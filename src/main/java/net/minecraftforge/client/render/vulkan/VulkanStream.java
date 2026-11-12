@@ -304,6 +304,18 @@ final class VulkanStream implements AutoCloseable {
     /** Whether an outline-mode draw has been reported. Once is enough: the question is whether it happens at all. */
     private static boolean outlineDrawLogged;
 
+    /** Whether the frame chosen by the {@code targets} trigger has been traced. */
+    private static boolean tracedTargetFrame;
+
+    private static boolean hasTargetSwitch(List<FrameDraws.Operation> ops) {
+        for (FrameDraws.Operation op : ops) {
+            if (op instanceof FrameDraws.TargetBind bind && bind.target() != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static int framesReplayed;
 
     /**
@@ -321,6 +333,11 @@ final class VulkanStream implements AutoCloseable {
         if ("true".equalsIgnoreCase(value.trim())) {
             return 1;
         }
+        if ("targets".equalsIgnoreCase(value.trim())) {
+            // The first frame that switches into an offscreen target: that is the entity-outline pass, and it arrives
+            // at no predictable frame number.
+            return -1;
+        }
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
@@ -337,7 +354,14 @@ final class VulkanStream implements AutoCloseable {
             }
         }
         drawsThisFrame = draws.size();
-        boolean tracing = ++framesReplayed == traceFrame;
+        framesReplayed++;
+        boolean tracing;
+        if (traceFrame < 0) {
+            tracing = !tracedTargetFrame && hasTargetSwitch(ops);
+            tracedTargetFrame |= tracing;
+        } else {
+            tracing = framesReplayed == traceFrame;
+        }
         if (ops.isEmpty()) {
             return;
         }
@@ -482,6 +506,7 @@ final class VulkanStream implements AutoCloseable {
                                 + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest()
                                 + " cull=" + draw.state().cull()
                                 + " overlay=" + draw.state().overlayMode()
+                                + " colour=#" + Integer.toHexString(draw.state().colorArgb())
                                 + " program=" + (draw.state().program() == null ? "none"
                                         : String.valueOf(draw.state().program().id()));
                     } else if (op instanceof FrameDraws.FramebufferCopy copy) {

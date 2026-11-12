@@ -29,6 +29,32 @@ class FrameStateVkTest {
         return matrix.transform(new Vector4f(x, y, z, 1.0F));
     }
 
+    /**
+     * The outline mode's combine stack, as {@code GlStateManager.enableOutlineMode} sets it.
+     *
+     * <p>This is the state the entity-outline pass depends on: the lightmap unit replaces the light with the team
+     * colour and takes its alpha from the texture, which is what gives the silhouette an alpha step to trace. The
+     * sequence is copied from vanilla rather than simplified, because the whole question is whether the real one is
+     * recognised.</p>
+     */
+    @Test
+    void theOutlineCombineIsRecognisedAsOutlineMode() {
+        FrameStateVk state = new FrameStateVk();
+        int textureEnv = 8960;
+        // glTexEnv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, teamColour), as a buffer because that is the overload
+        state.texEnv(textureEnv, 8705, FloatBuffer.wrap(new float[] {1.0F, 1.0F, 1.0F, 1.0F}));
+        state.texEnvi(textureEnv, 8704, 34160);   // GL_TEXTURE_ENV_MODE = GL_COMBINE
+        state.texEnvi(textureEnv, 34161, 7681);   // GL_COMBINE_RGB = GL_REPLACE
+        state.texEnvi(textureEnv, 34176, 34166);  // GL_SOURCE0_RGB = GL_CONSTANT
+        state.texEnvi(textureEnv, 34192, 768);    // GL_OPERAND0_RGB = GL_SRC_COLOR
+        state.texEnvi(textureEnv, 34162, 7681);   // GL_COMBINE_ALPHA = GL_REPLACE
+        state.texEnvi(textureEnv, 34184, 5890);   // GL_SOURCE0_ALPHA = GL_TEXTURE
+        state.texEnvi(textureEnv, 34200, 770);    // GL_OPERAND0_ALPHA = GL_SRC_ALPHA
+
+        assertEquals(1, state.overlayMode(), "the combine stack vanilla sets for an outline is outline mode");
+        assertEquals(1.0F, state.overlayColor()[0], 0.0001F, "and the light is replaced with the team colour");
+    }
+
     @Test
     void allThirteenCapabilitiesAreKnown() {
         // The set is closed by the thirteen BooleanState constructions in vanilla. A backend switching on a value
