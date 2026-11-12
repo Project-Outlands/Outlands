@@ -70,10 +70,21 @@ void main() {
         lightAlpha = sampled.a;
     }
 
-    // Outline mode: GlStateManager.enableOutlineMode sets the lightmap unit's combine to GL_REPLACE with the team
-    // colour, and takes the alpha from the texture. So the light is replaced instead of mixed, and the alpha of the
-    // silhouette comes from the lightmap rather than from the vertex colour - which is what gives the entity-outline
-    // chain an alpha step to trace. Nothing here invents a colour: an opaque lightmap leaves alpha at 1.
+    // Outline mode: GlStateManager.enableOutlineMode sets one unit's combine to GL_REPLACE with the team colour.
+    // Which unit decides what disappears from the picture.
+    //
+    // Over the entity's own texture (the case that happens: the outline pass calls it with unit 0 active) the texture
+    // is replaced, so the silhouette is one flat colour - that is what a glowing entity looks like, and it is why
+    // multiplying the texture in here turned a white outline into the entity's own colour.
+    if (pc.overlayMode > 1.5) {
+        // The alpha still comes through the lightmap, as GL's modulate stage does: whatever the light contributes
+        // there multiplies alpha as well as colour, and leaving it out would invent an opacity the fixed pipeline
+        // never produced.
+        outColor = vec4(inColor.rgb * pc.overlayColor.rgb * light, sample4.a * inColor.a * lightAlpha);
+        return;
+    }
+    // Over a light: the texture stays, the light becomes the constant colour, and the silhouette's alpha comes from
+    // that light. Kept because a mod can configure the combiner this way, and the two are not the same picture.
     if (pc.overlayMode > 0.5) {
         outColor = vec4(sample4.rgb * inColor.rgb * pc.overlayColor.rgb,
                 sample4.a * inColor.a * lightAlpha);

@@ -38,7 +38,7 @@ class FrameStateVkTest {
      * recognised.</p>
      */
     @Test
-    void theOutlineCombineIsRecognisedAsOutlineMode() {
+    void theOutlineCombineOnUnitZeroReplacesTheTexture() {
         FrameStateVk state = new FrameStateVk();
         int textureEnv = 8960;
         // glTexEnv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, teamColour), as a buffer because that is the overload
@@ -51,8 +51,10 @@ class FrameStateVkTest {
         state.texEnvi(textureEnv, 34184, 5890);   // GL_SOURCE0_ALPHA = GL_TEXTURE
         state.texEnvi(textureEnv, 34200, 770);    // GL_OPERAND0_ALPHA = GL_SRC_ALPHA
 
-        assertEquals(1, state.overlayMode(), "the combine stack vanilla sets for an outline is outline mode");
-        assertEquals(1.0F, state.overlayColor()[0], 0.0001F, "and the light is replaced with the team colour");
+        // 2, not 1: with unit 0 active the *texture* is what gets replaced, and that is the difference between a
+        // white silhouette and one in the entity's own colour.
+        assertEquals(2, state.overlayMode(), "unit 0 with a replace combine means the texture is replaced");
+        assertEquals(1.0F, state.overlayColor()[0], 0.0001F, "and it is replaced with the team colour");
     }
 
     @Test

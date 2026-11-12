@@ -452,7 +452,14 @@ final class FrameStateVk implements FrameState {
      * renderers; that is a different combine function and it is not implemented here, so it stays un-applied rather
      * than being approximated into something that looks wrong.</p>
      */
-    /** 1 when the overlay is outline mode, 0 for the hurt-flash interpolate. */
+    /** The hurt-flash interpolate: the light is mixed towards the constant colour. */
+    private static final int OVERLAY_LIGHT_MIXED = 0;
+    /** Outline mode over a light unit: the light becomes the constant colour, the texture still multiplies. */
+    private static final int OVERLAY_LIGHT_REPLACED = 1;
+    /** Outline mode over unit 0: the texture is replaced by the constant colour, so the shape is one flat colour. */
+    private static final int OVERLAY_TEXTURE_REPLACED = 2;
+
+    /** One of the {@code OVERLAY_*} values: what the texture environment's combine stack is doing. */
     private int overlayMode;
 
     @Override
@@ -462,12 +469,20 @@ final class FrameStateVk implements FrameState {
 
     private void updateOverlayColor() {
         for (int unit = 0; unit < TEXTURE_UNITS; unit++) {
-            // Outline mode: GlStateManager.enableOutlineMode sets this unit to GL_REPLACE with the constant colour as
-            // source 0, so the light becomes the team colour and the silhouette's alpha comes from the lightmap. That
-            // is how a glowing entity gets a shape for entity_sobel to trace - the colour is replaced, nothing is mixed.
+            // Outline mode: GlStateManager.enableOutlineMode sets the *active* unit to GL_REPLACE with the constant
+            // colour as source 0. Which unit that is changes what the replacement replaces, and the two cases are not
+            // the same picture:
+            //
+            // - unit 0 is the entity's own texture, so replacing it makes the silhouette one flat colour. That is the
+            //   glowing-entity outline vanilla produces, and it is the case that actually happens: RenderHelper's
+            //   enableStandardItemLighting ends by making unit 0 active, and enableOutlineMode is called right after.
+            // - any other unit is a light, so replacing it tints the silhouette instead of flattening it.
+            //
+            // Measured, treating both as "the light was replaced": the outline appeared in the entity's texture colour
+            // - a dark ring for a dark-textured entity - where the GL client shows a flat team-coloured one.
             if (texEnvMode[unit] == GL_COMBINE && texCombineRgb[unit] == 7681 /* GL_REPLACE */) {
                 System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
-                overlayMode = 1;
+                overlayMode = unit == 0 ? OVERLAY_TEXTURE_REPLACED : OVERLAY_LIGHT_REPLACED;
                 return;
             }
             if (texEnvMode[unit] == GL_COMBINE
@@ -477,11 +492,11 @@ final class FrameStateVk implements FrameState {
                     && texSource2Rgb[unit] == GL_CONSTANT
                     && texOperand2Rgb[unit] == GL_SRC_ALPHA) {
                 System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
-                overlayMode = 0;
+                overlayMode = OVERLAY_LIGHT_MIXED;
                 return;
             }
         }
-        overlayMode = 0;
+        overlayMode = OVERLAY_LIGHT_MIXED;
         overlayColor[0] = 0.0F;
         overlayColor[1] = 0.0F;
         overlayColor[2] = 0.0F;
