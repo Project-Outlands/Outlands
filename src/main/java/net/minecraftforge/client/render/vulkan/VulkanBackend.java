@@ -280,19 +280,38 @@ public final class VulkanBackend implements RenderBackend {
             net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
             net.minecraft.client.renderer.GlStateManager.disableTexture2D();
             net.minecraft.client.renderer.GlStateManager.disableDepth();
+            // Culling is left as the game has it: an offscreen target's viewport is inverted, which inverts the
+            // winding, so a visible marker is also the proof that the pipeline's front face follows the target.
 
             net.minecraft.client.renderer.Tessellator tessellator =
                     net.minecraft.client.renderer.Tessellator.getInstance();
             net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
             buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
-            buffer.pos(0.0, 96.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(96.0, 96.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(96.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(0.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(0.0, 96.0, 0.0).color(0, 120, 255, 255).endVertex();
+            buffer.pos(96.0, 96.0, 0.0).color(0, 120, 255, 255).endVertex();
+            buffer.pos(96.0, 0.0, 0.0).color(0, 120, 255, 255).endVertex();
+            buffer.pos(0.0, 0.0, 0.0).color(0, 120, 255, 255).endVertex();
             tessellator.draw();
+            if (!selfTestReported) {
+                selfTestReported = true;
+                net.minecraftforge.client.render.vertex.DrawState state =
+                        net.minecraftforge.client.render.vertex.DrawState.current();
+                float[] mvp = state.mvp();
+                LOGGER.info("selftest: marker draw viewport={} mvp row0={} row1={} row2={} row3={}",
+                        java.util.Arrays.toString(state.viewport()),
+                        mvp[0] + "/" + mvp[1] + "/" + mvp[2] + "/" + mvp[3],
+                        mvp[4] + "/" + mvp[5] + "/" + mvp[6] + "/" + mvp[7],
+                        mvp[8] + "/" + mvp[9] + "/" + mvp[10] + "/" + mvp[11],
+                        mvp[12] + "/" + mvp[13] + "/" + mvp[14] + "/" + mvp[15]);
+            }
         } finally {
             selfTestFramebuffer.unbindFramebuffer();
         }
+    }
+
+    /** Prints one line of the self-test's operation trace. */
+    static void logOperation(String kind, String detail) {
+        LOGGER.info("selftest: op {} {}", kind, detail);
     }
 
     /** Creates, resizes and releases a render target, reporting what the device said. Gated by a system property. */

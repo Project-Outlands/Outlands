@@ -118,6 +118,7 @@ final class VulkanStream implements AutoCloseable {
     private int cachedSrcAlpha;
     private int cachedDstAlpha;
     private int cachedChannels;
+    private boolean cachedFlipsWinding;
     private VulkanPipeline cachedPipeline;
 
     private ByteBuffer hostVboStaging;
@@ -225,6 +226,16 @@ final class VulkanStream implements AutoCloseable {
     void setRenderTargets(VulkanRenderTargets targets) {
         this.renderTargets = targets;
     }
+
+    /**
+     * One-shot trace of a frame's operations, under {@code -Doutlands.render.trace.ops=true}.
+     *
+     * <p>Null once it has printed, because a frame's operation list is hundreds of entries and only the first one is
+     * interesting. This is how the target-switch ordering was verified: the list is the whole contract between the
+     * game's frame and the recorder, so reading it back is often faster than reasoning about what should have been
+     * recorded.</p>
+     */
+    private static Boolean traceOps = Boolean.getBoolean("outlands.render.trace.ops") ? Boolean.TRUE : null;
 
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget windowTarget) {
@@ -358,6 +369,35 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
+            if (traceOps != null) {
+                traceOps = null;
+                for (FrameDraws.Operation op : ops) {
+                    String detail;
+                    if (op instanceof FrameDraws.TargetBind bind) {
+                        detail = "target=" + bind.target() + " " + bind.width() + "x" + bind.height();
+                    } else if (op instanceof FrameDraws.Clear clear) {
+                        detail = "mask=" + clear.mask() + " color=" + java.util.Arrays.toString(clear.color())
+                                + " scissor=" + clear.scissorEnabled() + " " + java.util.Arrays.toString(clear.scissorBox());
+                    } else if (op instanceof FrameDraws.Draw draw) {
+                        java.nio.FloatBuffer f = java.nio.ByteBuffer.wrap(draw.vertices())
+                                .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+                        int stride = draw.layout().stride() / 4;
+                        detail = "v0=(" + f.get(0) + "," + f.get(1) + "," + f.get(2) + ")"
+                                + " v2=(" + f.get(stride * 2) + "," + f.get(stride * 2 + 1) + "," + f.get(stride * 2 + 2) + ")"
+                                + " vertices=" + draw.vertexCount() + " texture=" + draw.state().texture()
+                                + " viewport=" + java.util.Arrays.toString(draw.state().viewport())
+                                + " scissor=" + draw.state().scissorEnabled() + " "
+                                + java.util.Arrays.toString(draw.state().scissor())
+                                + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest();
+                    } else if (op instanceof FrameDraws.FramebufferCopy copy) {
+                        detail = "texture=" + copy.texture() + " " + copy.width() + "x" + copy.height();
+                    } else {
+                        detail = "";
+                    }
+                    net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation(op.getClass().getSimpleName(),
+                            detail);
+                }
+            }
             // What the instance is currently open over. A frame starts on the window's image and every switch moves it.
             FrameRenderTarget current = windowTarget;
             for (FrameDraws.Operation op : ops) {
@@ -489,8 +529,10 @@ final class VulkanStream implements AutoCloseable {
                         | (mask[2] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT : 0)
                         | (mask[3] ? org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT : 0);
 
+                // Read once per draw: an offscreen target inverts the viewport, hence the winding, hence the front face.
+                boolean targetFlipsWinding = current.flipsVertically();
                 VulkanPipeline pipeline;
-                if (cachedPipeline != null && topo == cachedTopology
+                if (cachedPipeline != null && topo == cachedTopology && targetFlipsWinding == cachedFlipsWinding
                         && ds.depthTest() == cachedDepthTest && ds.depthWrite() == cachedDepthWrite
                         && ds.depthFunc() == cachedDepthFunc && ds.blend() == cachedBlend && ds.cull() == cachedCull
                         && ds.blendSourceRgb() == cachedSrcRgb && ds.blendDestinationRgb() == cachedDstRgb
@@ -501,7 +543,7 @@ final class VulkanStream implements AutoCloseable {
                     VulkanPipeline.PipelineState ps = new VulkanPipeline.PipelineState(topo,
                             ds.depthTest(), ds.depthWrite(), ds.depthFunc(), ds.blend(), ds.cull(),
                             ds.blendSourceRgb(), ds.blendDestinationRgb(), ds.blendSourceAlpha(),
-                            ds.blendDestinationAlpha(), channels);
+                            ds.blendDestinationAlpha(), channels, targetFlipsWinding);
                     pipeline = pipelineFor(ps);
                     cachedTopology = topo;
                     cachedDepthTest = ds.depthTest();
@@ -514,6 +556,7 @@ final class VulkanStream implements AutoCloseable {
                     cachedSrcAlpha = ds.blendSourceAlpha();
                     cachedDstAlpha = ds.blendDestinationAlpha();
                     cachedChannels = channels;
+                    cachedFlipsWinding = targetFlipsWinding;
                     cachedPipeline = pipeline;
                 }
                 if (pipeline.handle() != boundPipeline) {
@@ -588,8 +631,16 @@ final class VulkanStream implements AutoCloseable {
                     System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
                     lastPushedLayout = curLayout;
                 }
-                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), viewportWidth, viewportHeight);
-                applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), viewportWidth, viewportHeight);
+                // Both rectangles are in the *bound target's* coordinates: GL's viewport and scissor count their y
+                // from the bottom of whichever framebuffer is current, so the flip has to use that target's height.
+                // Using the window's was a real bug: a 256-high viewport inside a 480-high frame was placed at
+                // y = 480 - 256 = 224 in a 256-tall target, leaving one eighth of it visible - a 96x96 quad came out
+                // 96x32, which is exactly what the composite self-test showed.
+                int targetWidth = current.width();
+                int targetHeight = current.height();
+                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
+                        current.flipsVertically());
+                applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), targetWidth, targetHeight);
                 if (textureSets[indexOfOp] != boundSet) {
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
                             stack.longs(textureSets[indexOfOp]), null);
@@ -620,7 +671,8 @@ final class VulkanStream implements AutoCloseable {
      * find it, rather than in the top-left where a straight copy of the numbers would put it.</p>
      */
     private static void applyViewport(VkCommandBuffer commandBuffer, org.lwjgl.vulkan.VkViewport.Buffer viewport,
-                                      int[] applied, DrawState state, int frameWidth, int frameHeight) {
+                                      int[] applied, DrawState state, int frameWidth, int frameHeight,
+                                      boolean flipVertically) {
         int x = 0;
         int y = 0;
         int width = frameWidth;
@@ -631,6 +683,12 @@ final class VulkanStream implements AutoCloseable {
             y = frameHeight - box[1] - box[3];
             width = box[2];
             height = box[3];
+        }
+        if (flipVertically) {
+            // A negative height is Vulkan's own way to invert y (core since 1.1), and it is the closest thing to GL's
+            // bottom-up target: the same draw lands in the rows a GL driver would put it in.
+            y = y + height;
+            height = -height;
         }
         if (applied[0] == x && applied[1] == y && applied[2] == width && applied[3] == height) {
             return;

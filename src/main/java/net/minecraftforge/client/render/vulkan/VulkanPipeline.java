@@ -107,7 +107,8 @@ final class VulkanPipeline implements AutoCloseable {
      * @param dstAlpha   the GL destination blend factor for alpha
      */
     record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, int depthFunc, boolean blend,
-                         boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask) {
+                         boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask,
+                         boolean flippedWinding) {
         /** Every colour channel, which is what a pipeline built without a mask writes. */
         static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                 | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -115,13 +116,13 @@ final class VulkanPipeline implements AutoCloseable {
         /** The state the terrain phase has always used for opaque and cutout geometry. */
         static PipelineState terrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, 515, false, true,
-                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS);
+                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS, false);
         }
 
         /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
         static PipelineState translucentTerrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, 515, true, true,
-                    770, 771, 1, 0, ALL_CHANNELS);
+                    770, 771, 1, 0, ALL_CHANNELS, false);
         }
     }
 
@@ -324,7 +325,13 @@ final class VulkanPipeline implements AutoCloseable {
                 .sType$Default()
                 .polygonMode(org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL)
                 .cullMode(state.cull() ? VK_CULL_MODE_BACK_BIT : org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE)
-                .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                // An offscreen target is drawn with an inverted viewport so that its image ends up in GL's bottom-up
+                // order, and inverting y inverts which side of a triangle is counter-clockwise: a quad that was front
+                // facing becomes back facing and gets culled away. The front face is part of the pipeline state for
+                // that reason - measured, the self-test's marker disappeared entirely while culling was on.
+                .frontFace(state.flippedWinding()
+                        ? org.lwjgl.vulkan.VK10.VK_FRONT_FACE_CLOCKWISE
+                        : VK_FRONT_FACE_COUNTER_CLOCKWISE)
                 .lineWidth(1.0f);
 
         VkPipelineMultisampleStateCreateInfo multisample = VkPipelineMultisampleStateCreateInfo.calloc(stack)

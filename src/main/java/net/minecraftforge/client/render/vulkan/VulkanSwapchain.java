@@ -223,6 +223,12 @@ final class VulkanSwapchain {
         public void prepareForSampling(VkCommandBuffer commandBuffer) {
         }
 
+        /** No: the window's row 0 is the top of the screen, which is what the game's projection already produces. */
+        @Override
+        public boolean flipsVertically() {
+            return false;
+        }
+
         @Override
         public long colorImage() {
             return images[imageIndex];

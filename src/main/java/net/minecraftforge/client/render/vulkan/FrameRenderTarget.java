@@ -34,6 +34,22 @@ interface FrameRenderTarget {
      */
     void prepareForSampling(VkCommandBuffer commandBuffer);
 
+    /**
+     * Whether drawing into this target needs the viewport's y inverted.
+     *
+     * <p><b>Why a target differs from the window.</b> The game's projection puts the top of the screen at NDC
+     * {@code -1}, which is Vulkan's own convention and lands at row 0 of a framebuffer - correct for the window, whose
+     * row 0 is the top of the display. A render target is not displayed: its image is <i>sampled</i>, and GL's texture
+     * convention has v=0 at the bottom, which is what every one of vanilla's post-processing shaders assumes - the
+     * entity outline's vertex stages all end with {@code texCoord.y = 1.0 - y}. Without the flip the image comes out
+     * vertically mirrored relative to what those shaders expect, which a symmetric edge detector hides and the final
+     * composite shows as an outline offset from the thing it outlines.</p>
+     *
+     * <p>Measured, before this existed: a quad drawn at the top of a 256x256 target came back at the bottom of the
+     * composited image, and a GL client puts it at the top.</p>
+     */
+    boolean flipsVertically();
+
     /** The colour image being drawn into, in the layout the instance leaves it in. */
     long colorImage();
 

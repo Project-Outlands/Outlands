@@ -228,6 +228,12 @@ final class VulkanRenderTarget implements RenderTarget, FrameRenderTarget {
         currentLayout = org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
+    /** Yes: this image is sampled by vanilla's post-processing shaders, which assume GL's bottom-up texture origin. */
+    @Override
+    public boolean flipsVertically() {
+        return true;
+    }
+
     @Override
     public void beginRendering(VkCommandBuffer commandBuffer) {
         // LOAD both attachments: the game cleared the target when it wanted it cleared, and a switch into a target
