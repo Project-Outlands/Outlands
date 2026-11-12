@@ -48,6 +48,17 @@ final class VulkanRenderTargets implements RenderTargets.Factory {
         return byTexture.get(textureId);
     }
 
+    /**
+     * Every live target, in no particular order.
+     *
+     * <p>For the read-everything diagnostic: which target the silhouette reached is not always known in advance - a
+     * shader group the game built for itself is not reachable by name from the backend - and there are only a
+     * handful of them.</p>
+     */
+    java.util.List<VulkanRenderTarget> all() {
+        return new java.util.ArrayList<>(byTexture.values());
+    }
+
     /** The layout a target's colour image is in, or -1 when the handle is not a target. */
     int layoutOf(int textureId) {
         VulkanRenderTarget target = byTexture.get(textureId);

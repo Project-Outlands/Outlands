@@ -83,6 +83,19 @@ public final class VulkanBackend implements RenderBackend {
      * picture in a file is a far better argument than a log line that says the draw was recorded.</p>
      */
     private final int screenshotFrame = Integer.getInteger("outlands.render.shot.frame", 0);
+    /**
+     * A frame on which to read every render target back, under
+     * {@code -Doutlands.render.selftest.capture.targets=N}.
+     *
+     * <p>The frame matters: a world's outline pass only exists once a glowing entity is in view, and a shader group the
+     * game built for itself cannot be addressed by name from here. Reading all targets on one chosen frame shows which
+     * of them the silhouette reached and which stayed empty.</p>
+     */
+    private final int captureAllTargetsFrame =
+            Integer.getInteger("outlands.render.selftest.capture.targets", 0);
+    /** How often to repeat that readback, so a run does not have to land on one exact frame. Zero means once. */
+    private final int captureAllTargetsEvery =
+            Integer.getInteger("outlands.render.selftest.capture.every", 0);
     private int framesPresented;
     /**
      * Whether to run the game's own {@code blit} program over a render target. See {@link #selfTestBlit()}.
@@ -261,6 +274,17 @@ public final class VulkanBackend implements RenderBackend {
                 net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
                 net.minecraftforge.client.render.screenshot.Screenshots.request(minecraft.displayWidth,
                         minecraft.displayHeight, "shot-frame" + framesPresented + ".png");
+            }
+            if (captureAllTargetsFrame > 0 && framesPresented >= captureAllTargetsFrame
+                    && renderTargets != null && swapchain != null
+                    && (captureAllTargetsEvery <= 0
+                            ? framesPresented == captureAllTargetsFrame
+                            : (framesPresented - captureAllTargetsFrame) % captureAllTargetsEvery == 0)) {
+                java.util.List<VulkanRenderTarget> targets = renderTargets.all();
+                for (VulkanRenderTarget target : targets) {
+                    swapchain.captureTarget(target, "selftest-target-" + target.textureId() + ".png");
+                }
+                LOGGER.info("selftest: reading {} render targets back on frame {}", targets.size(), framesPresented);
             }
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.

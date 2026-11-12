@@ -299,7 +299,31 @@ final class VulkanStream implements AutoCloseable {
      * game's frame and the recorder, so reading it back is often faster than reasoning about what should have been
      * recorded.</p>
      */
-    private static Boolean traceOps = Boolean.getBoolean("outlands.render.trace.ops") ? Boolean.TRUE : null;
+    private static final int traceFrame = traceFrame();
+
+    private static int framesReplayed;
+
+    /**
+     * Which frame's operations to trace, from {@code -Doutlands.render.trace.ops=N}.
+     *
+     * <p>A frame number rather than a flag because the interesting frame is not always the first one: the
+     * entity-outline pass only runs once a world is loaded and a glowing entity is in view, which is never frame one.
+     * {@code =true} keeps its old meaning - the first frame.</p>
+     */
+    private static int traceFrame() {
+        String value = System.getProperty("outlands.render.trace.ops");
+        if (value == null || value.isEmpty()) {
+            return 0;
+        }
+        if ("true".equalsIgnoreCase(value.trim())) {
+            return 1;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
 
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget windowTarget) {
@@ -310,6 +334,7 @@ final class VulkanStream implements AutoCloseable {
             }
         }
         drawsThisFrame = draws.size();
+        boolean tracing = ++framesReplayed == traceFrame;
         if (ops.isEmpty()) {
             return;
         }
@@ -433,8 +458,7 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
-            if (traceOps != null) {
-                traceOps = null;
+            if (tracing) {
                 for (FrameDraws.Operation op : ops) {
                     String detail;
                     if (op instanceof FrameDraws.TargetBind bind) {
@@ -454,6 +478,7 @@ final class VulkanStream implements AutoCloseable {
                                 + java.util.Arrays.toString(draw.state().scissor())
                                 + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest()
                                 + " cull=" + draw.state().cull()
+                                + " overlay=" + draw.state().overlayMode()
                                 + " program=" + (draw.state().program() == null ? "none"
                                         : String.valueOf(draw.state().program().id()));
                     } else if (op instanceof FrameDraws.FramebufferCopy copy) {
@@ -640,7 +665,7 @@ final class VulkanStream implements AutoCloseable {
                         throw new IllegalStateException("a draw carries program " + ds.program().id()
                                 + " but no program cache is installed");
                     }
-                    if (programTrace.add(ds.program().id())) {
+                    if (tracing && programTrace.add(ds.program().id())) {
                         net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation("Program",
                                 "program=" + ds.program().id() + " vertices=" + draw.vertexCount()
                                         + " samplers=" + java.util.Arrays.toString(ds.programSamplers())
