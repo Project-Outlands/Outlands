@@ -2049,7 +2049,11 @@ v=0 在底部 —— 原版每一个后处理着色器都这么假设（`sobel.v
 450，一个 plain uniform + 一个显式 `(set=1,binding=0)` 的 sampler），把左半屏画成 75% 透明的全景图。
 alpha 取 0.75 是刻意的：block 没上传的话 quad 全透明、只在日志里留痕；上传了就能在主菜单上看出左半屏被"蒙住"。
 实测日志：`program 1 linked, block 16 bytes at set 0 binding 0, vertex inputs [0, 2], samplers [DiffuseSampler@1:0]`，
-画面左半屏为半透明全景图，validation 零 error 零 warning。
+画面左半屏为半透明全景图（`screenshots/shot-frame150.png`），validation 零 error 零 warning
+（日志里关于 `Outlands|Vulkan` 只有"validation layers are active"一条 INFO）。
+
+那条半透明左下/左半屏的方块**是自检本身**，不是回归：它用 0.75 的 alpha 正是为了让"uniform 有没有上传"变成
+画面上的差别。不带 `-Doutlands.render.selftest.program=true` 启动时它不会出现。
 
 **截图钩子**：`-Doutlands.render.shot.frame=N` 在第 N 帧（1 起）用后端自己的读回路径存一张 PNG 到
 `screenshots/`。桌面截图工具不一定看得见 Vulkan 窗口（这台机器上 X11/XWayland 与 KDE portal 抓到的是纯白/纯黑），
