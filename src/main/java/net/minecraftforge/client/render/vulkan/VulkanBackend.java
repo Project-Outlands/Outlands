@@ -282,7 +282,8 @@ public final class VulkanBackend implements RenderBackend {
                             : (framesPresented - captureAllTargetsFrame) % captureAllTargetsEvery == 0)) {
                 java.util.List<VulkanRenderTarget> targets = renderTargets.all();
                 for (VulkanRenderTarget target : targets) {
-                    swapchain.captureTarget(target, "selftest-target-" + target.textureId() + ".png");
+                    swapchain.captureTarget(target, "selftest-target-" + target.textureId()
+                            + "-" + target.width() + "x" + target.height() + ".png");
                 }
                 LOGGER.info("selftest: reading {} render targets back on frame {}", targets.size(), framesPresented);
             }
