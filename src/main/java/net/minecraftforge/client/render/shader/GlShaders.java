@@ -696,9 +696,32 @@ public final class GlShaders {
         }
     }
 
-    /** The program whose uniform table holds {@code location}. Locations are per program, so this is a lookup. */
+    /**
+     * The program a uniform location belongs to, asked of the bound program first.
+     *
+     * <p><b>Why the bound program decides.</b> GL's uniform locations are the program's, not the renderer's, and are
+     * only meaningful while that program is bound. The locations themselves are small integers handed out from 1 for
+     * every program, so scanning every program in turn gave the write to whichever one happened to come first in the
+     * map - a shader group's {@code ProjMat} was written into the main menu's program instead. Measured: the entity
+     * outline's uniform block was all zeros, so its vertex stage produced a degenerate quad, every pass of the chain
+     * drew nothing, and nothing about the result said why - no validation error, no warning, just an empty picture.</p>
+     *
+     * <p>The scan behind it is for the one case the game does on purpose: writing a uniform before binding the
+     * program, which the self-tests do to set a value up front.</p>
+     */
     private static Program programOf(int location) {
+        Program bound = PROGRAMS.get(currentProgram);
+        if (bound != null) {
+            for (Uniform uniform : bound.uniforms) {
+                if (uniform.location() == location) {
+                    return bound;
+                }
+            }
+        }
         for (Program program : PROGRAMS.values()) {
+            if (program == bound) {
+                continue;
+            }
             for (Uniform uniform : program.uniforms) {
                 if (uniform.location() == location) {
                     return program;
@@ -713,11 +736,13 @@ public final class GlShaders {
     }
 
     private static Uniform uniformAt(int location) {
-        for (Program program : PROGRAMS.values()) {
-            for (Uniform uniform : program.uniforms) {
-                if (uniform.location() == location) {
-                    return uniform;
-                }
+        Program program = programOf(location);
+        if (program == null) {
+            return null;
+        }
+        for (Uniform uniform : program.uniforms) {
+            if (uniform.location() == location) {
+                return uniform;
             }
         }
         return null;

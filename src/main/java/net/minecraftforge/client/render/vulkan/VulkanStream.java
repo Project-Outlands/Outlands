@@ -237,6 +237,15 @@ final class VulkanStream implements AutoCloseable {
         updateLightmapDescriptor(commandBuffer, slot);
     }
 
+    /** The uniform block as floats, for the trace. A read-only view has no backing array, so it is copied. */
+    private static float[] blockFloats(byte[] block) {
+        java.nio.FloatBuffer floats = java.nio.ByteBuffer.wrap(block)
+                .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+        float[] values = new float[floats.remaining()];
+        floats.get(values);
+        return values;
+    }
+
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
         if (renderTargets != null) {
             // A target that will be sampled this frame is moved to the sampled layout here, before the rendering
@@ -443,7 +452,10 @@ final class VulkanStream implements AutoCloseable {
                                 + " viewport=" + java.util.Arrays.toString(draw.state().viewport())
                                 + " scissor=" + draw.state().scissorEnabled() + " "
                                 + java.util.Arrays.toString(draw.state().scissor())
-                                + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest();
+                                + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest()
+                                + " cull=" + draw.state().cull()
+                                + " program=" + (draw.state().program() == null ? "none"
+                                        : String.valueOf(draw.state().program().id()));
                     } else if (op instanceof FrameDraws.FramebufferCopy copy) {
                         detail = "texture=" + copy.texture() + " " + copy.width() + "x" + copy.height();
                     } else {
@@ -634,7 +646,9 @@ final class VulkanStream implements AutoCloseable {
                                         + " samplers=" + java.util.Arrays.toString(ds.programSamplers())
                                         + " block=" + ds.programBlock().length
                                         + " viewport=" + java.util.Arrays.toString(ds.viewport())
-                                        + " target=" + targetWidth + "x" + targetHeight);
+                                            + " target=" + targetWidth + "x" + targetHeight
+                                            + " flipsViewport=" + programFlips + " flippedWinding=" + programWinding
+                                            + " block=" + java.util.Arrays.toString(blockFloats(ds.programBlock())));
                     }
                     applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                             programFlips);

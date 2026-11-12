@@ -606,22 +606,17 @@ public final class VulkanBackend implements RenderBackend {
                 LOGGER.info("selftest: outline chain rendered (silhouette {}x{} at {},{} in a {}x{} frame)",
                         2 * half, 2 * half, (int) (cx - half), (int) (cy - half),
                         minecraft.displayWidth, minecraft.displayHeight);
-                // The target's own contents, read back into screenshots/, because the composite cannot answer the
+                // The targets' own contents, read back into screenshots/, because the composite cannot answer the
                 // question this test exists for: a black window means either the silhouette never arrived or it was
-                // lost on the way out, and only the target itself distinguishes those two.
+                // lost on the way out, and only the target itself distinguishes those two. Both targets when the chain
+                // runs - "the composite is empty" is answered by which pass went empty first.
                 if (!selfTestOutlineCaptured && renderTargets != null) {
-                    VulkanRenderTarget capture =
-                            renderTargets.byTextureId(selfTestOutlineTarget.framebufferTexture);
-                    if (capture == null) {
-                        LOGGER.warn("selftest: the outline target's handle {} has no render target to read back",
-                                selfTestOutlineTarget.framebufferTexture);
-                    } else {
-                        selfTestOutlineCaptured = true;
-                        swapchain.captureTarget(capture, selfTestOutlineRaw
-                                ? "selftest-outline-raw.png" : "selftest-outline.png");
-                        LOGGER.info("selftest: reading the outline target {}x{} back to screenshots/{}",
-                                capture.width(), capture.height(), selfTestOutlineRaw
-                                        ? "selftest-outline-raw.png" : "selftest-outline.png");
+                    selfTestOutlineCaptured = true;
+                    String prefix = selfTestOutlineRaw ? "selftest-outline-raw" : "selftest-outline-chain";
+                    captureOutlineTarget(prefix + "-final.png", selfTestOutlineTarget);
+                    if (!selfTestOutlineRaw) {
+                        captureOutlineTarget(prefix + "-swap.png",
+                                selfTestOutlineGroup.getFramebufferRaw("swap"));
                     }
                 }
             }
@@ -631,6 +626,28 @@ public final class VulkanBackend implements RenderBackend {
                 LOGGER.error("selftest: the outline chain failed", e);
             }
         }
+    }
+
+    /**
+     * Asks for one of the outline test's framebuffers to be written to a file at the end of this frame.
+     *
+     * <p>Named rather than looked up by handle so a missing one says which, and so the size in the log is the size the
+     * file will be.</p>
+     */
+    private void captureOutlineTarget(String name, net.minecraft.client.shader.@org.jspecify.annotations.Nullable Framebuffer framebuffer) {
+        if (framebuffer == null) {
+            LOGGER.warn("selftest: the outline group has no framebuffer to read back for {}", name);
+            return;
+        }
+        VulkanRenderTarget target = renderTargets.byTextureId(framebuffer.framebufferTexture);
+        if (target == null) {
+            LOGGER.warn("selftest: the outline target's handle {} has no render target to read back for {}",
+                    framebuffer.framebufferTexture, name);
+            return;
+        }
+        swapchain.captureTarget(target, name);
+        LOGGER.info("selftest: reading the outline target {}x{} back to screenshots/{}",
+                target.width(), target.height(), name);
     }
 
     /** The projection the game's shader groups use, rebuilt for a {@code width}x{@code height} pass. */
