@@ -8,6 +8,7 @@ import net.minecraftforge.client.render.vulkan.shader.GlslCompiler;
 import net.minecraftforge.client.render.vulkan.shader.GlslPreprocessor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -81,6 +82,21 @@ class SpirvResourcesTest {
 
         assertEquals(0, GlShaders.shaderStatus(shader, GlShaders.COMPILE_STATUS));
         assertTrue(GlShaders.shaderLog(shader).contains("module-broken"), "the reason names the file");
+    }
+
+    @Test
+    void theRecordedHashIdentifiesTheSourceText() {
+        // The build writes this hash beside every module and the loader compares it with the text it was handed, so the
+        // two have to be the same function over the same bytes. Pinned against a known value because a change here
+        // would silently invalidate every shipped module at once - they would all be ignored and the GLSL compiled
+        // instead, which works and therefore looks like nothing is wrong.
+        assertEquals("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d", SourceHashes.sha1("hello"));
+        assertEquals(SourceHashes.sha1("void main() {}"), SourceHashes.sha1("void main() {}"),
+                "the same text is the same hash");
+        assertNotEquals(SourceHashes.sha1("void main() {}"), SourceHashes.sha1("void main() { }"),
+                "a different text is a different hash, which is what makes a replaced shader compile instead");
+        assertEquals("da39a3ee5e6b4b0d3255bfef95601890afd80709", SourceHashes.sha1(null),
+                "the empty text, which is what a null source means");
     }
 
     @Test

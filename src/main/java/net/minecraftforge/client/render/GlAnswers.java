@@ -100,8 +100,12 @@ public final class GlAnswers {
         // Declaring it off means vanilla skips those paths rather than failing in them. Every use of
         // ShaderLinkHelper in the game is behind an OpenGlHelper.shadersSupported check, so nothing else breaks.
         // The cost is visible and stated at startup: no entity outline, no post-processing.
-        caps.OpenGL20 = false;
-        caps.OpenGL21 = false;
+        // The experiment switch for S5: declaring 2.0/2.1 is what makes vanilla build its ShaderGroups, and the point
+        // of S5 is to find out whether the program path draws them correctly. Off by default, because a player must
+        // not land in the middle of that experiment; S6 removes the switch and declares the contract for real.
+        boolean shaders = Boolean.getBoolean("outlands.render.declare.gl2");
+        caps.OpenGL20 = shaders;
+        caps.OpenGL21 = shaders;
         // The one extension the contract names: vanilla's Framebuffer needs it below GL 3.0.
         caps.GL_ARB_framebuffer_object = true;
         caps.GL_EXT_blend_func_separate = true;
@@ -112,9 +116,9 @@ public final class GlAnswers {
         caps.GL_ARB_vertex_buffer_object = true;
         // See the OpenGL20/21 comment above: shaders are not implemented yet, so the ARB fallback must not offer a
         // second way in.
-        caps.GL_ARB_shader_objects = false;
-        caps.GL_ARB_vertex_shader = false;
-        caps.GL_ARB_fragment_shader = false;
+        caps.GL_ARB_shader_objects = shaders;
+        caps.GL_ARB_vertex_shader = shaders;
+        caps.GL_ARB_fragment_shader = shaders;
         return caps;
     }
 }

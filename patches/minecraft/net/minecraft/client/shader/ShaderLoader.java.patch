@@ -6,6 +6,7 @@
 +                // A module shipped beside the source, if any: the resource system reports which pack each one
 +                // came from, which is what decides whether a module still describes this source.
 +                net.minecraftforge.client.render.shader.SpirvResources.attach(
-+                    i, resourceManager, resourcelocation, type.getShaderMode(), iresource.getResourcePackName()
++                    i, resourceManager, resourcelocation, type.getShaderMode(), iresource.getResourcePackName(),
++                    java.nio.charset.StandardCharsets.UTF_8.decode(bytebuffer.duplicate()).toString()
 +                );
                  OpenGlHelper.glCompileShader(i);

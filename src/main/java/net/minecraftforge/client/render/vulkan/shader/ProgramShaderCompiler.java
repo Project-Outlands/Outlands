@@ -84,6 +84,9 @@ public final class ProgramShaderCompiler {
             for (String file : names) {
                 GlslCompiler.Stage stage = file.endsWith(".vsh")
                         ? GlslCompiler.Stage.VERTEX : GlslCompiler.Stage.FRAGMENT;
+                // The vanilla text is read either way: it is what the module records itself as replacing, and that
+                // record is what decides at run time whether the module still describes the shader beside it.
+                String replaced = read(zip, PROGRAM_DIR + file);
                 String source;
                 String origin;
                 if (handWrittenNames.contains(file)) {
@@ -98,6 +101,8 @@ public final class ProgramShaderCompiler {
                 // Names are needed here: the facade answers glGetUniformLocation for these programs by name.
                 byte[] spirv = GlslCompiler.compile(source, stage, file, true);
                 Files.write(targetDir.resolve(file + ".spv"), spirv);
+                Files.writeString(targetDir.resolve(file + ".spv.sha1"),
+                        net.minecraftforge.client.render.shader.SourceHashes.sha1(replaced) + "\n");
                 System.out.println("  " + file + " (" + origin + ") -> " + spirv.length + " bytes");
             }
             System.out.println("compiled " + names.size() + " program shaders into " + targetDir

@@ -113,6 +113,19 @@ final class VulkanStream implements AutoCloseable {
     static final int MAX_ATTRIBUTE_LOCATION = 3;
     /** Which index buffer is bound, kept across draws so it is rebound only when it changes. */
     private long boundIndexBuffer;
+    /** Programs reported once, so the log names each one the first time it is drawn. */
+    private final java.util.Set<Integer> programTrace = new java.util.HashSet<>();
+    /**
+     * Whether a program draw has taken over the descriptor sets since the stream last bound its own.
+     *
+     * <p>The stream binds set 0 per draw and set 1 (the lightmap) once per frame, which is enough while the frame
+     * contains only stream draws. A program draw binds sets of <i>its</i> layout, and those occupy the same set indexes
+     * - so the lightmap binding is gone, and every stream draw after it samples whatever the program left there.
+     * Measured as particles turning pure black: their colour is the texture times the lightmap, and the lightmap was
+     * no longer a lightmap. The validation layers name it
+     * {@code VUID-vkCmdDrawIndexed-None-08600}.</p>
+     */
+    private boolean streamSetsStale;
     /**
      * Descriptor sets resolved for the frame being recorded, by texture handle.
      *
@@ -497,7 +510,13 @@ final class VulkanStream implements AutoCloseable {
                                     .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                                     .colorAttachment(0);
                             clearAttachments.get(atIdx).clearValue().color()
-                                    .float32(0, c[0]).float32(1, c[1]).float32(2, c[2]).float32(3, 1.0F);
+                                    // The alpha is the game's, not an opaque default. A target cleared to
+                                    // (0,0,0,0) and then sampled is the normal case: the entity outline's chain
+                                    // starts from a transparent target and blurs its alpha into a shape. Forcing 1
+                                    // made every cleared target opaque, so the chain's output was an opaque black
+                                    // frame and the composite painted the world out - measured, in a world with a
+                                    // glowing entity on screen.
+                                    .float32(0, c[0]).float32(1, c[1]).float32(2, c[2]).float32(3, c[3]);
                             atIdx++;
                         }
                         if (clearDepth) {
@@ -566,9 +585,27 @@ final class VulkanStream implements AutoCloseable {
                 // 96x32, which is exactly what the composite self-test showed.
                 int targetWidth = current.width();
                 int targetHeight = current.height();
-                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
-                        targetFlipsWinding);
                 applyScissor(commandBuffer, scissor, appliedScissor, draw.state(), targetWidth, targetHeight);
+
+                // The two paths want opposite viewport flips, and this is the subtlest thing in the whole renderer.
+                //
+                // A recorded draw arrives with GL-oriented clip space and the stream path pre-inverts it (the mvp's
+                // second row is negated), so what it needs is one more inversion to land display-correct in the
+                // window - and both inside a target, where the flip is what makes the target's storage GL's.
+                //
+                // A *program* draw has no such pre-inversion: its own matrix produced GL clip space, so it needs
+                // exactly the opposite. Into the window that is the flip (clip +1 is the top of the picture, and only
+                // a negative viewport puts it in row 0); into a target the viewport must stay unflipped, because the
+                // target is already stored bottom-up and clip +1 has to reach its last row.
+                boolean programFlips = !current.flipsVertically();
+                // The winding is a *second* question, and it is the one that decides whether the quad survives culling.
+                // The stream path mirrors clip y with its matrix and the target's viewport mirrors it again, so its
+                // pipeline says "clockwise" exactly when the target's viewport is flipped. A program's own matrix
+                // does no mirroring, which leaves the viewport as the only one - so the count that front face cares
+                // about is the *target's* flip, not the flip applied here. Passing this draw's own flip instead culled
+                // the blit experiment's quad away entirely: an odd number of mirrors is counter-clockwise, and the
+                // pipeline was told to expect clockwise.
+                boolean programWinding = current.flipsVertically();
 
                 if (ds.program() != null) {
                     // A program of the game's own: its pipeline, its block, its samplers. Nothing the stream has
@@ -577,7 +614,17 @@ final class VulkanStream implements AutoCloseable {
                         throw new IllegalStateException("a draw carries program " + ds.program().id()
                                 + " but no program cache is installed");
                     }
-                    programs.record(commandBuffer, slot, ds, topo, targetFlipsWinding);
+                    if (programTrace.add(ds.program().id())) {
+                        net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation("Program",
+                                "program=" + ds.program().id() + " vertices=" + draw.vertexCount()
+                                        + " samplers=" + java.util.Arrays.toString(ds.programSamplers())
+                                        + " block=" + ds.programBlock().length
+                                        + " viewport=" + java.util.Arrays.toString(ds.viewport())
+                                        + " target=" + targetWidth + "x" + targetHeight);
+                    }
+                    applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
+                            programFlips);
+                    programs.record(commandBuffer, slot, ds, topo, programWinding);
                     issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
                     boundPipeline = 0L;
                     boundSet = 0L;
@@ -585,6 +632,8 @@ final class VulkanStream implements AutoCloseable {
                     continue;
                 }
 
+                applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
+                        targetFlipsWinding);
                 VulkanPipeline pipeline;
                 if (cachedPipeline != null && topo == cachedTopology && targetFlipsWinding == cachedFlipsWinding
                         && ds.depthTest() == cachedDepthTest && ds.depthWrite() == cachedDepthWrite
@@ -685,10 +734,13 @@ final class VulkanStream implements AutoCloseable {
                     System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
                     lastPushedLayout = curLayout;
                 }
-                if (textureSets[indexOfOp] != boundSet) {
+                if (textureSets[indexOfOp] != boundSet || streamSetsStale) {
+                    // Both of the stream's sets, together: set 1 is the lightmap and a program draw may have replaced
+                    // it since this was last bound.
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
-                            stack.longs(textureSets[indexOfOp]), null);
+                            stack.longs(textureSets[indexOfOp], descriptors.lightmapSet(slot)), null);
                     boundSet = textureSets[indexOfOp];
+                    streamSetsStale = false;
                 }
                 issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
             }

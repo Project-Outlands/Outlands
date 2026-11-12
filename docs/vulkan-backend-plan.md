@@ -2055,6 +2055,35 @@ alpha 取 0.75 是刻意的：block 没上传的话 quad 全透明、只在日�
 `screenshots/`。桌面截图工具不一定看得见 Vulkan 窗口（这台机器上 X11/XWayland 与 KDE portal 抓到的是纯白/纯黑），
 而后端自己的 `vkCmdCopyImageToBuffer` 一定能。
 
+#### S4 之后、S5 之前的两次实测修复
+
+打开 `-Doutlands.render.declare.gl2=true` 之后拿真机跑（世界里放灵光箭），暴露出两个和 program 无关的旧 bug——
+它们今天才被看见，只是因为在这之前没有哪条路径会在**一帧之内**既清目标又反复切目标：
+
+| 现象 | 原因 | 修法 |
+|---|---|---|
+| 有灵光箭时除了 GUI 什么都看不见（世界全黑） | clear 的颜色 alpha 被写死成 1 | 用游戏给的 alpha。outline 链的第一趟是"清成透明、靠 alpha 勾形"，背景 alpha 被抬成 1 之后整条链的输出就是不透明黑，合成时把世界盖掉 |
+| 粒子全黑 | program 绘制绑的是**它自己**的 set 0/1，而流式路径每帧只单独绑 set 1（lightmap） | program 绘制之后置 `streamSetsStale`，下一次流式绘制把 set 0（纹理）与 set 1（lightmap）**一起**重绑。粒子的颜色 = 纹理 × lightmap，lightmap 不在位就是纯黑。validation 的 `VUID-vkCmdDrawIndexed-None-08600` 指的就是这条 |
+
+两条都是"绘制顺序里的状态耦合"，而不是 program 管线本身的问题：流式路径此前假定一帧里只有它自己在绑描述符集。
+
+#### AOT 模块必须真的被用上：`.spv.sha1`
+
+S5 验收要求"四趟 pass 不触发 JIT"，实测却不成立：日志显示每个模块都被 `SpirvResources` 以
+"came from Default while the shader came from FMLFileResourcePack:Minecraft Forge" 拒绝。原本的判据是
+"模块与源来自同一个 pack"，它对"作者把源和模块一起发"是对的，但对**我们替换原版 shader**这件事不成立：
+手写的 450 源刻意不进资源根（否则会被 GL 上下文读到），模块和源永远在不同的 pack 里。
+
+改法：模块旁边再发一个 `<源路径>.spv.sha1`，内容是**它要取代的那份源文本**的 SHA-1（由
+`ProgramShaderCompiler` 在构建时写，`SourceHashes.sha1` 是两边共用的实现）。判据变成：
+
+1. 同一个 pack → 用（作者自带模块的情形，行为不变）；
+2. 否则读 `.sha1`，与运行时拿到的源文本哈希一致 → 用（我们的替换模块）；
+3. 都不成立 → 认为模块不是描述这份源，JIT 编译（shader pack 改了源却没带模块的情形，正是这条要挡的）。
+
+于是 `blit`/`sobel`/`blur`/`entity_sobel` 这几趟现在走 AOT 模块（实测 block 布局从 JIT 版的 72 字节变成
+手写版的 96 字节，`ColorModulate@80` 就是证据），而 GLSL 只在 pack 换掉源时才会被编译。
+
 #### S5 之前必须先定的一件事：program 绘制的 y 方向
 
 `writeMvp` 给**流式**路径的 mvp 第 1 行取负，把 GL 的 NDC 翻成 Vulkan 的；program 路径拿不到这个：矩阵是游戏
@@ -2067,6 +2096,12 @@ alpha 取 0.75 是刻意的：block 没上传的话 quad 全透明、只在日�
 自检刻意**不**碰这个：它的顶点着色器直接写 clip 坐标、自己定 uv，因此只证明"机制通了、方向和采样自洽"。
 灵光箭那条链要拿 GL 后端的截图逐像素比对，再决定翻在哪儿（viewport 负高度 / 目标存储顺序 / 两者），
 这条写进 S5 的验收里。
+
+**实测结论（`-Doutlands.render.selftest.blit=true`）**：program 绘制进窗口要**翻**（负高度视口），进离屏目标
+**不翻**——与流式路径正好相反，因为流式路径的 mvp 已经被 `writeMvp` 预翻过一次。另外前表面是**第二个**问题：
+viewport 翻转会翻转绕序，而"需要几面顺时针"取决于**总镜像次数**，program 路径的总次数只由目标本身决定，
+所以 `PipelineState` 的 front face 参数应当传 `current.flipsVertically()`，与 y 翻转分开。第一版把两者当成
+同一个布尔，blit 的 quad 直接被背面剔除掉（"画了但什么都没出现"）。
 
 #### S5 目标作为 sampler + 端到端（大小：中）
 

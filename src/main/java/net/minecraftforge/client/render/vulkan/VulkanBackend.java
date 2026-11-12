@@ -84,6 +84,23 @@ public final class VulkanBackend implements RenderBackend {
      */
     private final int screenshotFrame = Integer.getInteger("outlands.render.shot.frame", 0);
     private int framesPresented;
+    /**
+     * Whether to run the game's own {@code blit} program over a render target. See {@link #selfTestBlit()}.
+     *
+     * <p>This is the orientation experiment, not a feature: a target is painted through the stream path and then drawn
+     * into the window through a program that is one of vanilla's own post-processing stages, so the answer - which
+     * corner of the window receives which corner of the target - can be compared against the GL backend doing exactly
+     * the same thing.</p>
+     */
+    private final boolean selfTestBlit = Boolean.getBoolean("outlands.render.selftest.blit");
+    /** Whether to run the whole entity-outline chain over a manufactured silhouette. See {@link #selfTestOutline()}. */
+    private final boolean selfTestOutline = Boolean.getBoolean("outlands.render.selftest.outline");
+    private net.minecraft.client.shader.ShaderGroup selfTestOutlineGroup;
+    private net.minecraft.client.shader.Framebuffer selfTestOutlineTarget;
+    private boolean selfTestOutlineReported;
+    private net.minecraft.client.shader.Framebuffer selfTestBlitIn;
+    private net.minecraft.client.shader.Shader selfTestBlitShader;
+    private boolean selfTestBlitReported;
     private long window;
     private boolean failed;
 
@@ -228,6 +245,12 @@ public final class VulkanBackend implements RenderBackend {
             }
             if (selfTestProgram) {
                 selfTestProgram();
+            }
+            if (selfTestBlit) {
+                selfTestBlit();
+            }
+            if (selfTestOutline) {
+                selfTestOutline();
             }
             framesPresented++;
             if (screenshotFrame > 0 && framesPresented == screenshotFrame) {
@@ -428,6 +451,169 @@ public final class VulkanBackend implements RenderBackend {
                 LOGGER.error("selftest: the program draw failed", e);
             }
         }
+    }
+
+    /**
+     * Paints a target with the stream path, then blits it into the window with vanilla's own {@code blit} program.
+     *
+     * <p>Gated by {@code -Doutlands.render.selftest.blit=true}. What it settles is the y direction of a program draw:
+     * {@code blit.vsh} takes the game's {@code ProjMat} - whose {@code m11} is {@code -2/h}, so clip {@code y=+1} means
+     * the top of the picture - and maps {@code texCoord.y = 1 - y}, which is GL's convention of reading a render target
+     * from the bottom. Under Vulkan both halves of that have to be true at once, and the stream path's own flip (a
+     * negated mvp row) does not apply to a program's matrix. Running the same thing on the GL backend gives the
+     * reference picture to compare against.</p>
+     *
+     * <p>The marker is a green square in the target's top-left corner. Whichever corner of the window it lands in after
+     * the blit is the answer; a square that is mirrored or absent is a wrong answer.</p>
+     */
+    private void selfTestBlit() {
+        try {
+            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
+            if (selfTestBlitShader == null) {
+                if (!net.minecraftforge.client.render.shader.GlShaders.active()) {
+                    return;
+                }
+                selfTestBlitIn = new net.minecraft.client.shader.Framebuffer(256, 256, false);
+                selfTestBlitIn.setFramebufferFilter(9728);
+                selfTestBlitShader = new net.minecraft.client.shader.Shader(minecraft.getResourceManager(),
+                        "minecraft:blit", selfTestBlitIn, minecraft.getFramebuffer());
+                LOGGER.info("selftest: blit program {} over target {}",
+                        selfTestBlitShader.getShaderManager().getProgram(), selfTestBlitIn.framebufferTexture);
+            }
+
+            // The target: cleared to blue, with a green square in its top-left corner, drawn the way the game draws.
+            selfTestBlitIn.framebufferClear();
+            selfTestBlitIn.bindFramebuffer(true);
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.ortho(0.0, 256.0, 256.0, 0.0, 1000.0, 3000.0);
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
+            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
+            net.minecraft.client.renderer.GlStateManager.disableDepth();
+            net.minecraft.client.renderer.GlStateManager.disableCull();
+            net.minecraft.client.renderer.GlStateManager.disableBlend();
+            net.minecraft.client.renderer.Tessellator tessellator =
+                    net.minecraft.client.renderer.Tessellator.getInstance();
+            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
+            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
+            buffer.pos(0.0, 64.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(64.0, 64.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(64.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
+            buffer.pos(0.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
+            tessellator.draw();
+            selfTestBlitIn.unbindFramebuffer();
+            selfTestBlitShader.setProjectionMatrix(blitProjection(256.0F, 256.0F));
+            selfTestBlitShader.render(0.0F);
+
+            if (!selfTestBlitReported) {
+                selfTestBlitReported = true;
+                net.minecraftforge.client.render.vertex.DrawState state =
+                        net.minecraftforge.client.render.vertex.DrawState.current();
+                LOGGER.info("selftest: blit draw viewport={} program={}", java.util.Arrays.toString(state.viewport()),
+                        state.program() == null ? "none" : String.valueOf(state.program().id()));
+            }
+        } catch (Exception e) {
+            if (!selfTestBlitReported) {
+                selfTestBlitReported = true;
+                LOGGER.error("selftest: the blit experiment failed", e);
+            }
+        }
+    }
+
+    /**
+     * Runs the entity-outline chain the way {@code RenderGlobal} does, over a silhouette this method paints instead of
+     * one an entity rendered.
+     *
+     * <p>Gated by {@code -Doutlands.render.selftest.outline=true}. The point is to have the real four passes - the
+     * group's own two framebuffers, vanilla's {@code post/entity_outline.json}, and the composite that
+     * {@code renderEntityOutlineFramebuffer} does - runnable without a world, so what the player sees when a glowing
+     * entity is on screen can be reproduced and looked at from a screenshot.</p>
+     *
+     * <p>The silhouette is an opaque white square with alpha 0.3 in the middle of the frame, which is what the outline
+     * pass expects to find in its input: {@code entity_sobel.fsh} looks at the <i>alpha</i> gradient, so the shape's
+     * transparency is what makes an outline appear around it.</p>
+     */
+    private void selfTestOutline() {
+        try {
+            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
+            if (selfTestOutlineGroup == null) {
+                selfTestOutlineGroup = new net.minecraft.client.shader.ShaderGroup(minecraft.getTextureManager(),
+                        minecraft.getResourceManager(), minecraft.getFramebuffer(),
+                        new net.minecraft.util.ResourceLocation("shaders/post/entity_outline.json"));
+                selfTestOutlineGroup.createBindFramebuffers(minecraft.displayWidth, minecraft.displayHeight);
+                selfTestOutlineTarget = selfTestOutlineGroup.getFramebufferRaw("final");
+                LOGGER.info("selftest: outline group over {}x{} target {}",
+                        selfTestOutlineTarget.framebufferTextureWidth, selfTestOutlineTarget.framebufferTextureHeight,
+                        selfTestOutlineTarget.framebufferTexture);
+            }
+
+            // 1. The silhouette, into the group's "final" target, exactly as RenderGlobal starts the chain.
+            selfTestOutlineTarget.framebufferClear();
+            selfTestOutlineTarget.bindFramebuffer(false);
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.ortho(0.0, minecraft.displayWidth, minecraft.displayHeight, 0.0,
+                    1000.0, 3000.0);
+            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
+            net.minecraft.client.renderer.GlStateManager.loadIdentity();
+            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
+            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
+            net.minecraft.client.renderer.GlStateManager.disableCull();
+            net.minecraft.client.renderer.GlStateManager.disableDepth();
+            net.minecraft.client.renderer.GlStateManager.enableBlend();
+            net.minecraft.client.renderer.Tessellator tessellator =
+                    net.minecraft.client.renderer.Tessellator.getInstance();
+            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
+            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
+            float cx = minecraft.displayWidth * 0.5F;
+            float cy = minecraft.displayHeight * 0.5F;
+            float half = 40.0F;
+            buffer.pos(cx - half, cy + half, 0.0).color(255, 255, 255, 76).endVertex();
+            buffer.pos(cx + half, cy + half, 0.0).color(255, 255, 255, 76).endVertex();
+            buffer.pos(cx + half, cy - half, 0.0).color(255, 255, 255, 76).endVertex();
+            buffer.pos(cx - half, cy - half, 0.0).color(255, 255, 255, 76).endVertex();
+            tessellator.draw();
+
+            // 2. The four passes, and the composite RenderGlobal.renderEntityOutlineFramebuffer does afterwards.
+            selfTestOutlineGroup.render(0.0F);
+            minecraft.getFramebuffer().bindFramebuffer(false);
+            net.minecraft.client.renderer.GlStateManager.enableBlend();
+            net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
+                    net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
+                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                    net.minecraft.client.renderer.GlStateManager.SourceFactor.ZERO,
+                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE);
+            selfTestOutlineTarget.framebufferRenderExt(minecraft.displayWidth, minecraft.displayHeight, false);
+            net.minecraft.client.renderer.GlStateManager.disableBlend();
+
+            if (!selfTestOutlineReported) {
+                selfTestOutlineReported = true;
+                LOGGER.info("selftest: outline chain rendered (silhouette {}x{} at {},{} in a {}x{} frame)",
+                        2 * half, 2 * half, (int) (cx - half), (int) (cy - half),
+                        minecraft.displayWidth, minecraft.displayHeight);
+            }
+        } catch (Exception e) {
+            if (!selfTestOutlineReported) {
+                selfTestOutlineReported = true;
+                LOGGER.error("selftest: the outline chain failed", e);
+            }
+        }
+    }
+
+    /** The projection the game's shader groups use, rebuilt for a {@code width}x{@code height} pass. */
+    private static org.lwjgl.util.vector.Matrix4f blitProjection(float width, float height) {
+        org.lwjgl.util.vector.Matrix4f projection = new org.lwjgl.util.vector.Matrix4f();
+        projection.setIdentity();
+        projection.m00 = 2.0F / width;
+        projection.m11 = 2.0F / -height;
+        projection.m22 = -0.0020001999F;
+        projection.m33 = 1.0F;
+        projection.m03 = -1.0F;
+        projection.m13 = 1.0F;
+        projection.m23 = -1.0001999F;
+        return projection;
     }
 
     /** Compiles and links the self-test program, and reports the layout the modules produced. */
