@@ -239,6 +239,10 @@ processResources {
 test {
     // The tests read the compiled program modules the way the game will, so the generator has to have run.
     dependsOn 'compileProgramShaders'
+    // A shader edit must invalidate the shader-freshness test. Resources are not an input of the test task, so without
+    // this the guard that catches "GLSL edited, SPIR-V not recompiled" would be skipped precisely when it matters -
+    // and that failure mode is silent at run time, which is why the guard exists.
+    inputs.dir(file("${rootProject.projectDir}/src/main/resources/assets/outlands/shaders"))
     maxParallelForks = 1
     useJUnitPlatform()
     testLogging {

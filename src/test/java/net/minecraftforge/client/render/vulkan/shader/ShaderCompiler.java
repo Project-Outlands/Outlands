@@ -41,10 +41,20 @@ public final class ShaderCompiler {
     /** Where the sources live, relative to the project directory. */
     private static final String SOURCE_DIR = "src/main/resources/assets/outlands/shaders";
 
-    /** name -> shader stage kind. */
-    private static final String[][] SHADERS = {
+    /**
+     * name -> shader stage kind: every GLSL source this project ships compiled.
+     *
+     * <p>The list is the whole contract. A source missing from it is committed as GLSL only, and the backend - which
+     * loads the {@code .spv} next to it and never the source - keeps running yesterday's binary. That happened to
+     * {@code stream.frag}: its outline-mode branches were written, reviewed and tested in the GLSL, and never once
+     * executed, because this list had only the two terrain stages. {@code CommittedShaderSpirvTest} now fails when a
+     * source and its binary disagree, so the same silence cannot happen again.</p>
+     */
+    static final String[][] SHADERS = {
             {"terrain.vert", "vertex"},
             {"terrain.frag", "fragment"},
+            {"stream.vert", "vertex"},
+            {"stream.frag", "fragment"},
     };
 
     private ShaderCompiler() {}
