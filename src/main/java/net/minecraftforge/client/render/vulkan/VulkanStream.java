@@ -301,6 +301,9 @@ final class VulkanStream implements AutoCloseable {
      */
     private static final int traceFrame = traceFrame();
 
+    /** Whether an outline-mode draw has been reported. Once is enough: the question is whether it happens at all. */
+    private static boolean outlineDrawLogged;
+
     private static int framesReplayed;
 
     /**
@@ -657,6 +660,16 @@ final class VulkanStream implements AutoCloseable {
                 // the blit experiment's quad away entirely: an odd number of mirrors is counter-clockwise, and the
                 // pipeline was told to expect clockwise.
                 boolean programWinding = current.flipsVertically();
+
+                // One line the first time an outline-mode draw reaches the recorder. Whether the entity-outline pass
+                // ran at all, and whether it ran with the lightmap unit set to replace, is the first question asked of
+                // an in-world outline that does not appear - and it is not answerable from a picture alone.
+                if (ds.overlayMode() != 0 && !outlineDrawLogged) {
+                    outlineDrawLogged = true;
+                    net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation("OutlineDraw",
+                            "texture=" + ds.texture() + " colour=" + java.util.Arrays.toString(ds.overlayColor())
+                                    + " target=" + current.width() + "x" + current.height());
+                }
 
                 if (ds.program() != null) {
                     // A program of the game's own: its pipeline, its block, its samplers. Nothing the stream has
