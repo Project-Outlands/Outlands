@@ -772,7 +772,10 @@ final class VulkanStream implements AutoCloseable {
                 float curFogDensity = ds.fogDensity();
                 float[] curFogColor = ds.fogColor();
                 float[] curOverlayColor = ds.overlayColor();
-        float curOverlayMode = ds.overlayMode() == 1 ? 1.0F : 0.0F;
+                // The mode travels as it is: it says *what* the texture environment replaced (1 a light, 2 the
+                // texture), and collapsing it to "is it outline mode" sent the second case down the normal path - a
+                // silhouette in the entity's own texture colour, which is exactly what it was meant to avoid.
+                float curOverlayMode = (float) ds.overlayMode();
 
                 boolean needPush = curLayout != lastPushedLayout
                         || curAlphaRef != lastPushedAlphaRef
@@ -787,9 +790,12 @@ final class VulkanStream implements AutoCloseable {
                                 || curFogColor[3] != lastPushedFogColor[3]))
                         || curOverlayMode != lastPushedOverlayMode
                         || curOverlayColor[3] != lastPushedOverlayColor[3]
-                        || (curOverlayColor[3] > 0.0f && (curOverlayColor[0] != lastPushedOverlayColor[0]
-                                || curOverlayColor[1] != lastPushedOverlayColor[1]
-                                || curOverlayColor[2] != lastPushedOverlayColor[2]))
+                        // In outline mode the constant's alpha is zero and its colour is the whole point, so the
+                        // colour has to be compared whenever either mode is set, not only when there is alpha.
+                        || ((curOverlayMode != 0.0F || curOverlayColor[3] > 0.0f)
+                                && (curOverlayColor[0] != lastPushedOverlayColor[0]
+                                        || curOverlayColor[1] != lastPushedOverlayColor[1]
+                                        || curOverlayColor[2] != lastPushedOverlayColor[2]))
                         || !java.util.Arrays.equals(curMvp, lastPushedMvp);
                 if (needPush) {
                     push.position(0);
@@ -809,8 +815,8 @@ final class VulkanStream implements AutoCloseable {
                     push.put(28, curFogStart);
                     push.put(29, curFogEnd);
                     push.put(30, curFogDensity);
-                    // The one spare float carries the overlay mode: 1 means outline mode, where the fragment stage
-                    // replaces the light with the overlay's colour and takes its alpha from the lightmap.
+                    // The one spare float carries the overlay mode: 1 when a light unit was replaced, 2 when the
+                    // texture was, 0 for the hurt-flash mix.
                     push.put(31, curOverlayMode);
                     constants.position(0);
                     constants.limit(128);
