@@ -88,22 +88,6 @@ public final class Screenshots {
     }
 
     /**
-     * A request for a picture that is not the window, such as a render target's contents.
-     *
-     * <p>Not stored as pending: nothing takes it, so the caller owns it and satisfies it itself. The naming, the
-     * directory and the file belong here anyway, so a diagnostic writes its picture next to the real screenshots
-     * instead of inventing a second convention.</p>
-     */
-    public static Request file(String name, int width, int height) {
-        File directory = new File(Minecraft.getMinecraft().gameDir, DIRECTORY);
-        if (!directory.isDirectory() && !directory.mkdir()) {
-            LOGGER.error("could not create the screenshot directory {}", directory);
-        }
-        File file = new File(directory, name);
-        return new Request(width, height, file, successMessage(file));
-    }
-
-    /**
      * Writes the pixels of the frame that satisfied a request.
      *
      * @param rgba   the picture, four bytes per pixel, first row at the top, as Vulkan reads it back
@@ -132,34 +116,6 @@ public final class Screenshots {
         } catch (Exception e) {
             LOGGER.error("could not write the screenshot {}", request.file(), e);
             post(new TextComponentString("无法保存截图: " + e));
-        }
-    }
-
-    /**
-     * Writes a picture whose alpha is part of the picture.
-     *
-     * <p>{@link #deliver} forces every pixel opaque, which is right for the window and wrong for the one image a
-     * diagnostic reads back: the entity outline is traced from an <i>alpha</i> step, so the target's alpha is the
-     * whole subject. Rows and channels arrive in Vulkan's order - BGRA, first row on top - as the copy leaves them.</p>
-     */
-    public static void deliverWithAlpha(Request request, byte[] bgra, int width, int height) {
-        try {
-            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            java.awt.image.DataBufferInt buffer = (java.awt.image.DataBufferInt) image.getRaster().getDataBuffer();
-            int[] pixels = buffer.getData();
-            for (int i = 0; i < width * height; i++) {
-                int at = i * 4;
-                int blue = bgra[at] & 0xFF;
-                int green = bgra[at + 1] & 0xFF;
-                int red = bgra[at + 2] & 0xFF;
-                int alpha = bgra[at + 3] & 0xFF;
-                pixels[i] = (alpha << 24) | (red << 16) | (green << 8) | blue;
-            }
-            Files.createDirectories(request.file().toPath().getParent());
-            javax.imageio.ImageIO.write(image, "png", request.file());
-            LOGGER.info("wrote {}x{} with alpha to {}", width, height, request.file());
-        } catch (Exception e) {
-            LOGGER.error("could not write the picture {}", request.file(), e);
         }
     }
 

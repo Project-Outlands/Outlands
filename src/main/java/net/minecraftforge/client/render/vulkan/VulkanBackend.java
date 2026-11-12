@@ -61,63 +61,9 @@ public final class VulkanBackend implements RenderBackend {
     /** What the game asks of each frame; installed so Framebuffer's calls land here instead of in GL. */
     private final VulkanFrameRecording frameRecording = new VulkanFrameRecording();
 
-    /** Whether to draw into an offscreen target and composite it back every frame. See {@link #selfTestComposite()}. */
-    private final boolean selfTestComposite =
-            "composite".equals(System.getProperty("outlands.render.selftest.targets"));
     /** Replays the game's own draws into the frame's rendering instance. */
     private VulkanStream stream;
     private VulkanRenderTargets renderTargets;
-    private net.minecraft.client.shader.Framebuffer selfTestFramebuffer;
-    private boolean selfTestReported;
-    /** Whether to draw a quad through a program the GL facade compiled and linked. See {@link #selfTestProgram()}. */
-    private final boolean selfTestProgram =
-            Boolean.getBoolean("outlands.render.selftest.program");
-    private int selfTestProgramId;
-    private int selfTestProgramTexture;
-    private boolean selfTestProgramReported;
-    /**
-     * Frame to save a screenshot on, under {@code -Doutlands.render.shot.frame=N} (1-based), or 0 for none.
-     *
-     * <p>The backend can read its own window's image back, and doing so on a chosen frame is the only way to look at
-     * what a headless run actually drew: the desktop's screenshot tools do not necessarily see a Vulkan window, and a
-     * picture in a file is a far better argument than a log line that says the draw was recorded.</p>
-     */
-    private final int screenshotFrame = Integer.getInteger("outlands.render.shot.frame", 0);
-    /**
-     * A frame on which to read every render target back, under
-     * {@code -Doutlands.render.selftest.capture.targets=N}.
-     *
-     * <p>The frame matters: a world's outline pass only exists once a glowing entity is in view, and a shader group the
-     * game built for itself cannot be addressed by name from here. Reading all targets on one chosen frame shows which
-     * of them the silhouette reached and which stayed empty.</p>
-     */
-    private final int captureAllTargetsFrame =
-            Integer.getInteger("outlands.render.selftest.capture.targets", 0);
-    /** How often to repeat that readback, so a run does not have to land on one exact frame. Zero means once. */
-    private final int captureAllTargetsEvery =
-            Integer.getInteger("outlands.render.selftest.capture.every", 0);
-    private int framesPresented;
-    /**
-     * Whether to run the game's own {@code blit} program over a render target. See {@link #selfTestBlit()}.
-     *
-     * <p>This is the orientation experiment, not a feature: a target is painted through the stream path and then drawn
-     * into the window through a program that is one of vanilla's own post-processing stages, so the answer - which
-     * corner of the window receives which corner of the target - can be compared against the GL backend doing exactly
-     * the same thing.</p>
-     */
-    private final boolean selfTestBlit = Boolean.getBoolean("outlands.render.selftest.blit");
-    /** Whether to run the whole entity-outline chain over a manufactured silhouette. See {@link #selfTestOutline()}. */
-    private final boolean selfTestOutline = Boolean.getBoolean("outlands.render.selftest.outline");
-    /** Whether to composite the raw silhouette instead of running the chain, which says where an outline is lost. */
-    private final boolean selfTestOutlineRaw = Boolean.getBoolean("outlands.render.selftest.outline.raw");
-    private net.minecraft.client.shader.ShaderGroup selfTestOutlineGroup;
-    private net.minecraft.client.shader.Framebuffer selfTestOutlineTarget;
-    private boolean selfTestOutlineReported;
-    /** Whether the target's contents have been read back to a file. Once is enough, and it costs a fence wait. */
-    private boolean selfTestOutlineCaptured;
-    private net.minecraft.client.shader.Framebuffer selfTestBlitIn;
-    private net.minecraft.client.shader.Shader selfTestBlitShader;
-    private boolean selfTestBlitReported;
     private long window;
     private boolean failed;
 
@@ -138,17 +84,7 @@ public final class VulkanBackend implements RenderBackend {
         RenderBackendSelection.register(
                 new RenderBackendSelection.Candidate(INSTANCE, VulkanBackend::isAvailable,
                         BRANCH_DEVELOPMENT_PRIORITY));
-        if (isAvailable()) {
-            LOGGER.warn("Vulkan is the preferred render backend (branch development mode): this build boots into "
-                    + "Vulkan, which currently clears the screen and draws nothing else. Revisit the default "
-                    + "before merge.");
-            LOGGER.warn("The capability table does not declare GL 2.0/2.1, so entity outlines (including the one the "
-                    + "spectral arrow needs) and post-processing are skipped. Shader objects themselves work - the "
-                    + "game's programs ship as precompiled SPIR-V modules and anything else is compiled from GLSL - "
-                    + "but a ShaderGroup needs a second render target and a program draw path, and neither exists "
-                    + "yet. This is our gap, not the hardware's - the main-menu warning about an old graphics card is "
-                    + "suppressed on a non-GL backend for that reason.");
-        } else {
+        if (!isAvailable()) {
             LOGGER.info("Vulkan backend registered as the preferred candidate, but it reports unavailable; the "
                     + "vanilla renderer will be used.");
         }
@@ -216,12 +152,6 @@ public final class VulkanBackend implements RenderBackend {
                     swapchain.depthFormat());
             net.minecraftforge.client.render.target.RenderTargets.install(renderTargets);
             stream.setRenderTargets(renderTargets);
-            if (Boolean.getBoolean("outlands.render.selftest.targets")) {
-                // Allocates a target on the real device: the one part of this that a unit test cannot prove is that
-                // the validation layers accept a COLOR_ATTACHMENT|SAMPLED image and a DEPTH-aspect view, and that the
-                // handle it registers is the one the texture cache resolves.
-                selfTestRenderTargets();
-            }
             stream.setTerrain(terrainLayer);
             swapchain.setStream(stream);
             swapchain.setTextures(textureCache);
@@ -257,36 +187,6 @@ public final class VulkanBackend implements RenderBackend {
             if (stream != null && frameState != null) {
                 stream.setLightmapTexture(frameState.lightmapTexture());
             }
-            if (selfTestComposite) {
-                selfTestComposite();
-            }
-            if (selfTestProgram) {
-                selfTestProgram();
-            }
-            if (selfTestBlit) {
-                selfTestBlit();
-            }
-            if (selfTestOutline) {
-                selfTestOutline();
-            }
-            framesPresented++;
-            if (screenshotFrame > 0 && framesPresented == screenshotFrame) {
-                net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
-                net.minecraftforge.client.render.screenshot.Screenshots.request(minecraft.displayWidth,
-                        minecraft.displayHeight, "shot-frame" + framesPresented + ".png");
-            }
-            if (captureAllTargetsFrame > 0 && framesPresented >= captureAllTargetsFrame
-                    && renderTargets != null && swapchain != null
-                    && (captureAllTargetsEvery <= 0
-                            ? framesPresented == captureAllTargetsFrame
-                            : (framesPresented - captureAllTargetsFrame) % captureAllTargetsEvery == 0)) {
-                java.util.List<VulkanRenderTarget> targets = renderTargets.all();
-                for (VulkanRenderTarget target : targets) {
-                    swapchain.captureTarget(target, "selftest-target-" + target.textureId()
-                            + "-" + target.width() + "x" + target.height() + ".png");
-                }
-                LOGGER.info("selftest: reading {} render targets back on frame {}", targets.size(), framesPresented);
-            }
             // Whatever the game drew while building this frame is replayed inside it, then the next frame starts
             // collecting from empty.
             swapchain.setPendingDraws(net.minecraftforge.client.render.vertex.FrameDraws.drain());
@@ -300,91 +200,6 @@ public final class VulkanBackend implements RenderBackend {
             failed = true;
             LOGGER.error("Vulkan frame failed; stopping presentation", e);
             close();
-        }
-    }
-
-    /**
-     * A framebuffer drawn into and composited back, once per frame, through the game's own code paths.
-     *
-     * <p>Gated by {@code -Doutlands.render.selftest.targets=composite}. What it proves is what a unit test cannot: the
-     * frame ends its rendering instance, moves the target's images between layouts, draws into them off-screen and
-     * composites the result over the window - on the real device, with the validation layers listening. A red square in
-     * the window's top-left corner is the expected picture; the square's position is also the orientation check, since
-     * a composited image that comes back upside down puts the square in the wrong corner.</p>
-     *
-     * <p><b>Why the vanilla objects.</b> {@code Framebuffer} is what the game uses: {@code framebufferClear} binds,
-     * clears and unbinds, and {@code framebufferRender} binds the target's texture and draws one textured quad through
-     * the Tessellator. Driving those means the test exercises the paths a shader group will use, rather than a
-     * parallel implementation that could agree with itself and disagree with the game.</p>
-     */
-    private void selfTestComposite() {
-        try {
-            if (selfTestFramebuffer == null) {
-                selfTestFramebuffer = new net.minecraft.client.shader.Framebuffer(256, 256, true);
-                selfTestFramebuffer.setFramebufferColor(1.0F, 0.0F, 0.0F, 1.0F);
-                selfTestFramebuffer.setFramebufferFilter(9728);
-                LOGGER.info("selftest: composite framebuffer {}x{} texture {}",
-                        selfTestFramebuffer.framebufferTextureWidth, selfTestFramebuffer.framebufferTextureHeight,
-                        selfTestFramebuffer.framebufferTexture);
-            }
-            selfTestFramebuffer.framebufferClear();
-            selfTestMarker();
-            selfTestFramebuffer.framebufferRender(256, 256);
-        } catch (RuntimeException e) {
-            // Reported once rather than every frame: the point of the self-test is a diagnosable state, not a log flood.
-            if (!selfTestReported) {
-                selfTestReported = true;
-                LOGGER.error("selftest: composite of an offscreen target failed", e);
-            }
-        }
-    }
-
-    /**
-     * Draws a green square at the target's top-left, through the ordinary vertex path.
-     *
-     * <p>The point is orientation: a target cleared to one colour cannot show whether the composite flipped it, but a
-     * marker in a corner can. The quad is drawn in the game's own coordinates - an ortho over the target's size with y
-     * pointing down, exactly as {@code framebufferRenderExt} sets up for its own quad - so if the composite is faithful
-     * the marker appears in the same corner of the window as it had in the target, and a flip shows up as the opposite
-     * corner.</p>
-     */
-    private void selfTestMarker() {
-        selfTestFramebuffer.bindFramebuffer(true);
-        try {
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.ortho(0.0, 256.0, 256.0, 0.0, 1000.0, 3000.0);
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
-            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
-            net.minecraft.client.renderer.GlStateManager.disableDepth();
-            // Culling is left as the game has it: an offscreen target's viewport is inverted, which inverts the
-            // winding, so a visible marker is also the proof that the pipeline's front face follows the target.
-
-            net.minecraft.client.renderer.Tessellator tessellator =
-                    net.minecraft.client.renderer.Tessellator.getInstance();
-            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
-            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
-            buffer.pos(0.0, 96.0, 0.0).color(0, 120, 255, 255).endVertex();
-            buffer.pos(96.0, 96.0, 0.0).color(0, 120, 255, 255).endVertex();
-            buffer.pos(96.0, 0.0, 0.0).color(0, 120, 255, 255).endVertex();
-            buffer.pos(0.0, 0.0, 0.0).color(0, 120, 255, 255).endVertex();
-            tessellator.draw();
-            if (!selfTestReported) {
-                selfTestReported = true;
-                net.minecraftforge.client.render.vertex.DrawState state =
-                        net.minecraftforge.client.render.vertex.DrawState.current();
-                float[] mvp = state.mvp();
-                LOGGER.info("selftest: marker draw viewport={} mvp row0={} row1={} row2={} row3={}",
-                        java.util.Arrays.toString(state.viewport()),
-                        mvp[0] + "/" + mvp[1] + "/" + mvp[2] + "/" + mvp[3],
-                        mvp[4] + "/" + mvp[5] + "/" + mvp[6] + "/" + mvp[7],
-                        mvp[8] + "/" + mvp[9] + "/" + mvp[10] + "/" + mvp[11],
-                        mvp[12] + "/" + mvp[13] + "/" + mvp[14] + "/" + mvp[15]);
-            }
-        } finally {
-            selfTestFramebuffer.unbindFramebuffer();
         }
     }
 
@@ -422,341 +237,6 @@ public final class VulkanBackend implements RenderBackend {
                 fragColor = vec4(texture(DiffuseSampler, vUv).rgb, 1.0) * Tint;
             }
             """;
-
-    /**
-     * Draws the left half of the window through a program the facade compiled, linked and bound.
-     *
-     * <p>Gated by {@code -Doutlands.render.selftest.program=true}. What it proves, none of which a unit test can: a
-     * GLSL string becomes a module, modules become a pipeline with a layout derived from the module's own decorations,
-     * the game's {@code glUniform*} writes land at the offsets the compiler chose, and a sampler named
-     * {@code DiffuseSampler} reaches the texture the game bound to the unit it was pointed at.</p>
-     *
-     * <p>The alpha of the tint is 0.75 on purpose. If the uniform block never arrived the quad is transparent and only
-     * the log shows why; if it arrived, the menu or the world shows through the left half. That makes "the uniform
-     * works" a difference in the picture rather than a claim in a log line.</p>
-     */
-    private void selfTestProgram() {
-        try {
-            if (selfTestProgramId == 0) {
-                selfTestProgramId = createSelfTestProgram();
-            }
-            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
-            net.minecraft.util.ResourceLocation panorama =
-                    new net.minecraft.util.ResourceLocation("textures/gui/title/background/panorama_0.png");
-            minecraft.getTextureManager().bindTexture(panorama);
-            if (selfTestProgramTexture == 0) {
-                selfTestProgramTexture = minecraft.getTextureManager().getTexture(panorama).getGlTextureId();
-            }
-
-            net.minecraftforge.client.render.shader.GlShaders.useProgram(selfTestProgramId);
-            int tint = net.minecraftforge.client.render.shader.GlShaders.uniformLocation(selfTestProgramId, "Tint");
-            net.minecraftforge.client.render.shader.GlShaders.uniform4f(tint, 1.0F, 1.0F, 1.0F, 0.75F);
-
-            net.minecraft.client.renderer.GlStateManager.disableCull();
-            net.minecraft.client.renderer.GlStateManager.disableDepth();
-            net.minecraft.client.renderer.GlStateManager.enableBlend();
-            net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
-                    net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
-                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
-                    net.minecraft.client.renderer.GlStateManager.SourceFactor.ONE,
-                    net.minecraft.client.renderer.GlStateManager.DestFactor.ZERO);
-            net.minecraft.client.renderer.GlStateManager.enableTexture2D();
-
-            net.minecraft.client.renderer.Tessellator tessellator =
-                    net.minecraft.client.renderer.Tessellator.getInstance();
-            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
-            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_TEX);
-            // The left half, with the image's row 0 (v=0) at clip y=-1, which is the window's top row.
-            buffer.pos(-1.0, -1.0, 0.0).tex(0.0, 0.0).endVertex();
-            buffer.pos(0.0, -1.0, 0.0).tex(1.0, 0.0).endVertex();
-            buffer.pos(0.0, 1.0, 0.0).tex(1.0, 1.0).endVertex();
-            buffer.pos(-1.0, 1.0, 0.0).tex(0.0, 1.0).endVertex();
-            tessellator.draw();
-
-            net.minecraftforge.client.render.shader.GlShaders.useProgram(0);
-        } catch (RuntimeException e) {
-            if (!selfTestProgramReported) {
-                selfTestProgramReported = true;
-                LOGGER.error("selftest: the program draw failed", e);
-            }
-        }
-    }
-
-    /**
-     * Paints a target with the stream path, then blits it into the window with vanilla's own {@code blit} program.
-     *
-     * <p>Gated by {@code -Doutlands.render.selftest.blit=true}. What it settles is the y direction of a program draw:
-     * {@code blit.vsh} takes the game's {@code ProjMat} - whose {@code m11} is {@code -2/h}, so clip {@code y=+1} means
-     * the top of the picture - and maps {@code texCoord.y = 1 - y}, which is GL's convention of reading a render target
-     * from the bottom. Under Vulkan both halves of that have to be true at once, and the stream path's own flip (a
-     * negated mvp row) does not apply to a program's matrix. Running the same thing on the GL backend gives the
-     * reference picture to compare against.</p>
-     *
-     * <p>The marker is a green square in the target's top-left corner. Whichever corner of the window it lands in after
-     * the blit is the answer; a square that is mirrored or absent is a wrong answer.</p>
-     */
-    private void selfTestBlit() {
-        try {
-            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
-            if (selfTestBlitShader == null) {
-                if (!net.minecraftforge.client.render.shader.GlShaders.active()) {
-                    return;
-                }
-                selfTestBlitIn = new net.minecraft.client.shader.Framebuffer(256, 256, false);
-                selfTestBlitIn.setFramebufferFilter(9728);
-                selfTestBlitShader = new net.minecraft.client.shader.Shader(minecraft.getResourceManager(),
-                        "minecraft:blit", selfTestBlitIn, minecraft.getFramebuffer());
-                LOGGER.info("selftest: blit program {} over target {}",
-                        selfTestBlitShader.getShaderManager().getProgram(), selfTestBlitIn.framebufferTexture);
-            }
-
-            // The target: cleared to blue, with a green square in its top-left corner, drawn the way the game draws.
-            selfTestBlitIn.framebufferClear();
-            selfTestBlitIn.bindFramebuffer(true);
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.ortho(0.0, 256.0, 256.0, 0.0, 1000.0, 3000.0);
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
-            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
-            net.minecraft.client.renderer.GlStateManager.disableDepth();
-            net.minecraft.client.renderer.GlStateManager.disableCull();
-            net.minecraft.client.renderer.GlStateManager.disableBlend();
-            net.minecraft.client.renderer.Tessellator tessellator =
-                    net.minecraft.client.renderer.Tessellator.getInstance();
-            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
-            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
-            buffer.pos(0.0, 64.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(64.0, 64.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(64.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
-            buffer.pos(0.0, 0.0, 0.0).color(0, 255, 0, 255).endVertex();
-            tessellator.draw();
-            selfTestBlitIn.unbindFramebuffer();
-            selfTestBlitShader.setProjectionMatrix(blitProjection(256.0F, 256.0F));
-            selfTestBlitShader.render(0.0F);
-
-            if (!selfTestBlitReported) {
-                selfTestBlitReported = true;
-                net.minecraftforge.client.render.vertex.DrawState state =
-                        net.minecraftforge.client.render.vertex.DrawState.current();
-                LOGGER.info("selftest: blit draw viewport={} program={}", java.util.Arrays.toString(state.viewport()),
-                        state.program() == null ? "none" : String.valueOf(state.program().id()));
-            }
-        } catch (Exception e) {
-            if (!selfTestBlitReported) {
-                selfTestBlitReported = true;
-                LOGGER.error("selftest: the blit experiment failed", e);
-            }
-        }
-    }
-
-    /**
-     * Runs the entity-outline chain the way {@code RenderGlobal} does, over a silhouette this method paints instead of
-     * one an entity rendered.
-     *
-     * <p>Gated by {@code -Doutlands.render.selftest.outline=true}. The point is to have the real four passes - the
-     * group's own two framebuffers, vanilla's {@code post/entity_outline.json}, and the composite that
-     * {@code renderEntityOutlineFramebuffer} does - runnable without a world, so what the player sees when a glowing
-     * entity is on screen can be reproduced and looked at from a screenshot.</p>
-     *
-     * <p>The silhouette is an opaque white square with alpha 0.3 in the middle of the frame, which is what the outline
-     * pass expects to find in its input: {@code entity_sobel.fsh} looks at the <i>alpha</i> gradient, so the shape's
-     * transparency is what makes an outline appear around it.</p>
-     */
-    private void selfTestOutline() {
-        try {
-            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getMinecraft();
-            if (selfTestOutlineGroup == null) {
-                selfTestOutlineGroup = new net.minecraft.client.shader.ShaderGroup(minecraft.getTextureManager(),
-                        minecraft.getResourceManager(), minecraft.getFramebuffer(),
-                        new net.minecraft.util.ResourceLocation("shaders/post/entity_outline.json"));
-                selfTestOutlineGroup.createBindFramebuffers(minecraft.displayWidth, minecraft.displayHeight);
-                selfTestOutlineTarget = selfTestOutlineGroup.getFramebufferRaw("final");
-                LOGGER.info("selftest: outline group over {}x{} target {}",
-                        selfTestOutlineTarget.framebufferTextureWidth, selfTestOutlineTarget.framebufferTextureHeight,
-                        selfTestOutlineTarget.framebufferTexture);
-            }
-
-            // 1. The silhouette, into the group's "final" target, exactly as RenderGlobal starts the chain.
-            selfTestOutlineTarget.framebufferClear();
-            selfTestOutlineTarget.bindFramebuffer(false);
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.ortho(0.0, minecraft.displayWidth, minecraft.displayHeight, 0.0,
-                    1000.0, 3000.0);
-            net.minecraft.client.renderer.GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
-            net.minecraft.client.renderer.GlStateManager.loadIdentity();
-            net.minecraft.client.renderer.GlStateManager.translate(0.0F, 0.0F, -2000.0F);
-            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
-            net.minecraft.client.renderer.GlStateManager.disableCull();
-            net.minecraft.client.renderer.GlStateManager.disableDepth();
-            net.minecraft.client.renderer.GlStateManager.enableBlend();
-            net.minecraft.client.renderer.Tessellator tessellator =
-                    net.minecraft.client.renderer.Tessellator.getInstance();
-            net.minecraft.client.renderer.BufferBuilder buffer = tessellator.getBuffer();
-            buffer.begin(7, net.minecraft.client.renderer.vertex.DefaultVertexFormats.POSITION_COLOR);
-            float cx = minecraft.displayWidth * 0.5F;
-            float cy = minecraft.displayHeight * 0.5F;
-            float half = 40.0F;
-            // Opaque, because that is what the outline material produces: GlStateManager.enableOutlineMode makes the
-            // lightmap unit replace the light with the team colour and take its alpha from the texture, so the
-            // silhouette lands fully opaque and entity_sobel has an alpha step to trace. Drawing it at alpha 0.3 made
-            // the composite a 9% wash (alpha times alpha) and told us nothing about whether it arrived.
-            buffer.pos(cx - half, cy + half, 0.0).color(255, 255, 255, 255).endVertex();
-            buffer.pos(cx + half, cy + half, 0.0).color(255, 255, 255, 255).endVertex();
-            buffer.pos(cx + half, cy - half, 0.0).color(255, 255, 255, 255).endVertex();
-            buffer.pos(cx - half, cy - half, 0.0).color(255, 255, 255, 255).endVertex();
-            tessellator.draw();
-
-            // 2. The four passes, and the composite RenderGlobal.renderEntityOutlineFramebuffer does afterwards. With
-            // the raw mode on, the chain is skipped so the composite shows what the chain was given: a white square in
-            // the middle means the silhouette arrived and the outline was lost in the passes, and no square at all
-            // means it never got there.
-            if (!selfTestOutlineRaw) {
-                selfTestOutlineGroup.render(0.0F);
-            }
-            minecraft.getFramebuffer().bindFramebuffer(false);
-            net.minecraft.client.renderer.GlStateManager.enableBlend();
-            net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
-                    net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
-                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
-                    net.minecraft.client.renderer.GlStateManager.SourceFactor.ZERO,
-                    net.minecraft.client.renderer.GlStateManager.DestFactor.ONE);
-            selfTestOutlineTarget.framebufferRenderExt(minecraft.displayWidth, minecraft.displayHeight, false);
-            net.minecraft.client.renderer.GlStateManager.disableBlend();
-
-            if (!selfTestOutlineReported) {
-                selfTestOutlineReported = true;
-                LOGGER.info("selftest: outline chain rendered (silhouette {}x{} at {},{} in a {}x{} frame)",
-                        2 * half, 2 * half, (int) (cx - half), (int) (cy - half),
-                        minecraft.displayWidth, minecraft.displayHeight);
-                // The targets' own contents, read back into screenshots/, because the composite cannot answer the
-                // question this test exists for: a black window means either the silhouette never arrived or it was
-                // lost on the way out, and only the target itself distinguishes those two. Both targets when the chain
-                // runs - "the composite is empty" is answered by which pass went empty first.
-                if (!selfTestOutlineCaptured && renderTargets != null) {
-                    selfTestOutlineCaptured = true;
-                    String prefix = selfTestOutlineRaw ? "selftest-outline-raw" : "selftest-outline-chain";
-                    captureOutlineTarget(prefix + "-final.png", selfTestOutlineTarget);
-                    if (!selfTestOutlineRaw) {
-                        captureOutlineTarget(prefix + "-swap.png",
-                                selfTestOutlineGroup.getFramebufferRaw("swap"));
-                    }
-                }
-            }
-        } catch (Exception e) {
-            if (!selfTestOutlineReported) {
-                selfTestOutlineReported = true;
-                LOGGER.error("selftest: the outline chain failed", e);
-            }
-        }
-    }
-
-    /**
-     * Asks for one of the outline test's framebuffers to be written to a file at the end of this frame.
-     *
-     * <p>Named rather than looked up by handle so a missing one says which, and so the size in the log is the size the
-     * file will be.</p>
-     */
-    private void captureOutlineTarget(String name, net.minecraft.client.shader.@org.jspecify.annotations.Nullable Framebuffer framebuffer) {
-        if (framebuffer == null) {
-            LOGGER.warn("selftest: the outline group has no framebuffer to read back for {}", name);
-            return;
-        }
-        VulkanRenderTarget target = renderTargets.byTextureId(framebuffer.framebufferTexture);
-        if (target == null) {
-            LOGGER.warn("selftest: the outline target's handle {} has no render target to read back for {}",
-                    framebuffer.framebufferTexture, name);
-            return;
-        }
-        swapchain.captureTarget(target, name);
-        LOGGER.info("selftest: reading the outline target {}x{} back to screenshots/{}",
-                target.width(), target.height(), name);
-    }
-
-    /** The projection the game's shader groups use, rebuilt for a {@code width}x{@code height} pass. */
-    private static org.lwjgl.util.vector.Matrix4f blitProjection(float width, float height) {
-        org.lwjgl.util.vector.Matrix4f projection = new org.lwjgl.util.vector.Matrix4f();
-        projection.setIdentity();
-        projection.m00 = 2.0F / width;
-        projection.m11 = 2.0F / -height;
-        projection.m22 = -0.0020001999F;
-        projection.m33 = 1.0F;
-        projection.m03 = -1.0F;
-        projection.m13 = 1.0F;
-        projection.m23 = -1.0001999F;
-        return projection;
-    }
-
-    /** Compiles and links the self-test program, and reports the layout the modules produced. */
-    private int createSelfTestProgram() {
-        int program = net.minecraftforge.client.render.shader.GlShaders.createProgram();
-        int vertex = net.minecraftforge.client.render.shader.GlShaders.createShader(
-                net.minecraftforge.client.render.shader.GlShaders.VERTEX_SHADER);
-        int fragment = net.minecraftforge.client.render.shader.GlShaders.createShader(
-                net.minecraftforge.client.render.shader.GlShaders.FRAGMENT_SHADER);
-        net.minecraftforge.client.render.shader.GlShaders.shaderSource(vertex, SELF_TEST_VERTEX);
-        net.minecraftforge.client.render.shader.GlShaders.shaderSource(fragment, SELF_TEST_FRAGMENT);
-        net.minecraftforge.client.render.shader.GlShaders.compileShader(vertex);
-        net.minecraftforge.client.render.shader.GlShaders.compileShader(fragment);
-        if (net.minecraftforge.client.render.shader.GlShaders.shaderStatus(vertex,
-                net.minecraftforge.client.render.shader.GlShaders.COMPILE_STATUS) == 0) {
-            throw new IllegalStateException("selftest: the program's vertex stage did not compile:\n"
-                    + net.minecraftforge.client.render.shader.GlShaders.shaderLog(vertex));
-        }
-        if (net.minecraftforge.client.render.shader.GlShaders.shaderStatus(fragment,
-                net.minecraftforge.client.render.shader.GlShaders.COMPILE_STATUS) == 0) {
-            throw new IllegalStateException("selftest: the program's fragment stage did not compile:\n"
-                    + net.minecraftforge.client.render.shader.GlShaders.shaderLog(fragment));
-        }
-        net.minecraftforge.client.render.shader.GlShaders.attachShader(program, vertex);
-        net.minecraftforge.client.render.shader.GlShaders.attachShader(program, fragment);
-        net.minecraftforge.client.render.shader.GlShaders.linkProgram(program);
-        if (net.minecraftforge.client.render.shader.GlShaders.programStatus(program,
-                net.minecraftforge.client.render.shader.GlShaders.LINK_STATUS) == 0) {
-            throw new IllegalStateException("selftest: the program did not link:\n"
-                    + net.minecraftforge.client.render.shader.GlShaders.programLog(program));
-        }
-
-        int sampler = net.minecraftforge.client.render.shader.GlShaders.uniformLocation(program, "DiffuseSampler");
-        if (sampler < 0) {
-            throw new IllegalStateException("selftest: the program has no DiffuseSampler, so nothing would be"
-                    + " sampled");
-        }
-        net.minecraftforge.client.render.shader.GlShaders.uniform1i(sampler, 0);
-
-        net.minecraftforge.client.render.shader.GlShaders.Program linked =
-                net.minecraftforge.client.render.shader.GlShaders.program(program);
-        LOGGER.info("selftest: program {} linked, block {} bytes at set {} binding {}, vertex inputs {}, samplers {}",
-                program, linked.blockSize(), linked.blockSet(), linked.blockBinding(),
-                java.util.Arrays.toString(linked.vertexInputLocations()),
-                linked.samplerUniforms().stream()
-                        .map(u -> u.name() + "@" + u.descriptorSet() + ":" + u.binding()).toList());
-        return program;
-    }
-
-    /** Prints one line of the self-test's operation trace. */
-    static void logOperation(String kind, String detail) {
-        LOGGER.info("selftest: op {} {}", kind, detail);
-    }
-
-    /** Creates, resizes and releases a render target, reporting what the device said. Gated by a system property. */
-    private void selfTestRenderTargets() {
-        net.minecraftforge.client.render.target.RenderTarget target = renderTargets.create(256, 256, true);
-        boolean registered = textureCache.hasExternal(target.textureId());
-        LOGGER.info("selftest: target {}x{} depth={} texture={} registered={}",
-                target.width(), target.height(), target.useDepth(), target.textureId(), registered);
-        if (!registered) {
-            throw new IllegalStateException("selftest: the target's handle was not registered, so nothing could"
-                    + " sample it");
-        }
-        target.resize(512, 384, true);
-        LOGGER.info("selftest: after resize {}x{}, same handle={}",
-                target.width(), target.height(), textureCache.hasExternal(target.textureId()));
-        target.close();
-        LOGGER.info("selftest: after close registered={}", textureCache.hasExternal(target.textureId()));
-    }
 
     @Override
     public void setSwapInterval(int interval) {
@@ -796,30 +276,12 @@ public final class VulkanBackend implements RenderBackend {
     @Override
     public void close() {
         net.minecraftforge.client.render.target.FrameRecordings.install(null);
-        if (selfTestFramebuffer != null) {
-            selfTestFramebuffer.deleteFramebuffer();
-            selfTestFramebuffer = null;
-        }
-        // The self-test objects are the backend's own, so they are released here. Anything the game created is a
-        // different matter: it deletes its framebuffers after the display is gone, which is why the factory is only
-        // withdrawn below rather than taking the targets with it.
-        if (selfTestOutlineGroup != null) {
-            selfTestOutlineGroup.deleteShaderGroup();
-            selfTestOutlineGroup = null;
-            selfTestOutlineTarget = null;
-        }
-        if (selfTestBlitShader != null) {
-            selfTestBlitShader.deleteShader();
-            selfTestBlitShader = null;
-        }
-        if (selfTestBlitIn != null) {
-            selfTestBlitIn.deleteFramebuffer();
-            selfTestBlitIn = null;
-        }
         if (renderTargets != null) {
-            // The framebuffers that hold these targets outlive the backend - the game deletes its own after the
-            // display goes away - so what is withdrawn here is only the ability to allocate more.
+            // The game's framebuffer objects outlive the backend and are never deleted on quit, but their Vulkan
+            // images are ours - so they are released here, before the device goes, or the validation layers report
+            // them as leaked. See VulkanRenderTargets.close.
             net.minecraftforge.client.render.target.RenderTargets.uninstall(renderTargets);
+            renderTargets.close();
             renderTargets = null;
         }
         ChunkMeshCapture.disable();
@@ -851,6 +313,8 @@ public final class VulkanBackend implements RenderBackend {
             context.close();
             context = null;
         }
+        // Last, so the image counters have seen every destroy: the swapchain's, the textures', the targets'.
+        LOGGER.info("{}", VulkanSwapchain.report());
     }
 
     /**

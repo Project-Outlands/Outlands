@@ -114,7 +114,6 @@ final class VulkanStream implements AutoCloseable {
     /** Which index buffer is bound, kept across draws so it is rebound only when it changes. */
     private long boundIndexBuffer;
     /** Programs reported once, so the log names each one the first time it is drawn. */
-    private final java.util.Set<Integer> programTrace = new java.util.HashSet<>();
     /**
      * Whether a program draw has taken over the descriptor sets since the stream last bound its own.
      *
@@ -237,15 +236,6 @@ final class VulkanStream implements AutoCloseable {
         updateLightmapDescriptor(commandBuffer, slot);
     }
 
-    /** The uniform block as floats, for the trace. A read-only view has no backing array, so it is copied. */
-    private static float[] blockFloats(byte[] block) {
-        java.nio.FloatBuffer floats = java.nio.ByteBuffer.wrap(block)
-                .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
-        float[] values = new float[floats.remaining()];
-        floats.get(values);
-        return values;
-    }
-
     private void resolve(int texture, VkCommandBuffer commandBuffer, int slot) {
         if (renderTargets != null) {
             // A target that will be sampled this frame is moved to the sampled layout here, before the rendering
@@ -291,60 +281,6 @@ final class VulkanStream implements AutoCloseable {
         this.programs = programs;
     }
 
-    /**
-     * One-shot trace of a frame's operations, under {@code -Doutlands.render.trace.ops=true}.
-     *
-     * <p>Null once it has printed, because a frame's operation list is hundreds of entries and only the first one is
-     * interesting. This is how the target-switch ordering was verified: the list is the whole contract between the
-     * game's frame and the recorder, so reading it back is often faster than reasoning about what should have been
-     * recorded.</p>
-     */
-    private static final int traceFrame = traceFrame();
-
-    /** Whether an outline-mode draw has been reported. Once is enough: the question is whether it happens at all. */
-    private static boolean outlineDrawLogged;
-
-    /** Whether the frame chosen by the {@code targets} trigger has been traced. */
-    private static boolean tracedTargetFrame;
-
-    private static boolean hasTargetSwitch(List<FrameDraws.Operation> ops) {
-        for (FrameDraws.Operation op : ops) {
-            if (op instanceof FrameDraws.TargetBind bind && bind.target() != 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static int framesReplayed;
-
-    /**
-     * Which frame's operations to trace, from {@code -Doutlands.render.trace.ops=N}.
-     *
-     * <p>A frame number rather than a flag because the interesting frame is not always the first one: the
-     * entity-outline pass only runs once a world is loaded and a glowing entity is in view, which is never frame one.
-     * {@code =true} keeps its old meaning - the first frame.</p>
-     */
-    private static int traceFrame() {
-        String value = System.getProperty("outlands.render.trace.ops");
-        if (value == null || value.isEmpty()) {
-            return 0;
-        }
-        if ("true".equalsIgnoreCase(value.trim())) {
-            return 1;
-        }
-        if ("targets".equalsIgnoreCase(value.trim())) {
-            // The first frame that switches into an offscreen target: that is the entity-outline pass, and it arrives
-            // at no predictable frame number.
-            return -1;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
-            return 1;
-        }
-    }
-
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget windowTarget) {
         draws.clear();
@@ -354,14 +290,6 @@ final class VulkanStream implements AutoCloseable {
             }
         }
         drawsThisFrame = draws.size();
-        framesReplayed++;
-        boolean tracing;
-        if (traceFrame < 0) {
-            tracing = !tracedTargetFrame && hasTargetSwitch(ops);
-            tracedTargetFrame |= tracing;
-        } else {
-            tracing = framesReplayed == traceFrame;
-        }
         if (ops.isEmpty()) {
             return;
         }
@@ -485,48 +413,21 @@ final class VulkanStream implements AutoCloseable {
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
-            if (tracing) {
-                for (FrameDraws.Operation op : ops) {
-                    String detail;
-                    if (op instanceof FrameDraws.TargetBind bind) {
-                        detail = "target=" + bind.target() + " " + bind.width() + "x" + bind.height();
-                    } else if (op instanceof FrameDraws.Clear clear) {
-                        detail = "mask=" + clear.mask() + " color=" + java.util.Arrays.toString(clear.color())
-                                + " scissor=" + clear.scissorEnabled() + " " + java.util.Arrays.toString(clear.scissorBox());
-                    } else if (op instanceof FrameDraws.Draw draw) {
-                        java.nio.FloatBuffer f = java.nio.ByteBuffer.wrap(draw.vertices())
-                                .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
-                        int stride = draw.layout().stride() / 4;
-                        detail = "v0=(" + f.get(0) + "," + f.get(1) + "," + f.get(2) + ")"
-                                + " v2=(" + f.get(stride * 2) + "," + f.get(stride * 2 + 1) + "," + f.get(stride * 2 + 2) + ")"
-                                + " vertices=" + draw.vertexCount() + " texture=" + draw.state().texture()
-                                + " viewport=" + java.util.Arrays.toString(draw.state().viewport())
-                                + " scissor=" + draw.state().scissorEnabled() + " "
-                                + java.util.Arrays.toString(draw.state().scissor())
-                                + " blend=" + draw.state().blend() + " depthTest=" + draw.state().depthTest()
-                                + " cull=" + draw.state().cull()
-                                + " overlay=" + draw.state().overlayMode()
-                                + " colour=#" + Integer.toHexString(draw.state().colorArgb())
-                                + " program=" + (draw.state().program() == null ? "none"
-                                        : String.valueOf(draw.state().program().id()));
-                    } else if (op instanceof FrameDraws.FramebufferCopy copy) {
-                        detail = "texture=" + copy.texture() + " " + copy.width() + "x" + copy.height();
-                    } else {
-                        detail = "";
-                    }
-                    net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation(op.getClass().getSimpleName(),
-                            detail);
-                }
-            }
             // What the instance is currently open over. A frame starts on the window's image and every switch moves it.
             FrameRenderTarget current = windowTarget;
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.TargetBind bind) {
+                    // A switch to the target already being drawn into is what GL would call a no-op; it is recorded
+                    // anyway because the game cannot know what the recorder is doing. Ending the instance and opening
+                    // it again with LOAD would cost a full attachment load for nothing.
+                    FrameRenderTarget next = bind.target() == 0 ? windowTarget : resolveTarget(bind);
+                    if (next == current) {
+                        continue;
+                    }
                     vkCmdEndRendering(commandBuffer);
                     // The target being left has finished its pass: this is the only point where its contents are
                     // complete and it is still in the attachment layout, so it moves to the sampled layout here.
                     current.prepareForSampling(commandBuffer);
-                    FrameRenderTarget next = bind.target() == 0 ? windowTarget : resolveTarget(bind);
                     next.prepareForRendering(commandBuffer);
                     next.beginRendering(commandBuffer);
                     current = next;
@@ -686,32 +587,12 @@ final class VulkanStream implements AutoCloseable {
                 // pipeline was told to expect clockwise.
                 boolean programWinding = current.flipsVertically();
 
-                // One line the first time an outline-mode draw reaches the recorder. Whether the entity-outline pass
-                // ran at all, and whether it ran with the lightmap unit set to replace, is the first question asked of
-                // an in-world outline that does not appear - and it is not answerable from a picture alone.
-                if (ds.overlayMode() != 0 && !outlineDrawLogged) {
-                    outlineDrawLogged = true;
-                    net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation("OutlineDraw",
-                            "texture=" + ds.texture() + " colour=" + java.util.Arrays.toString(ds.overlayColor())
-                                    + " target=" + current.width() + "x" + current.height());
-                }
-
                 if (ds.program() != null) {
                     // A program of the game's own: its pipeline, its block, its samplers. Nothing the stream has
                     // cached applies to it, and everything it binds has to be rebound for the next streamed draw.
                     if (programs == null) {
                         throw new IllegalStateException("a draw carries program " + ds.program().id()
                                 + " but no program cache is installed");
-                    }
-                    if (tracing && programTrace.add(ds.program().id())) {
-                        net.minecraftforge.client.render.vulkan.VulkanBackend.logOperation("Program",
-                                "program=" + ds.program().id() + " vertices=" + draw.vertexCount()
-                                        + " samplers=" + java.util.Arrays.toString(ds.programSamplers())
-                                        + " block=" + ds.programBlock().length
-                                        + " viewport=" + java.util.Arrays.toString(ds.viewport())
-                                            + " target=" + targetWidth + "x" + targetHeight
-                                            + " flipsViewport=" + programFlips + " flippedWinding=" + programWinding
-                                            + " block=" + java.util.Arrays.toString(blockFloats(ds.programBlock())));
                     }
                     applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                             programFlips);

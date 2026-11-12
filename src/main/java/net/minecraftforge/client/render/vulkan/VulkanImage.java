@@ -66,6 +66,36 @@ final class VulkanImage implements AutoCloseable {
     /** Whether this image has been in a layout it can be copied into and sampled from. */
     private boolean initialised;
 
+    /**
+     * Every image created and destroyed through this class, so a shutdown can say whether they balanced.
+     *
+     * <p>The validation layers already report a leaked image at {@code vkDestroyDevice}, but they report it once per
+     * run, at the very end, and only while the layers are loaded. A counter that is always maintained answers the same
+     * question at every shutdown, and it is what makes "a ShaderGroup's targets are released when the group goes" a
+     * measurement rather than an assumption.</p>
+     */
+    private static int created;
+    private static int destroyed;
+
+    /** Copies of an image into host or scissor memory; counted so a frame can prove it did not add any.</p> */
+    private static int copies;
+
+    static void recordCopy() {
+        copies++;
+    }
+
+    static int createdCount() {
+        return created;
+    }
+
+    static int destroyedCount() {
+        return destroyed;
+    }
+
+    static int copyCount() {
+        return copies;
+    }
+
     private VulkanImage(VkDevice device, long image, long memory, long view, int width, int height, int format) {
         this.device = device;
         this.image = image;
@@ -186,6 +216,7 @@ final class VulkanImage implements AutoCloseable {
                 VkCheck.check(vkBindImageMemory(device, image, memory, 0L), "vkBindImageMemory");
 
                 view = createView(device, image, stack, format, aspect);
+                created++;
                 return new VulkanImage(device, image, memory, view, width, height, format);
             } catch (RuntimeException e) {
                 if (view != 0L) {
@@ -195,6 +226,7 @@ final class VulkanImage implements AutoCloseable {
                     vkFreeMemory(device, memory, null);
                 }
                 vkDestroyImage(device, image, null);
+                destroyed++;
                 throw e;
             }
         }
@@ -304,6 +336,7 @@ final class VulkanImage implements AutoCloseable {
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer(commandBuffer, image,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination, region);
+            recordCopy();
 
             transition(commandBuffer, stack,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -342,6 +375,7 @@ final class VulkanImage implements AutoCloseable {
                     .mipLevel(0).baseArrayLayer(0).layerCount(1);
             org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer(commandBuffer, target.colorImage(),
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, toBuffer);
+            recordCopy();
 
             transitionExternal(commandBuffer, stack, target.colorImage(),
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -481,5 +515,6 @@ final class VulkanImage implements AutoCloseable {
         vkDestroyImageView(device, view, null);
         vkDestroyImage(device, image, null);
         vkFreeMemory(device, memory, null);
+        destroyed++;
     }
 }

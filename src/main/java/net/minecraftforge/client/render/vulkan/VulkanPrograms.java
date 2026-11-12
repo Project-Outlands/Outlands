@@ -16,7 +16,9 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
-import java.util.HashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+
 import java.util.List;
 import java.util.Map;
 
@@ -75,7 +77,8 @@ final class VulkanPrograms implements AutoCloseable {
     private final VulkanBuffer[] arenas = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
     private final int[] arenaCursor = new int[VulkanSwapchain.FRAMES_IN_FLIGHT];
     private final long[] pools = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
-    private final Map<Integer, VulkanProgram> programs = new HashMap<>();
+    /** Programs by the GL name the game gave them; primitive keys because this is read once per program draw. */
+    private final Int2ObjectMap<VulkanProgram> programs = new Int2ObjectOpenHashMap<>();
 
     VulkanPrograms(VulkanContext context, int colorFormat, int depthFormat, VulkanTextures textures) {
         this.context = context;

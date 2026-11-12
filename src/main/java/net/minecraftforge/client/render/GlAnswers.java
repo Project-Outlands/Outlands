@@ -84,28 +84,21 @@ public final class GlAnswers {
         caps.OpenGL14 = true;
         // 1.5 - buffer objects. Answering false here selects display lists, which no backend implements.
         caps.OpenGL15 = true;
-        // 2.0 / 2.1 and the shader extensions are NOT declared yet, and this is deliberate.
+        // 2.0 / 2.1, which is what §8.4 fixes the contract at: vanilla's post-processing is GLSL 1.20, and every
+        // one of the game's five program files is now answered by a module this project ships.
         //
-        // §8.4 fixes the contract at GL 2.1 because vanilla's post-processing is GLSL 1.20. Shader *objects* now work
-        // on this backend - GlShaders keeps GL's object model, the game's own programs ship as precompiled modules
-        // beside their sources, and anything else is compiled from GLSL by shaderc - so glCreateShader is no longer
-        // the reason to say no.
-        //
-        // The reason is what follows a successful link. Declaring 2.0/2.1 makes RenderGlobal build the entity-outline
-        // ShaderGroup, and that group binds and clears a *second* render target every frame and then draws four
-        // full-screen quads with the linked program. This backend has one colour target and no program draw path yet,
-        // so the group would fail on its first bind. Answering "supported" before those exist would move the failure
-        // from a stated gap into the middle of a frame.
-        //
-        // Declaring it off means vanilla skips those paths rather than failing in them. Every use of
-        // ShaderLinkHelper in the game is behind an OpenGlHelper.shadersSupported check, so nothing else breaks.
-        // The cost is visible and stated at startup: no entity outline, no post-processing.
-        // The experiment switch for S5: declaring 2.0/2.1 is what makes vanilla build its ShaderGroups, and the point
-        // of S5 is to find out whether the program path draws them correctly. Off by default, because a player must
-        // not land in the middle of that experiment; S6 removes the switch and declares the contract for real.
-        boolean shaders = Boolean.getBoolean("outlands.render.declare.gl2");
-        caps.OpenGL20 = shaders;
-        caps.OpenGL21 = shaders;
+        // This was the last switch to turn: while it was off, RenderGlobal never built its entity-outline ShaderGroup
+        // and the world had no outlines at all. What made it safe to turn on is the chain, not the declaration -
+        // GlShaders keeping GL's object model, the game's programs shipping as AOT modules, the program draw path,
+        // and offscreen targets that can be sampled inside the frame that painted them.
+        caps.OpenGL20 = true;
+        caps.OpenGL21 = true;
+        // The ARB forms of the same three, because vanilla still takes the extension branch when it finds one: with
+        // them false, ShaderLinkHelper installs nothing and every ShaderGroup fails on its first bind, which is how
+        // an outline pass turns into an exception in the middle of a frame.
+        caps.GL_ARB_shader_objects = true;
+        caps.GL_ARB_vertex_shader = true;
+        caps.GL_ARB_fragment_shader = true;
         // The one extension the contract names: vanilla's Framebuffer needs it below GL 3.0.
         caps.GL_ARB_framebuffer_object = true;
         caps.GL_EXT_blend_func_separate = true;
@@ -114,11 +107,6 @@ public final class GlAnswers {
         caps.GL_ARB_multitexture = true;
         caps.GL_ARB_texture_env_combine = true;
         caps.GL_ARB_vertex_buffer_object = true;
-        // See the OpenGL20/21 comment above: shaders are not implemented yet, so the ARB fallback must not offer a
-        // second way in.
-        caps.GL_ARB_shader_objects = shaders;
-        caps.GL_ARB_vertex_shader = shaders;
-        caps.GL_ARB_fragment_shader = shaders;
         return caps;
     }
 }

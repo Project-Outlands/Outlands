@@ -17,6 +17,12 @@ import java.util.Map;
  * uniform blocks' members with their offsets, and the declared size of each member's type. That is the minimum both
  * ends need: the descriptor set layout when the pipeline is built, and the byte layout when the game hands over a
  * {@code glUniform4f}.</p>
+ *
+ * <p><b>Why the id tables here are boxed.</b> Everything below keys on SPIR-V ids, and those tables are built once per
+ * link - a few thousand entries for a large module, and only when a module is linked, against per-draw and per-frame
+ * paths elsewhere that are all primitive-keyed ({@code GlShaders}, {@code VulkanPrograms}, {@code VulkanTextures}).
+ * Spending {@code Int2ObjectOpenHashMap} on them would buy a one-off allocation against a binary parser whose tables
+ * read as "id to name"; the trade was made deliberately, not missed.</p>
  */
 public final class SpirvReflection {
 
@@ -445,8 +451,7 @@ public final class SpirvReflection {
             }
             return switch (type.kind) {
                 case BOOL, INT, FLOAT -> type.scalarSize;
-                case VECTOR -> sizeOf(type.memberOrComponent, constants) * type.arrayStrideOrMemberCount;
-                case MATRIX -> sizeOf(type.memberOrComponent, constants) * type.arrayStrideOrMemberCount;
+                case VECTOR, MATRIX -> sizeOf(type.memberOrComponent, constants) * type.arrayStrideOrMemberCount;
                 case ARRAY -> {
                     long[] length = constants.get(type.arrayStrideOrMemberCount);
                     long count = length == null ? 0 : length[0];

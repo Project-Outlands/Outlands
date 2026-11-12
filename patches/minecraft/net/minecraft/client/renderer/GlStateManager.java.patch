@@ -333,7 +333,7 @@
      public static void glGetTexImage(int target, int level, int format, int type, IntBuffer pixels)
      {
 +        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("texture readback (glGetTexImage)", "world icon / screenshot readback not yet implemented; returning blank image"); return; }
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("texture readback (glGetTexImage)", "a mod reading a texture into client memory needs a transfer of its own - vanilla's callers are routed earlier; returning a blank image"); return; }
          GL11.glGetTexImage(target, level, format, type, pixels);
      }
  
@@ -638,7 +638,7 @@
      public static void glReadPixels(int x, int y, int width, int height, int format, int type, IntBuffer pixels)
      {
 +        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("pixel readback (glReadPixels)", "screenshot readback not yet implemented; returning blank image"); return; }
++        if (state2 != null) { net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("pixel readback (glReadPixels)", "the frame is read back by the backend rather than by a GL call, so only a mod asking for raw pixels sees this - returning a blank image"); return; }
          GL11.glReadPixels(x, y, width, height, format, type, pixels);
      }
  

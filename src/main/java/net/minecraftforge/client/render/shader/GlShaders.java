@@ -10,6 +10,13 @@ import org.apache.logging.log4j.Logger;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -190,8 +197,15 @@ public final class GlShaders {
         }
     }
 
-    private static final Map<Integer, Shader> SHADERS = new LinkedHashMap<>();
-    private static final Map<Integer, Program> PROGRAMS = new LinkedHashMap<>();
+    /**
+     * Shader objects and programs by their GL names.
+     *
+     * <p>fastutil's primitive-keyed maps, and insertion-ordered: every uniform write resolves a location by walking
+     * {@link #PROGRAMS} in the order its programs were linked, so the order is part of the lookup result. A boxed key
+     * here is an allocation on a path the game drives once per uniform per draw.</p>
+     */
+    private static final Int2ObjectMap<Shader> SHADERS = new Int2ObjectLinkedOpenHashMap<>();
+    private static final Int2ObjectMap<Program> PROGRAMS = new Int2ObjectLinkedOpenHashMap<>();
     private static int nextShaderId = 1;
     private static int nextProgramId = 1;
     private static int currentProgram;
@@ -398,7 +412,7 @@ public final class GlShaders {
         // One entry per (set, binding), because that is what a descriptor set layout is: a binding, not a name. Both
         // stages may declare the same sampler - a shader that samples in the vertex stage as well - and the two
         // reflections describe the same binding. Keeping both would make a layout with two bindings at one index.
-        Map<Long, Uniform> samplers = new LinkedHashMap<>();
+        Long2ObjectMap<Uniform> samplers = new Long2ObjectLinkedOpenHashMap<>();
         for (Uniform uniform : existing.uniforms) {
             if (!uniform.sampler()) {
                 continue;
@@ -420,13 +434,17 @@ public final class GlShaders {
         if (vertexModule == null) {
             existing.vertexInputLocations = new int[0];
         } else {
-            java.util.TreeSet<Integer> locations = new java.util.TreeSet<>();
+            IntOpenHashSet locations = new IntOpenHashSet();
             for (SpirvReflection.StageVariable variable : SpirvReflection.stageInterface(vertexModule)) {
                 if (!variable.output()) {
                     locations.add(variable.location());
                 }
             }
-            existing.vertexInputLocations = locations.stream().mapToInt(Integer::intValue).toArray();
+            // Sorted, because the pipeline's vertex input descriptions are built in this order. A set first, then a
+            // sort: two stages may declare the same location and a pipeline must not describe it twice.
+            int[] sorted = locations.toIntArray();
+            IntArrays.quickSort(sorted);
+            existing.vertexInputLocations = sorted;
         }
         existing.linked = true;
     }

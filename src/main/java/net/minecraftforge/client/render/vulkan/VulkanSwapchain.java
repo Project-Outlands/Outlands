@@ -175,30 +175,20 @@ final class VulkanSwapchain {
     private int screenshotHeight;
 
     /**
-     * The targets the next frame is to read back, for the self-tests.
+     * What a frame spent, accumulated for the shutdown report.
      *
-     * <p>A target's picture can only be read from inside a frame: the draws that painted it are commands in this
-     * frame's buffer. So the requests are registered before {@link #drawFrame} and satisfied the same way a screenshot
-     * is - a copy into host memory after the last draw, then a file once the frame's fence has signalled.</p>
-     *
-     * <p>A list rather than one: the outline chain's four passes each write a different target, and "the composite is
-     * empty" is answered by knowing which pass went empty first.</p>
+     * <p>§11.5 asks for two numbers that no picture shows: rendering instances per frame stay within "target switches
+     * plus one", and target switches do not add image copies. Both are counted here, every frame, and reported once at
+     * shutdown - a frame that broke either leaves a trace even when it looked right on screen.</p>
      */
-    private final java.util.List<Capture> pendingCaptures = new java.util.ArrayList<>();
-    /** The captures the frame being recorded is copying out, until its fence has been waited on. */
-    private java.util.List<Capture> captures = java.util.List.of();
-
-    /** One target's contents on their way to a file. */
-    private static final class Capture {
-        final FrameRenderTarget target;
-        final String name;
-        VulkanBuffer buffer;
-
-        Capture(FrameRenderTarget target, String name) {
-            this.target = target;
-            this.name = name;
-        }
-    }
+    private static int framesRecorded;
+    private static int maxInstances;
+    private static int maxSwitches;
+    private static int maxBinds;
+    private static int instanceOverBudget;
+    private static int copyOverBudget;
+    /** When the last periodic report was printed, in {@link System#nanoTime()} units. */
+    private static long lastReportAt;
 
     private int extentHeight;
 
@@ -258,11 +248,6 @@ final class VulkanSwapchain {
         @Override
         public long colorImage() {
             return images[imageIndex];
-        }
-
-        /** The window cannot be a capture target: the screenshot path reads its image directly. */
-        @Override
-        public void copyTo(VkCommandBuffer commandBuffer, long destination) {
         }
 
         @Override
@@ -341,17 +326,6 @@ final class VulkanSwapchain {
         this.pendingDraws = draws;
     }
 
-    /**
-     * Asks for a render target's contents to be written to a PNG at the end of the next frame.
-     *
-     * <p>For the outline self-test: the chain can be run to completion with a perfectly empty hand and nothing about
-     * the composite says so, which is why the target itself has to be readable. Called before
-     * {@link #setPendingDraws}, so the order the request is made in is the order the frame it describes is drawn in.</p>
-     */
-    void captureTarget(FrameRenderTarget target, String name) {
-        pendingCaptures.add(new Capture(target, name));
-    }
-
     void drawFrame(long window) {
         if (!outOfDate && windowSizeChanged(window)) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
@@ -402,7 +376,6 @@ final class VulkanSwapchain {
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
             // waiting here costs the player nothing.
             finishScreenshot(frame);
-            finishTargetCaptures(frame);
         }
 
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
@@ -499,61 +472,6 @@ final class VulkanSwapchain {
         }
     }
 
-    /**
-     * Records a copy of each requested render target's colour attachment into host memory.
-     *
-     * <p>After the screenshot copy and still outside the rendering instance: a copy may not be recorded inside a pass,
-     * and every target's contents are final by the time the composite has read them.</p>
-     */
-    private void recordTargetCopies(VkCommandBuffer commandBuffer) {
-        for (Capture capture : captures) {
-            FrameRenderTarget target = capture.target;
-            long bytes = (long) target.width() * target.height() * 4L;
-            if (bytes <= 0 || bytes > Integer.MAX_VALUE) {
-                net.minecraftforge.client.render.screenshot.Screenshots.failed(
-                        net.minecraftforge.client.render.screenshot.Screenshots.file(capture.name, target.width(),
-                                target.height()),
-                        "a " + target.width() + "x" + target.height()
-                                + " target is not a size this backend can read back");
-                continue;
-            }
-            capture.buffer = VulkanBuffer.createReadback(device, context, (int) bytes);
-            // No barrier on the buffer afterwards: the host read waits on the frame's fence, which is the same
-            // guarantee the screenshot path relies on.
-            target.copyTo(commandBuffer, capture.buffer.handle());
-        }
-    }
-
-    /** Writes out the captured targets once the frame that copied them has finished. */
-    private void finishTargetCaptures(int frame) {
-        if (captures.isEmpty()) {
-            return;
-        }
-        java.util.List<Capture> done = captures;
-        captures = java.util.List.of();
-        try {
-            VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
-            for (Capture capture : done) {
-                if (capture.buffer == null) {
-                    continue;
-                }
-                FrameRenderTarget target = capture.target;
-                byte[] bgra = capture.buffer.read(target.width() * target.height() * 4);
-                net.minecraftforge.client.render.screenshot.Screenshots.deliverWithAlpha(
-                        net.minecraftforge.client.render.screenshot.Screenshots.file(capture.name, target.width(),
-                                target.height()),
-                        bgra, target.width(), target.height());
-            }
-        } finally {
-            for (Capture capture : done) {
-                if (capture.buffer != null) {
-                    capture.buffer.close();
-                    capture.buffer = null;
-                }
-            }
-        }
-    }
-
     private void beginRenderingInstance(VkCommandBuffer commandBuffer, int imageIndex, int colorLoadOp) {
         // The colour comes from what the game asked for, not from a constant: GlStateManager.clear(16640) and
         // Framebuffer.setFramebufferColor both happen before Display.update() hands the frame over. A resumed instance
@@ -578,14 +496,41 @@ final class VulkanSwapchain {
                 colorLoadOp, requested, true, colorLoadOp, depth);
     }
 
+    /**
+     * One line at shutdown: what the renderer did, and whether either §11.5 budget was ever exceeded.
+     *
+     * <p>Deliberately not behind a property. The numbers are four counters and the line is printed once.</p>
+     */
+    static String report() {
+        return "renderer: " + framesRecorded + " frames, at most " + maxInstances
+                + " rendering instances in a frame (" + maxBinds + " binds at most, " + maxSwitches
+                + " of them into a target),"
+                + " instance budget exceeded " + instanceOverBudget + " times, copy budget exceeded "
+                + copyOverBudget + " times, images " + VulkanImage.createdCount() + " created / "
+                + VulkanImage.destroyedCount() + " destroyed ("
+                + (VulkanImage.createdCount() - VulkanImage.destroyedCount()) + " live), "
+                + VulkanRenderTargets.stats();
+    }
+
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
-        // A capture request belongs to this frame rather than to the next one: it names targets the draws recorded
-        // into this buffer just painted.
-        captures = java.util.List.copyOf(pendingCaptures);
-        pendingCaptures.clear();
+        RenderInstance.resetOpened();
+        int copiesBefore = VulkanImage.copyCount();
+        int binds = 0;
+        int switches = 0;
+        int copyOps = 0;
+        for (net.minecraftforge.client.render.vertex.FrameDraws.Operation op : pendingDraws) {
+            if (op instanceof net.minecraftforge.client.render.vertex.FrameDraws.TargetBind bind) {
+                binds++;
+                if (bind.target() != 0) {
+                    switches++;
+                }
+            } else if (op instanceof net.minecraftforge.client.render.vertex.FrameDraws.FramebufferCopy) {
+                copyOps++;
+            }
+        }
         VkCheck.check(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer");
         VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
                 .sType$Default()
@@ -668,9 +613,6 @@ final class VulkanSwapchain {
         if (screenshot != null) {
             recordScreenshotCopy(commandBuffer, imageIndex, screenshot, stack);
         }
-        if (!captures.isEmpty()) {
-            recordTargetCopies(commandBuffer);
-        }
 
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
         presentBarrier.get(0)
@@ -692,6 +634,33 @@ final class VulkanSwapchain {
         vkCmdPipelineBarrier2(commandBuffer, presentDependency);
 
         VkCheck.check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
+
+        // Budgets, measured on the recorded frame rather than assumed: one instance for the window, one per bind, and
+        // one more per framebuffer copy - a copy may not be recorded inside a rendering instance, so the instance is
+        // closed around it and reopened with LOAD. Binds, not switches: a switch back to the window opens an instance
+        // exactly like a switch into a target does, and the first version of this counted only the latter.
+        int instances = RenderInstance.opened();
+        int copies = VulkanImage.copyCount() - copiesBefore;
+        int expectedCopies = copyOps + (screenshot != null ? 1 : 0);
+        framesRecorded++;
+        maxInstances = Math.max(maxInstances, instances);
+        maxSwitches = Math.max(maxSwitches, switches);
+        maxBinds = Math.max(maxBinds, binds);
+        if (instances > binds + copyOps + 1) {
+            instanceOverBudget++;
+        }
+        if (copies > expectedCopies) {
+            copyOverBudget++;
+        }
+        // Every fifteen seconds, the same line the shutdown prints - by time, not by frame, because frame rate is not
+        // a clock: an uncapped menu renders ten times faster than a world and would otherwise report ten times as
+        // often. A run that is killed rather than closed still reports, and a budget that starts being exceeded is
+        // visible while the session is still going.
+        long now = System.nanoTime();
+        if (now - lastReportAt >= 15_000_000_000L) {
+            lastReportAt = now;
+            LOGGER.info("{}", report());
+        }
     }
 
     /**

@@ -26,9 +26,6 @@ import java.util.Set;
  */
 final class FrameStateVk implements FrameState {
 
-    private static final org.apache.logging.log4j.Logger LOGGER =
-            org.apache.logging.log4j.LogManager.getLogger("Outlands|render");
-
     static final class MatrixStack {
         private final Matrix4f[] stack;
         private int top;
@@ -465,9 +462,6 @@ final class FrameStateVk implements FrameState {
     /** One of the {@code OVERLAY_*} values: what the texture environment's combine stack is doing. */
     private int overlayMode;
 
-    /** Whether the unit an outline combine landed on has been reported. Once is enough, and it is not per frame. */
-    private static boolean outlineUnitLogged;
-
     @Override
     public int overlayMode() {
         return overlayMode;
@@ -489,13 +483,6 @@ final class FrameStateVk implements FrameState {
             if (texEnvMode[unit] == GL_COMBINE && texCombineRgb[unit] == 7681 /* GL_REPLACE */) {
                 System.arraycopy(texEnvColor[unit], 0, overlayColor, 0, 4);
                 overlayMode = unit == 0 ? OVERLAY_TEXTURE_REPLACED : OVERLAY_LIGHT_REPLACED;
-                if (!outlineUnitLogged) {
-                    outlineUnitLogged = true;
-                    // Which unit got the replace decides what disappears from the picture, and the answer is not
-                    // something that can be read off the source: it depends on which unit the caller left active.
-                    LOGGER.info("outline combine on unit {} -> mode {} colour={}", unit, overlayMode,
-                            java.util.Arrays.toString(texEnvColor[unit]));
-                }
                 return;
             }
             if (texEnvMode[unit] == GL_COMBINE

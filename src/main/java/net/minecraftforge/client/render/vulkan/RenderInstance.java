@@ -25,7 +25,24 @@ import static org.lwjgl.vulkan.VK13.vkCmdBeginRendering;
  */
 final class RenderInstance {
 
+    /**
+     * Instances opened since the counter was last reset - one frame's worth.
+     *
+     * <p>What it is for: a frame may open one instance plus one per target switch, and no more. More means something
+     * reopened an instance it did not need to, which costs a full attachment load per switch and is invisible in the
+     * picture. See docs/vulkan-backend-plan.md §11.5 item 4.</p>
+     */
+    private static int opened;
+
     private RenderInstance() {}
+
+    static void resetOpened() {
+        opened = 0;
+    }
+
+    static int opened() {
+        return opened;
+    }
 
     /**
      * Opens a rendering instance.
@@ -83,6 +100,7 @@ final class RenderInstance {
             }
 
             vkCmdBeginRendering(commandBuffer, renderingInfo);
+            opened++;
 
             VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
             viewport.get(0).x(0.0f).y(0.0f).width(width).height(height).minDepth(0.0f).maxDepth(1.0f);
