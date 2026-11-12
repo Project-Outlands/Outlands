@@ -95,6 +95,8 @@ public final class VulkanBackend implements RenderBackend {
     private final boolean selfTestBlit = Boolean.getBoolean("outlands.render.selftest.blit");
     /** Whether to run the whole entity-outline chain over a manufactured silhouette. See {@link #selfTestOutline()}. */
     private final boolean selfTestOutline = Boolean.getBoolean("outlands.render.selftest.outline");
+    /** Whether to composite the raw silhouette instead of running the chain, which says where an outline is lost. */
+    private final boolean selfTestOutlineRaw = Boolean.getBoolean("outlands.render.selftest.outline.raw");
     private net.minecraft.client.shader.ShaderGroup selfTestOutlineGroup;
     private net.minecraft.client.shader.Framebuffer selfTestOutlineTarget;
     private boolean selfTestOutlineReported;
@@ -576,8 +578,13 @@ public final class VulkanBackend implements RenderBackend {
             buffer.pos(cx - half, cy - half, 0.0).color(255, 255, 255, 76).endVertex();
             tessellator.draw();
 
-            // 2. The four passes, and the composite RenderGlobal.renderEntityOutlineFramebuffer does afterwards.
-            selfTestOutlineGroup.render(0.0F);
+            // 2. The four passes, and the composite RenderGlobal.renderEntityOutlineFramebuffer does afterwards. With
+            // the raw mode on, the chain is skipped so the composite shows what the chain was given: a white square in
+            // the middle means the silhouette arrived and the outline was lost in the passes, and no square at all
+            // means it never got there.
+            if (!selfTestOutlineRaw) {
+                selfTestOutlineGroup.render(0.0F);
+            }
             minecraft.getFramebuffer().bindFramebuffer(false);
             net.minecraft.client.renderer.GlStateManager.enableBlend();
             net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
