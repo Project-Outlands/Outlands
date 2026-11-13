@@ -176,8 +176,8 @@ public class Keyboard {
 
     public static final int KEYBOARD_SIZE = Short.MAX_VALUE;
 
-    /** Snapshot of SDL's keyboard state array, refreshed by the event pump. */
-    public static ByteBuffer sdlKeyPressedArray = null;
+    /** Snapshot of SDL's keyboard state array, refreshed by the event pump on the first thread. */
+    public static volatile ByteBuffer sdlKeyPressedArray = null;
 
     private static final String[] unlocalizedKeyNameMiniLut = new String[Short.MAX_VALUE];
 
@@ -210,8 +210,18 @@ public class Keyboard {
         enqueue(new KeyEvent(0, '\0', KeyState.RELEASE, Sys.getNanoTime()));
     }
 
-    /** Populates the key name->index lookup table with the current keyboard layout based names. */
+    /**
+     * Populates the key name lookup table and its reverse map with the current keyboard layout based names.
+     * <p>
+     * Resolving a key name asks SDL, which may only be done on the first thread. The loop is marshalled as one task
+     * rather than letting each of the 256 {@link #getKeyName(int)} calls wait for its own round trip: this runs during
+     * client startup, where every millisecond of the loading screen shows.
+     */
     public static void populateKeyLookupTables() {
+        if (!MainThread.isMainThread()) {
+            MainThread.runOnMainThread(Keyboard::populateKeyLookupTables);
+            return;
+        }
         for (int key = 0; key <= 255; key++) {
             getKeyName(key);
         }
@@ -383,8 +393,12 @@ public class Keyboard {
     }
 
     /**
-     * Resolves the layout name of an LWJGL2 keycode. SDL key queries are main-thread only, so the lookup is
+     * Resolves the layout name of an LWJGL2 keycode. SDL key queries are first-thread only, so the lookup is
      * dispatched there and the result falls back to the built-in key names.
+     * <p>
+     * The wait is bounded by the event loop, not by a frame: Foundation 1.1.0's first thread drains its queue
+     * continuously, so a caller parked here (a tooltip asking for a key hint from the server thread, for instance) is
+     * answered as soon as the loop is free instead of waiting for the next render.
      */
     public static String getKeyName(int key) {
         if (key == KEY_NONE) {

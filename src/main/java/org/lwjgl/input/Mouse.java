@@ -315,8 +315,8 @@ public class Mouse {
         return (sdlButtonState & sdlButtonMask(button)) != 0;
     }
 
-    /** Updated once per pump so button state queries do not need a window handle. */
-    public static int sdlButtonState = 0;
+    /** Updated once per pump so button state queries do not need a window handle. Written on the first thread. */
+    public static volatile int sdlButtonState = 0;
 
     private static int sdlButtonMask(int button) {
         return button >= 0 && button < 5 ? 1 << button : 0;

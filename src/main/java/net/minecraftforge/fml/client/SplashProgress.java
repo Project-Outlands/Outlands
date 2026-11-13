@@ -366,8 +366,9 @@ public class SplashProgress
                     glEnd();
                     glDisable(GL_TEXTURE_2D);
 
-                    // Only the buffer swap belongs to this thread. SDL's event pump is main-thread only,
-                    // so the loading thread owns it and this loop must not call processMessages().
+                    // Only the buffer swap belongs to this thread. The SDL event pump is dispatched to Foundation's
+                    // first thread by processMessages(), so this loading loop uses update(false) and never pumps from
+                    // here.
                     mutex.acquireUninterruptibly();
                     long updateStart = System.nanoTime();
                     Display.update(false);

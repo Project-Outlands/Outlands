@@ -192,12 +192,27 @@ class Util {
 				+ String.join("\n" , LAUNCHER_REPOSITORIES) as String)
 	}
 
+	/**
+	 * Maps a natives classifier onto the os name a launcher rule needs.
+	 * <p>
+	 * The architecture has to be part of the name for the non-x86 classifiers. Prism matches the precise
+	 * {@code [os]-[arch]} classifier on non-legacy architectures and only falls back to the bare {@code [os]} for
+	 * x86_64/x86, so giving {@code natives-macos-arm64} the bare {@code osx} rule would exclude it on Apple Silicon
+	 * while including it on Intel, where it would shadow the x86_64 natives on the classpath. Same for
+	 * linux-arm64/arm32 and windows-arm64/x86.
+	 */
 	static def getOSName(nativeClassifier) {
 		if (nativeClassifier.contains('natives-linux')) {
+			if (nativeClassifier.contains('-arm64')) return 'linux-arm64'
+			if (nativeClassifier.contains('-arm32')) return 'linux-arm32'
 			return 'linux'
-		} else if (nativeClassifier.contains('natives-macos')) {
-			return 'osx'
-		}	else if (nativeClassifier.contains('natives-windows')) {
+		}
+		if (nativeClassifier.contains('natives-macos')) {
+			return nativeClassifier.contains('-arm64') ? 'osx-arm64' : 'osx'
+		}
+		if (nativeClassifier.contains('natives-windows')) {
+			if (nativeClassifier.contains('-arm64')) return 'windows-arm64'
+			if (nativeClassifier.contains('-x86')) return 'windows-x86'
 			return 'windows'
 		}
 	}

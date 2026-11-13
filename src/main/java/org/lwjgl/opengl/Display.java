@@ -162,6 +162,16 @@ public class Display {
     private static long sdlWindow = NULL;
     /** GL context bound to {@link #sdlWindow}. */
     private static long sdlGlContext = NULL;
+    /** Hidden window that owns {@link #sdlCloneableGlContext}. */
+    static long sdlSharedWindow = NULL;
+    /**
+     * A context that shares with {@link #sdlGlContext} and is used as the anchor when a shared context is created.
+     * <p>
+     * Creating a shared context needs a current context on the creating thread, and that thread is the event loop, not
+     * the one the display context belongs to. The display context must not be dragged over there, so a second context
+     * is kept for exactly that purpose.
+     */
+    static long sdlCloneableGlContext = NULL;
     /** SDL window id, used to filter events addressed to other windows. */
     private static int sdlWindowId = 0;
 
@@ -181,21 +191,11 @@ public class Display {
 
     static {
         Sys.initialize();
-        desktopDisplayMode = queryDesktopDisplayMode();
+        // The query is marshalled, so it lives in DesktopDisplayModeQuery: a lambda compiled here would be a static
+        // method of Display, and running it on the event loop requires this initializer to have finished - which is
+        // waiting for exactly that task. See DesktopDisplayModeQuery's class comment.
+        desktopDisplayMode = DesktopDisplayModeQuery.query();
         mode = new DisplayMode(desktopDisplayMode.getWidth(), desktopDisplayMode.getHeight());
-    }
-
-    private static DisplayMode queryDesktopDisplayMode() {
-        return MainThread.runOnMainThread(() -> {
-            final int display = Sys.checkSdl(SDL_GetPrimaryDisplay());
-            final SDL_DisplayMode sdlMode = Sys.checkSdl(SDL_GetDesktopDisplayMode(display));
-            return new DisplayMode(
-                sdlMode.w(),
-                sdlMode.h(),
-                Sys.checkSdl(SDLPixels.SDL_GetPixelFormatDetails(sdlMode.format()))
-                    .bits_per_pixel(),
-                Math.round(sdlMode.refresh_rate()));
-        });
     }
 
     public static void setPixelFormat(PixelFormat pixel_format) {
@@ -258,6 +258,8 @@ public class Display {
         final int resolvedMajor = resolveContextMajor();
         final int resolvedMinor = resolveContextMinor();
         try {
+            // The window and its GL context may only be created on the first thread. Everything after this line is
+            // thread-affine instead: the game thread binds the new context to itself and draws its frames there.
             MainThread.runOnMainThread(() -> createWindow(resolvedMajor, resolvedMinor));
             if (hasGLContext) {
                 Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
@@ -281,24 +283,28 @@ public class Display {
         displayCreated = true;
         GLContext.refreshCapabilities();
 
-        if (pendingBorderless) {
-            pendingBorderless = false;
-            borderlessInsteadOfFullscreen = true;
-            if (platformOwnsFullscreen()) {
-                applyPlatformFullscreen(true);
-            } else {
-                applyBorderlessGeometry();
+        // Still window work, so still first-thread work: the deferred fullscreen request, bringing the window to the
+        // foreground and the DWM style. The client thread reads the resulting geometry after the marshal returns.
+        MainThread.runOnMainThread(() -> {
+            if (pendingBorderless) {
+                pendingBorderless = false;
+                borderlessInsteadOfFullscreen = true;
+                if (platformOwnsFullscreen()) {
+                    applyPlatformFullscreen(true);
+                } else {
+                    applyBorderlessGeometry();
+                }
+                Sys.checkSdl(SDL_SyncWindow(sdlWindow));
+                // The window changed size while it was being created, so the recorded geometry is stale.
+                updateWindowDimensions();
             }
-            Sys.checkSdl(SDL_SyncWindow(sdlWindow));
-            // The window changed size while it was being created, so the recorded geometry is stale.
-            updateWindowDimensions();
-        }
 
-        // Ask for the foreground: SDL creates the window without stealing activation from whatever launched the
-        // game, so without this the window can open behind the launcher.
-        Sys.checkSdl(SDLVideo.SDL_RaiseWindow(sdlWindow));
+            // Ask for the foreground: SDL creates the window without stealing activation from whatever launched the
+            // game, so without this the window can open behind the launcher.
+            Sys.checkSdl(SDLVideo.SDL_RaiseWindow(sdlWindow));
 
-        refreshWindowStyle();
+            refreshWindowStyle();
+        });
     }
 
     /**
@@ -479,10 +485,37 @@ public class Display {
 
         sdlWindowId = SDLVideo.SDL_GetWindowID(sdlWindow);
         if (openGl) {
+            // SDL_GL_CreateContext makes the new context current on this (first) thread. The game thread binds the
+            // window context to itself right after this task, so it must not stay current here.
             sdlGlContext = SDLVideo.SDL_GL_CreateContext(sdlWindow);
             if (sdlGlContext == NULL) {
                 throw new IllegalStateException("Failed to create GL context: " + SDLError.SDL_GetError());
             }
+            // Contexts created by the event loop (DrawableGL.createSharedContext) share with this anchor instead of
+            // taking the display context away from the game thread. Losing it only costs the splash screen its shared
+            // drawable, so a driver that refuses a second context is a warning, not a failed launch.
+            Sys.checkSdl(SDLVideo.SDL_GL_SetAttribute(SDLVideo.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1));
+            final long sharedWindow = SDLVideo.SDL_CreateWindow(
+                "Outlands - shared GL context",
+                1,
+                1,
+                SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+            if (sharedWindow != NULL) {
+                final long sharedContext = SDLVideo.SDL_GL_CreateContext(sharedWindow);
+                if (sharedContext != NULL) {
+                    sdlSharedWindow = sharedWindow;
+                    sdlCloneableGlContext = sharedContext;
+                } else {
+                    FMLLog.log.warn("Could not create a shared GL context ({}), continuing without one",
+                        SDLError.SDL_GetError());
+                    SDL_DestroyWindow(sharedWindow);
+                }
+            } else {
+                FMLLog.log.warn("Could not create the shared GL context window ({}), continuing without one",
+                    SDLError.SDL_GetError());
+            }
+            Sys.checkSdl(SDLVideo.SDL_GL_SetAttribute(SDLVideo.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0));
+            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL));
         }
         // A non-GL backend creates its own context/surface from the window; there is no GL context to make current.
 
@@ -673,11 +706,10 @@ public class Display {
     }
 
     public static void processMessages() {
-        if (MainThread.isMainThread()) {
-            // Queued tasks land here; must precede the window calls so they apply this frame.
-            MainThread.drain();
-            pumpSdlEvents();
-        }
+        // SDL's event pump may only run on the thread that initialised video. Since Foundation 1.1.0 that is the
+        // event-loop thread, not the client thread running this method, so the pump is marshalled. It blocks, which
+        // keeps the frame boundary intact: the input state below is complete for this frame once it returns.
+        MainThread.runOnMainThread(Display::pumpSdlEvents);
         Mouse.poll();
         Keyboard.poll();
 
@@ -697,6 +729,7 @@ public class Display {
      */
     private static final StringBuilder pumpedKeyCharacters = new StringBuilder(8);
 
+    /** Polls and dispatches the pending SDL events. Runs on the first thread, marshalled by {@link #processMessages()}. */
     private static void pumpSdlEvents() {
         pumpedKeyCharacters.setLength(0);
         SDLEvents.SDL_PumpEvents();
@@ -1008,6 +1041,9 @@ public class Display {
     private static void destroyWindow() {
         try {
             if (hasGLContext) {
+                // The display context is bound to the calling thread, so it is released here; by the time the first
+                // thread destroys it below, no thread holds it any more.
+                SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL);
                 GL.setCapabilities(null);
                 GL.destroy();
             }
@@ -1016,6 +1052,14 @@ public class Display {
                 if (sdlGlContext != NULL) {
                     SDLVideo.SDL_GL_DestroyContext(sdlGlContext);
                     sdlGlContext = NULL;
+                }
+                if (sdlCloneableGlContext != NULL) {
+                    SDLVideo.SDL_GL_DestroyContext(sdlCloneableGlContext);
+                    sdlCloneableGlContext = NULL;
+                }
+                if (sdlSharedWindow != NULL) {
+                    SDL_DestroyWindow(sdlSharedWindow);
+                    sdlSharedWindow = NULL;
                 }
                 if (sdlWindow != NULL) {
                     SDL_DestroyWindow(sdlWindow);
@@ -1369,7 +1413,8 @@ public class Display {
             return;
         }
         if (!hasGLContext) return;
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_SetSwapInterval(value)));
+        // The swap interval belongs to the context current on the calling thread, so this must not be marshalled.
+        Sys.checkSdl(SDLVideo.SDL_GL_SetSwapInterval(value));
     }
 
     public static void setDisplayConfiguration(float gamma, float brightness, float contrast) {
@@ -1381,7 +1426,14 @@ public class Display {
             return;
         }
         if (!hasGLContext) return;
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL)));
+        // A GL context is bound to the thread that makes it current. Marshalling this would release it on the
+        // event-loop thread and leave the caller's binding untouched, which is the opposite of what LWJGL2 promises.
+        glContextMutex.lock();
+        try {
+            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, NULL));
+        } finally {
+            glContextMutex.unlock();
+        }
     }
 
     public static boolean isCurrent() {
@@ -1394,7 +1446,13 @@ public class Display {
             return;
         }
         if (!hasGLContext) return;
-        MainThread.runOnMainThread(() -> Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext)));
+        // Per-thread, like releaseContext() above: the calling thread is the one that wants the context.
+        glContextMutex.lock();
+        try {
+            Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlGlContext));
+        } finally {
+            glContextMutex.unlock();
+        }
     }
 
     public static String getAdapter() {

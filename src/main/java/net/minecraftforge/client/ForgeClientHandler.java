@@ -51,6 +51,7 @@ import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
 import net.minecraftforge.oredict.OreDictionary;
+import org.lwjgl.MainThread;
 import org.lwjgl.opengl.Display;
 import org.lwjgl.sdl.SDLError;
 import org.lwjgl.sdl.SDLVideo;
@@ -150,11 +151,16 @@ public class ForgeClientHandler
                 // SDL maps this onto each desktop's own attention request: FlashWindowEx on Windows, an
                 // urgency hint on X11, the activation protocol on Wayland, requestUserAttention on macOS.
                 // A desktop that cannot do it is not a reason to fail the launch: the flash is cosmetic.
-                if (!SDLVideo.SDL_FlashWindow(Display.getWindow(), SDLVideo.SDL_FLASH_UNTIL_FOCUSED))
+                // Window calls belong to the first thread, so the request is marshalled there.
+                final long window = Display.getWindow();
+                MainThread.runOnMainThread(() ->
                 {
-                    FMLLog.log.debug("Taskbar flash not supported by this desktop ({}), continuing without it",
-                        SDLError.SDL_GetError());
-                }
+                    if (!SDLVideo.SDL_FlashWindow(window, SDLVideo.SDL_FLASH_UNTIL_FOCUSED))
+                    {
+                        FMLLog.log.debug("Taskbar flash not supported by this desktop ({}), continuing without it",
+                            SDLError.SDL_GetError());
+                    }
+                });
             }
             played = true;
         }

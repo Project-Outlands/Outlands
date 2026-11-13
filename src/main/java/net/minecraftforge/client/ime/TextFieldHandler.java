@@ -140,8 +140,10 @@ public final class TextFieldHandler {
      * <p>
      * Not routed through {@link org.lwjgl.input.Keyboard}: a commit has no key press behind it, so passing it
      * through the key queue means inventing events for it, which loses or duplicates characters as soon as a commit
-     * spans several characters. The game is single threaded for input (SDL's pump and the GUI both run on the
-     * client thread), so writing to the field here is safe and the key queue stays exactly as LWJGL2 left it.
+     * spans several characters. Input stays serialised with the GUI: the client thread blocks in
+     * {@link org.lwjgl.opengl.Display#processMessages()} until the event pump, which runs on Foundation's first
+     * thread, has dispatched every event of the frame - so writing to the field here is safe and the key queue stays
+     * exactly as LWJGL2 left it.
      */
     public static void onTextInput(String text) {
         if (text.isEmpty()) {

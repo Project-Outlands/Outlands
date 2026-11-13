@@ -10,63 +10,51 @@ import java.util.function.LongSupplier;
 import top.outlands.foundation.boot.MainThreadExecutor;
 
 /**
- * Dispatches window and event work onto the process main thread.
+ * Dispatches window and event work onto the process's first thread.
  * <p>
- * SDL's {@code SDL_PumpEvents}/{@code SDL_PeepEvents} may only run there, while the game loop,
- * resource loading and mod background tasks all reach window state from other threads.
+ * SDL's {@code SDL_PumpEvents}/{@code SDL_PeepEvents} and the window API may only run on the thread that initialised
+ * video, while the game loop, resource loading and mod background tasks all reach window state from other threads.
  * <p>
- * A thin adapter over {@link MainThreadExecutor} that adds the caller's context class loader propagation,
- * which Foundation does not do, and LWJGL2-shaped overloads.
+ * Since Foundation 1.1.0 that thread is no longer the game thread. Following RetroFuturaBootstrap's
+ * {@code MainStartOnFirstThread}, Foundation starts the game on a thread of its own ({@code Foundation-Main}) and
+ * turns the process's first thread into an event loop ({@code Foundation-EventLoop}) that services the tasks queued
+ * here. The loop drains continuously, so a blocking call no longer has to wait for the game loop to reach a frame
+ * boundary, and it cannot deadlock a thread that is itself blocked in a launcher wait loop. Tasks keep the context
+ * class loader of the submitting thread - Foundation does the binding - which is what mod code loading classes from
+ * an SDL callback needs.
  * <p>
- * Blocking methods require the main thread to be pumping {@link MainThreadExecutor#drain()}; they run inline
- * when already on the main thread.
+ * Blocking methods run inline when already on the first thread.
  */
 public final class MainThread {
 
     private MainThread() {}
 
+    /** @return whether the current thread is the process's first thread, the one that owns SDL/Cocoa */
     public static boolean isMainThread() {
         return MainThreadExecutor.isMainThread();
     }
 
-    private static Callable<Void> bindClassLoader(Runnable inner) {
-        return bindClassLoader(() -> {
-            inner.run();
-            return null;
-        });
-    }
-
-    private static <R> Callable<R> bindClassLoader(Callable<R> inner) {
-        final ClassLoader loader = Thread.currentThread()
-            .getContextClassLoader();
-        return () -> {
-            final Thread thread = Thread.currentThread();
-            final ClassLoader saved = thread.getContextClassLoader();
-            thread.setContextClassLoader(loader);
-            try {
-                return inner.call();
-            } finally {
-                thread.setContextClassLoader(saved);
-            }
-        };
-    }
-
+    /** Runs a task on the first thread, waiting for it to finish unless the caller already is that thread. */
     public static void runOnMainThread(Runnable r) {
         Objects.requireNonNull(r, "r");
         if (isMainThread()) {
             r.run();
         } else {
-            MainThreadExecutor.submit(bindClassLoader(r));
+            MainThreadExecutor.submit(() -> {
+                r.run();
+                return null;
+            });
         }
     }
 
+    /** Runs a task on the first thread and returns its result. */
     public static <T> T runOnMainThread(Callable<T> r) {
         Objects.requireNonNull(r, "r");
         try {
             if (isMainThread()) {
                 return r.call();
             }
-            return MainThreadExecutor.submit(bindClassLoader(r));
+            return MainThreadExecutor.submit(r);
         } catch (Exception e) {
             throw new IllegalStateException("Main-thread task failed", e);
         }
@@ -105,23 +93,11 @@ public final class MainThread {
     }
 
     /**
-     * Queues a task without blocking. Safe from any thread, including while the game loop is stalled,
-     * but the task only runs on the next {@link #drain()}.
+     * Queues a task for the first thread without blocking. Safe from any thread; the task runs on the event loop's
+     * next iteration, whether or not the game is currently drawing frames.
      */
     public static void post(Runnable r) {
         Objects.requireNonNull(r, "r");
-        MainThreadExecutor.post(() -> {
-            try {
-                bindClassLoader(r)
-                    .call();
-            } catch (Exception e) {
-                throw new IllegalStateException("Main-thread task failed", e);
-            }
-        });
-    }
-
-    /** Runs queued tasks. Must be called from the main thread, at least once per frame. */
-    public static void drain() {
-        MainThreadExecutor.drain();
+        MainThreadExecutor.post(r);
     }
 }
