@@ -60,6 +60,7 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceFeatures;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceProperties;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceQueueFamilyProperties;
 import static org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceFeatures2;
+import static org.lwjgl.vulkan.VK13.VK_API_VERSION_1_3;
 import static org.lwjgl.vulkan.VK14.VK_API_VERSION_1_4;
 
 /**
@@ -75,9 +76,11 @@ import static org.lwjgl.vulkan.VK14.VK_API_VERSION_1_4;
  *
  * <p><b>Features are queried, then enabled.</b> The backend is designed around four feature groups - dynamic
  * rendering, synchronization2, buffer device address, descriptor indexing - plus three Vulkan 1.4 additions that
- * make the GL shim cheaper (push descriptors, host image copy, maintenance5). A frame that only clears the screen
- * needs none of them, but asking for them here is what turns "the device reports 1.4" into "the device can
- * actually run what is being built", and it fails at startup instead of mid-frame.</p>
+ * will make the GL shim cheaper (push descriptors, host image copy, maintenance5). The baseline is 1.3: the three
+ * 1.4 features are enabled when the device has them and absent otherwise, because nothing calls them yet. Gating
+ * the whole backend on 1.4 rejected devices that can run everything the code does - measured: Turnip reporting
+ * 1.3.296. When a caller starts using one of them, the call site checks the feature flag rather than the version.
+ * </p>
  */
 final class VulkanContext {
 
@@ -262,7 +265,7 @@ final class VulkanContext {
                     .applicationVersion(1)
                     .pEngineName(stack.UTF8("Outlands"))
                     .engineVersion(1)
-                    .apiVersion(VK_API_VERSION_1_4);
+                    .apiVersion(VK_API_VERSION_1_3);
             VkInstanceCreateInfo instanceCreateInfo = VkInstanceCreateInfo.calloc(stack)
                     .sType$Default()
                     .flags(instanceFlags)
@@ -293,7 +296,8 @@ final class VulkanContext {
                     VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
                     vkGetPhysicalDeviceProperties(physicalDevice, properties);
                     int graphicsFamily = graphicsFamily(physicalDevice, surface);
-                    DeviceResult deviceResult = createDevice(physicalDevice, graphicsFamily, stack);
+                    DeviceResult deviceResult = createDevice(physicalDevice, graphicsFamily,
+                            properties.apiVersion(), stack);
                     VkDevice device = deviceResult.device();
                     VkQueue queue = queue(device, graphicsFamily, stack);
 
@@ -351,7 +355,7 @@ final class VulkanContext {
             VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
             vkGetPhysicalDeviceProperties(candidate, properties);
 
-            if (properties.apiVersion() < VK_API_VERSION_1_4) {
+            if (properties.apiVersion() < VK_API_VERSION_1_3) {
                 LOGGER.debug("Skipping {}: reports {}", properties.deviceNameString(),
                         VulkanProbe.version(properties.apiVersion()));
                 continue;
@@ -372,7 +376,7 @@ final class VulkanContext {
             }
         }
         if (best == null) {
-            throw new VkCheck.VulkanException("no Vulkan device meets the 1.4 baseline");
+            throw new VkCheck.VulkanException("no Vulkan device meets the 1.3 baseline");
         }
         return best;
         }
@@ -422,7 +426,8 @@ final class VulkanContext {
 
     private record DeviceResult(VkDevice device, boolean multiDrawIndirect, boolean drawIndirectFirstInstance) {}
 
-    private static DeviceResult createDevice(VkPhysicalDevice physicalDevice, int family, MemoryStack stack) {
+    private static DeviceResult createDevice(VkPhysicalDevice physicalDevice, int family, int deviceApiVersion,
+                                             MemoryStack stack) {
         // Query Vulkan 1.0 physical device features (multiDrawIndirect, drawIndirectFirstInstance)
         VkPhysicalDeviceFeatures supported10 = VkPhysicalDeviceFeatures.calloc(stack);
         vkGetPhysicalDeviceFeatures(physicalDevice, supported10);
@@ -438,10 +443,30 @@ final class VulkanContext {
                 .sType$Default();
         vkGetPhysicalDeviceFeatures2(physicalDevice,
                 VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(supported13.address()));
-        VkPhysicalDeviceVulkan14Features supported14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
-                .sType$Default();
-        vkGetPhysicalDeviceFeatures2(physicalDevice,
-                VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(supported14.address()));
+        // Only asked of a device that reports 1.4. On a 1.3 device the struct's sType is unknown and would be
+        // ignored, which is legal but means the answers are all "false" for a reason that has nothing to do with
+        // the features themselves - and a caller reading that would draw the wrong conclusion.
+        boolean vulkan14 = deviceApiVersion >= VK_API_VERSION_1_4;
+        // The three 1.4 features are for shim work that does not exist yet, so they are enabled when a device has
+        // them and simply absent otherwise. Nothing branches on the version: a future caller asks the device what
+        // it enabled, not what version it reports.
+        VkPhysicalDeviceVulkan14Features enable14 = null;
+        if (vulkan14) {
+            VkPhysicalDeviceVulkan14Features supported14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
+                    .sType$Default();
+            vkGetPhysicalDeviceFeatures2(physicalDevice,
+                    VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(supported14.address()));
+            enable14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
+                    .sType$Default()
+                    .pushDescriptor(supported14.pushDescriptor())
+                    .hostImageCopy(supported14.hostImageCopy())
+                    .maintenance5(supported14.maintenance5());
+            LOGGER.info("Vulkan 1.4 shim features: pushDescriptor={}, hostImageCopy={}, maintenance5={}",
+                    supported14.pushDescriptor(), supported14.hostImageCopy(), supported14.maintenance5());
+        } else {
+            LOGGER.info("Vulkan 1.4 is not available here: push descriptors, host image copy and maintenance5 are "
+                    + "off. Nothing uses them yet; the paths that will check the flag when they do.");
+        }
 
         boolean mdi = supported10.multiDrawIndirect();
         boolean firstInstance = supported10.drawIndirectFirstInstance();
@@ -470,12 +495,9 @@ final class VulkanContext {
                 // which is how this surfaced. The alpha test is what stops a transparent texel from writing its
                 // colour, so it is not optional for the GUI.
                 .shaderDemoteToHelperInvocation(supported13.shaderDemoteToHelperInvocation());
-        VkPhysicalDeviceVulkan14Features enable14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
-                .sType$Default()
-                .pNext(enable13.address())
-                .pushDescriptor(supported14.pushDescriptor())
-                .hostImageCopy(supported14.hostImageCopy())
-                .maintenance5(supported14.maintenance5());
+        if (enable14 != null) {
+            enable14.pNext(enable13.address());
+        }
 
         reportMissing("multiDrawIndirect", mdi);
         reportMissing("drawIndirectFirstInstance", firstInstance);
@@ -485,10 +507,6 @@ final class VulkanContext {
         reportMissing("dynamicRendering", supported13.dynamicRendering());
         reportMissing("synchronization2", supported13.synchronization2());
         reportMissing("shaderDemoteToHelperInvocation", supported13.shaderDemoteToHelperInvocation());
-        reportMissing("pushDescriptor", supported14.pushDescriptor());
-        reportMissing("hostImageCopy", supported14.hostImageCopy());
-        reportMissing("maintenance5", supported14.maintenance5());
-
         VkDeviceQueueCreateInfo.Buffer queueCreateInfo = VkDeviceQueueCreateInfo.calloc(1, stack);
         queueCreateInfo.get(0)
                 .sType$Default()
@@ -499,7 +517,7 @@ final class VulkanContext {
 
         VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack)
                 .sType$Default()
-                .pNext(enable14.address())
+                .pNext(enable14 != null ? enable14.address() : enable13.address())
                 .pEnabledFeatures(enable10)
                 .pQueueCreateInfos(queueCreateInfo)
                 .ppEnabledExtensionNames(extensionNames);

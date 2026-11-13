@@ -24,15 +24,22 @@ import static org.lwjgl.vulkan.VK10.vkEnumeratePhysicalDevices;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceProperties;
 import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceQueueFamilyProperties;
 import static org.lwjgl.vulkan.VK11.vkEnumerateInstanceVersion;
-import static org.lwjgl.vulkan.VK14.VK_API_VERSION_1_4;
+import static org.lwjgl.vulkan.VK13.VK_API_VERSION_1_3;
 
 /**
  * Whether this machine can run the Vulkan backend, answered before the window exists.
  *
- * <p><b>What it asks.</b> Three things, in increasing cost: the loader reports Vulkan 1.4, {@code VK_KHR_surface}
- * is an instance extension, and there is a physical device with a graphics queue that reports 1.4. Those are the
+ * <p><b>What it asks.</b> Three things, in increasing cost: the loader reports Vulkan 1.3, {@code VK_KHR_surface}
+ * is an instance extension, and there is a physical device with a graphics queue that reports 1.3. Those are the
  * requirements that cannot be worked around later; anything platform-specific (which surface extension, which
  * present mode) is answered once the window exists.</p>
+ *
+ * <p><b>Why 1.3 and not 1.4.</b> 1.3 is what the backend's features actually are: dynamic rendering,
+ * synchronization2 and demote-to-helper-invocation. The 1.4 additions (push descriptors, host image copy,
+ * maintenance5) are wanted for the parts of the GL shim that do not exist yet, so they are enabled when a device
+ * has them and never required - see {@link VulkanContext}. Requiring them turned "this GPU can run the backend"
+ * into "this GPU is new enough to also have three features nothing calls yet", which is how a working Turnip 1.3
+ * device got rejected.</p>
  *
  * <p><b>It creates and destroys a throwaway instance.</b> {@code BackendProbe} asks implementations not to create
  * driver objects, and this honours the intent rather than the letter: the instance is created only because
@@ -88,8 +95,8 @@ final class VulkanProbe {
                 return false;
             }
             final int instanceVersion = versionOut.get(0);
-            if (instanceVersion < VK_API_VERSION_1_4) {
-                LOGGER.info("Vulkan is unavailable: the loader reports {}, the backend requires 1.4",
+            if (instanceVersion < VK_API_VERSION_1_3) {
+                LOGGER.info("Vulkan is unavailable: the loader reports {}, the backend requires 1.3",
                         version(instanceVersion));
                 return false;
             }
@@ -120,7 +127,7 @@ final class VulkanProbe {
                 .sType$Default()
                 .pApplicationName(stack.UTF8("Outlands"))
                 .pEngineName(stack.UTF8("Outlands"))
-                .apiVersion(VK_API_VERSION_1_4);
+                .apiVersion(VK_API_VERSION_1_3);
         VkInstanceCreateInfo createInfo = VkInstanceCreateInfo.calloc(stack)
                 .sType$Default()
                 .pApplicationInfo(applicationInfo);
@@ -160,7 +167,7 @@ final class VulkanProbe {
             vkGetPhysicalDeviceProperties(device, properties);
             String name = properties.deviceNameString();
 
-            if (properties.apiVersion() < VK_API_VERSION_1_4) {
+            if (properties.apiVersion() < VK_API_VERSION_1_3) {
                 rejection = name + " reports " + version(properties.apiVersion());
                 continue;
             }
@@ -171,7 +178,7 @@ final class VulkanProbe {
             LOGGER.info("Vulkan is available: {} ({})", name, version(properties.apiVersion()));
             return true;
         }
-        LOGGER.info("Vulkan is unavailable: no device meets the 1.4 baseline ({})", rejection);
+        LOGGER.info("Vulkan is unavailable: no device meets the 1.3 baseline ({})", rejection);
         return false;
     }
 
