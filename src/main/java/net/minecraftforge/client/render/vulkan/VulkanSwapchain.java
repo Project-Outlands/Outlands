@@ -327,7 +327,7 @@ final class VulkanSwapchain {
     }
 
     void drawFrame(long window) {
-        if (!outOfDate && windowSizeChanged(window)) {
+        if (!outOfDate && windowSizeChanged()) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
             // window is compared against the swapchain rather than waiting for the driver to complain.
             outOfDate = true;
@@ -709,19 +709,20 @@ final class VulkanSwapchain {
         }
     }
 
-    /** Whether the window's pixel size differs from the swapchain's. A minimised window reports 0 and is ignored. */
-    private boolean windowSizeChanged(long window) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer width = stack.mallocInt(1);
-            IntBuffer height = stack.mallocInt(1);
-            SDLVideo.SDL_GetWindowSizeInPixels(window, width, height);
-            int w = width.get(0);
-            int h = height.get(0);
-            if (w <= 0 || h <= 0) {
-                return false;
-            }
-            return w != extentWidth || h != extentHeight;
+    /**
+     * Whether the window's pixel size differs from the swapchain's. A minimised window reports 0 and is ignored.
+     *
+     * <p>Reads the size the event pump recorded instead of asking SDL: this runs on the game thread, while
+     * {@code SDL_GetWindowSizeInPixels} is a video function that may only run on the first thread. The recorded value
+     * is that same call's answer, refreshed on the resize events that change it.</p>
+     */
+    private boolean windowSizeChanged() {
+        int w = org.lwjgl.opengl.Display.getFramebufferWidth();
+        int h = org.lwjgl.opengl.Display.getFramebufferHeight();
+        if (w <= 0 || h <= 0) {
+            return false;
         }
+        return w != extentWidth || h != extentHeight;
     }
 
     private static VkImageSubresourceRange colorRange(MemoryStack stack) {

@@ -2,6 +2,7 @@ package net.minecraftforge.client.ime;
 
 import net.minecraftforge.common.ForgeModContainer;
 import net.minecraftforge.fml.common.FMLLog;
+import org.lwjgl.MainThread;
 import org.lwjgl.sdl.SDLHints;
 import org.lwjgl.sdl.SDLVideo;
 
@@ -41,14 +42,15 @@ public class IMEHandler {
             FMLLog.log.info("IME handling disabled: forge.cfg has inputMethodBlockingEnabled=false");
             return false;
         }
-        final String videoDriver = SDLVideo.SDL_GetCurrentVideoDriver();
+        final String videoDriver = MainThread.runOnMainThread(SDLVideo::SDL_GetCurrentVideoDriver);
         if (videoDriver == null) {
             // Video is not up yet. Deliberately not cached, the caller asks again once it is.
             return false;
         }
         blockingEnabled = Boolean.TRUE;
         FMLLog.log.info("IME handling enabled on SDL video driver '{}' (implemented IME UI: {})",
-            videoDriver, SDLHints.SDL_GetHint(SDLHints.SDL_HINT_IME_IMPLEMENTED_UI));
+            videoDriver, MainThread.runOnMainThread(
+                () -> SDLHints.SDL_GetHint(SDLHints.SDL_HINT_IME_IMPLEMENTED_UI)));
         return true;
     }
 }

@@ -119,7 +119,7 @@ dependencies {
     installer "org.ow2.asm:asm-deprecated:$props.asm_deprecated"
 
     // Hacks
-    installer 'top.outlands:foundation:1.0.3'
+    installer 'top.outlands:foundation:1.1.0'
     installer 'net.lenni0451:Reflect:1.6.4'
     installer 'net.lenni0451.commons:unchecked:1.9.2'
     installer 'org.javassist:javassist:3.33.0-GA'

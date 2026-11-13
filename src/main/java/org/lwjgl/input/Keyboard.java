@@ -176,8 +176,8 @@ public class Keyboard {
 
     public static final int KEYBOARD_SIZE = Short.MAX_VALUE;
 
-    /** Snapshot of SDL's keyboard state array, refreshed by the event pump. */
-    public static ByteBuffer sdlKeyPressedArray = null;
+    /** Snapshot of SDL's keyboard state array, refreshed by the event pump on the first thread. */
+    public static volatile ByteBuffer sdlKeyPressedArray = null;
 
     private static final String[] unlocalizedKeyNameMiniLut = new String[Short.MAX_VALUE];
 
@@ -219,8 +219,18 @@ public class Keyboard {
         enqueue(new KeyEvent(0, '\0', KeyState.RELEASE, Sys.getNanoTime()));
     }
 
-    /** Populates the key name->index lookup table with the current keyboard layout based names. */
+    /**
+     * Populates the key name lookup table and its reverse map with the current keyboard layout based names.
+     * <p>
+     * Resolving a key name asks SDL, which may only be done on the first thread. The loop is marshalled as one task
+     * rather than letting each of the 256 {@link #getKeyName(int)} calls wait for its own round trip: this runs during
+     * client startup, where every millisecond of the loading screen shows.
+     */
     public static void populateKeyLookupTables() {
+        if (!MainThread.isMainThread()) {
+            MainThread.runOnMainThread(Keyboard::populateKeyLookupTables);
+            return;
+        }
         for (int key = 0; key <= 255; key++) {
             getKeyName(key);
         }
@@ -394,13 +404,12 @@ public class Keyboard {
     /**
      * Resolves the layout name of an LWJGL2 keycode.
      *
-     * <p><b>Why this must not marshal on a miss.</b> SDL key queries are main-thread only, and the first version
-     * dispatched every call there and waited for the answer. That is a blocking cross-thread wait inside a name
-     * getter, and mods call name getters from wherever they happen to be: IC2C asks for key names from the
-     * integrated server thread while it builds the tooltip search tree, once per tooltip line. Each of those calls
-     * waited for the main thread's next frame, which during a world load is one every 200 ms - measured as a world
-     * load that never finished rather than as a slow one. A name lookup therefore answers from the built-in table
-     * when it is not on the main thread, and only the main thread talks to SDL.</p>
+     * <p>SDL key queries are first-thread only, so the answer is cached per keycode once it has been asked for:
+     * {@link #populateKeyLookupTables()} warms all of them at startup as a single task, and a later miss on the first
+     * thread asks SDL directly. A miss on any other thread answers from the built-in table instead of marshalling,
+     * because this is a name getter and mods call it from wherever they happen to be - IC2C asks for key hints from
+     * the integrated server thread once per tooltip line. The event loop makes such a marshal cheap rather than
+     * deadlocking, but a name that can be answered locally is still the better answer.
      */
     public static String getKeyName(int key) {
         if (key == KEY_NONE) {

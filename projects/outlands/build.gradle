@@ -259,6 +259,13 @@ test {
 def mcVersion = props.minecraft_version
 def mcpVersion = props.mcp_version
 
+// Foundation 1.1.0 boots the game on a thread of its own and keeps the process's first thread for SDL/Cocoa
+// (RetroFuturaBootstrap's MainStartOnFirstThread). On macOS that thread is only the AppKit thread when the JVM is
+// started with -XstartOnFirstThread, and Foundation refuses to start otherwise. The flag is a macOS-only JVM
+// option, so it must not be passed on the other platforms.
+def macFirstThreadArgs = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('mac')
+    ? ['-XstartOnFirstThread'] : []
+
 // The asset index id comes from the version json inside the mcp metadata zip
 def assetIndex = providers.provider {
     def zip = new ZipFile(mcpBase.metadata.get())
@@ -307,7 +314,7 @@ forgedev.runs {
         options {
             mainClass = 'net.minecraftforge.boot.MainClient'
             workingDir = file('run')
-            jvmArgs = ProjectConstants.JVM_ARGUMENTS + ['-Dmixin.debug.export=true', '-Dmixin.checks.interfaces=true']
+            jvmArgs = ProjectConstants.JVM_ARGUMENTS + macFirstThreadArgs + ['-Dmixin.debug.export=true', '-Dmixin.checks.interfaces=true']
             environment.putAll(loaderEnv('fmldevclient', 'net.minecraftforge.fml.common.launcher.FMLTweaker'))
         }
     }

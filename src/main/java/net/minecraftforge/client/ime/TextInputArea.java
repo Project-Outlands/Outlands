@@ -5,6 +5,7 @@ import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.ScaledResolution;
+import org.lwjgl.MainThread;
 import org.lwjgl.opengl.Display;
 import org.lwjgl.sdl.SDLKeyboard;
 import org.lwjgl.sdl.SDL_Rect;
@@ -126,7 +127,9 @@ public final class TextInputArea {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             final SDL_Rect.Buffer rect = SDL_Rect.calloc(1, stack);
             rect.x(x).y(y).w(Math.max(1, width)).h(Math.max(1, height));
-            SDLKeyboard.SDL_SetTextInputArea(window, rect, cursor);
+            // SDL_SetTextInputArea is part of the window API and may only run on the first thread. The marshal blocks,
+            // so the stack frame above outlives the call on the other thread.
+            MainThread.runOnMainThread(() -> SDLKeyboard.SDL_SetTextInputArea(window, rect, cursor));
         }
     }
 

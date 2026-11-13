@@ -58,6 +58,19 @@ tasks.register('launcherJson') {
         def jarFile = loaderJar.get().asFile
         def timestamp = Util.iso8601Now()
         def loaderPath = "${project.group.replace('.', '/')}/${base.archivesName.get()}/${project.version}/${base.archivesName.get()}-${project.version}.jar"
+        // One list, two encodings: legacy launchers read 'minecraftArguments', modern ones read 'arguments'.
+        def gameArguments = [
+            '--username', '${auth_player_name}',
+            '--version', '${version_name}',
+            '--gameDir', '${game_directory}',
+            '--assetsDir', '${assets_root}',
+            '--assetIndex', '${assets_index_name}',
+            '--uuid', '${auth_uuid}',
+            '--accessToken', '${auth_access_token}',
+            '--userType', '${user_type}',
+            '--tweakClass', 'net.minecraftforge.fml.common.launcher.FMLTweaker',
+            '--versionType', 'Outlands'
+        ]
         def json = [
             _comment_             : ['Outlands launcher version json'],
             id                    : "1.12.2-Outlands-${project.version}",
@@ -79,18 +92,22 @@ tasks.register('launcherJson') {
             javaVersion           : [component: 'java-runtime-epsilon', majorVersion: 25],
             complianceLevel       : 1,
             minimumLauncherVersion: 18,
-            minecraftArguments    : [
-                '--username', '${auth_player_name}',
-                '--version', '${version_name}',
-                '--gameDir', '${game_directory}',
-                '--assetsDir', '${assets_root}',
-                '--assetIndex', '${assets_index_name}',
-                '--uuid', '${auth_uuid}',
-                '--accessToken', '${auth_access_token}',
-                '--userType', '${user_type}',
-                '--tweakClass', 'net.minecraftforge.fml.common.launcher.FMLTweaker',
-                '--versionType', 'Outlands'
-            ].join(' '),
+            minecraftArguments    : gameArguments.join(' '),
+            // A modern launcher ignores 'minecraftArguments' once 'arguments' exists, so the game list is repeated
+            // here, and the JVM list has to carry the classpath/natives arguments a modern launcher does not add
+            // itself. The osx rule is what Foundation 1.1.0 needs on macOS: the game runs on its own thread and the
+            // process's first thread services SDL/Cocoa (RetroFuturaBootstrap layout), which only works with
+            // -XstartOnFirstThread. Prism parses this file with its legacy reader and ignores 'arguments', which is
+            // why the MultiMC pack declares the FirstThreadOnMacOS trait instead.
+            arguments             : [
+                game: gameArguments,
+                jvm : [
+                    [rules: [[action: 'allow', os: [name: 'osx']]], value: '-XstartOnFirstThread'],
+                    '-Djava.library.path=${natives_directory}',
+                    '-cp',
+                    '${classpath}'
+                ]
+            ],
             libraries             : new ArrayList(vanilla.libraries)
         ]
 

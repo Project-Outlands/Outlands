@@ -47,7 +47,8 @@ public class Sys {
     private static String requestedVideoDriver = null;
 
     /**
-     * Brings up the SDL subsystems. Idempotent; must be reached from the main thread.
+     * Brings up the SDL subsystems. Idempotent; the work is marshalled onto the process's first thread, which is the
+     * thread that owns SDL video.
      */
     public static void initialize() {
         if (initialized) {

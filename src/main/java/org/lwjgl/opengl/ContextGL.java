@@ -69,8 +69,9 @@ public final class ContextGL implements Context {
     public synchronized void makeCurrent() throws LWJGLException {
         Display.glContextMutex.lock();
         try {
-            // SDL_GL_MakeCurrent may run off the main thread; only the event pump is restricted. The
-            // splash render thread relies on this when it binds the drawable for its own frames.
+            // A context is bound to the thread that makes it current; only the event pump and window management are
+            // restricted to the first thread. The splash render thread relies on this when it binds the drawable for
+            // its own frames.
             Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(sdlWindow, sdlContext));
             // Capabilities are thread-local, so each thread builds its own on first bind.
             if (glCaps == null) {

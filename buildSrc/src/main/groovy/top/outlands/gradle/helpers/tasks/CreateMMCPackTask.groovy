@@ -78,13 +78,8 @@ abstract class CreateMMCPackTask extends DefaultTask {
                 if (!lwjglVersion) {
                     lwjglVersion = libName.split(':')[2]
                 }
-                if (libName.contains('-arm64')) {
-                    def rules = lib.rules
-                    if (rules && rules[0] && rules[0].os) {
-                        def arm64Rule = [action: 'allow', os: [name: rules[0].os.name + '-arm64']]
-                        ((List) rules).add(arm64Rule)
-                    }
-                }
+                // The rules already carry the precise [os]-[arch] classifier (Util.getLWJGLNatives), which is what
+                // Prism evaluates for natives; nothing to add here.
                 lwjglLibraries.add(lib)
             } else {
                 def parts = libName.split(':')

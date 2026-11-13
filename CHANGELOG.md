@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.11] - 2026-11-11
+
+### 🚀 Features
+
+- [`f918dae`](https://github.com/Project-Outlands/Outlands/commit/f918dae576822f538e6ad9ee6327cacadf39752f) - *(window)* Support external rendering context lifecycles *(PR [#55](https://github.com/Project-Outlands/Outlands/pull/55) by [@DHJComical](https://github.com/DHJComical))*
+
+
 ## [2026.11.07] - 2026-11-07
 
 ### 🐛 Bug Fixes

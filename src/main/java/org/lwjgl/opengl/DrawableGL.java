@@ -73,13 +73,17 @@ public class DrawableGL implements DrawableLWJGL {
 
     public ContextGL createSharedContext() throws LWJGLException {
         synchronized (GlobalLock.lock) {
+            if (Display.sdlCloneableGlContext == NULL) {
+                throw new LWJGLException("Shared GL contexts need a GL context on the Display");
+            }
             return MainThread.runOnMainThread(() -> {
                 final long prevContext = SDLVideo.SDL_GL_GetCurrentContext();
                 final long prevWindow = SDLVideo.SDL_GL_GetCurrentWindow();
-                Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(this.context.sdlWindow, this.context.sdlContext));
+                // Share with the Display's cloneable context, not with the display context itself: the latter is
+                // current on the game thread that is drawing, and making it current here would move it away from
+                // there.
+                Sys.checkSdl(SDLVideo.SDL_GL_MakeCurrent(Display.sdlSharedWindow, Display.sdlCloneableGlContext));
 
-                // The new context must be told to share with the one made current just above, otherwise
-                // textures uploaded through one are invisible to the other.
                 Sys.checkSdl(SDLVideo.SDL_GL_SetAttribute(SDLVideo.SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1));
                 final long hiddenWindow = Sys
                     .checkSdl(SDL_CreateWindow("MC - Shared Drawable", 16, 16, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN));
