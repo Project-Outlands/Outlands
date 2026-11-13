@@ -14,6 +14,7 @@ import org.lwjgl.vulkan.VkInstanceCreateInfo;
 import org.lwjgl.vulkan.VkLayerProperties;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
+import org.lwjgl.vulkan.VkPhysicalDeviceLimits;
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan13Features;
@@ -29,6 +30,12 @@ import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.lwjgl.opengl.GL20.GL_MAX_TEXTURE_IMAGE_UNITS;
+import static org.lwjgl.opengl.GL20.GL_MAX_VERTEX_ATTRIBS;
+import static org.lwjgl.opengl.GL20.GL_MAX_FRAGMENT_UNIFORM_COMPONENTS;
+import static org.lwjgl.opengl.GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS;
+import static org.lwjgl.opengl.GL20.GL_MAX_VERTEX_UNIFORM_COMPONENTS;
+import static org.lwjgl.opengl.GL30.GL_MAX_ARRAY_TEXTURE_LAYERS;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 import static org.lwjgl.vulkan.KHRPortabilityEnumeration.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 import static org.lwjgl.vulkan.KHRPortabilityEnumeration.VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
@@ -166,6 +173,38 @@ final class VulkanContext {
             VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
             vkGetPhysicalDeviceProperties(physicalDevice, properties);
             return (int) properties.limits().minUniformBufferOffsetAlignment();
+        }
+    }
+
+    /**
+     * A device limit, named by the GL enum that asks for it, or {@code 0} for one this backend has no answer to.
+     *
+     * <p><b>The set is what the game asks for, not what GL defines.</b> These six are every limit vanilla reads
+     * through {@code GlStateManager.glGetInteger} - the client snooper collects them once during startup - so they
+     * are the ones worth a mapping. Anything else keeps returning 0 and the "not implemented" line, which is the
+     * honest answer for a limit nobody has needed yet.</p>
+     *
+     * <p><b>Where the GL name does not line up with a Vulkan one, the unit is what gets matched, not the name.</b>
+     * {@code GL_MAX_*_UNIFORM_COMPONENTS} counts 4-byte components in the default uniform block, which Vulkan does
+     * not have; its equivalent quantity is how many components fit in one uniform buffer, so the answer is
+     * {@code maxUniformBufferRange / 4}. The texture-unit limits are per stage in both APIs, so they map one to
+     * one. Returning a number that means something else would be worse than returning none, so nothing is
+     * approximated beyond that.</p>
+     */
+    int glLimit(int glEnum) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            VkPhysicalDeviceLimits limits = properties.limits();
+            return switch (glEnum) {
+                case GL_MAX_VERTEX_ATTRIBS -> limits.maxVertexInputAttributes();
+                case GL_MAX_TEXTURE_IMAGE_UNITS, GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS ->
+                        limits.maxPerStageDescriptorSamplers();
+                case GL_MAX_ARRAY_TEXTURE_LAYERS -> limits.maxImageArrayLayers();
+                // 4-byte components per uniform buffer: the unit GL counts them in. See the method comment.
+                case GL_MAX_VERTEX_UNIFORM_COMPONENTS, GL_MAX_FRAGMENT_UNIFORM_COMPONENTS ->
+                        (int) (limits.maxUniformBufferRange() / 4L);
+                default -> 0;
+            };
         }
     }
 

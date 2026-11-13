@@ -501,7 +501,7 @@
          GL11.glVertex3f(x, y, z);
      }
  
-@@ -744,121 +867,197 @@
+@@ -744,121 +867,205 @@
  
      public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
      {
@@ -689,9 +689,17 @@
      {
 +        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
 +        {
-+            // Every caller of the integer form is the snooper: it records GL limits for telemetry and nothing reads
-+            // them back. Zero is reported once rather than per call, because a value invented here would look like
-+            // a device limit and be wrong.
++            // Every caller of the integer form is the snooper: it records GL limits for telemetry. The limits that
++            // describe the device rather than a GL implementation are answered by the backend from the Vulkan device
++            // limits; anything else is reported once as 0 rather than per call, because a value invented here would
++            // look like a device limit and be wrong.
++            int limit = net.minecraftforge.client.render.RenderBackendSelection.get().glLimit(parameterName);
++
++            if (limit != 0)
++            {
++                return limit;
++            }
++
 +            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce(
 +                    "GL limit readback for the snooper (glGetInteger " + parameterName + ")",
 +                    "telemetry will report 0 for the GL limits the game collects");
@@ -700,7 +708,7 @@
          return GL11.glGetInteger(parameterName);
      }
  
-@@ -956,6 +1155,12 @@
+@@ -956,6 +1163,12 @@
                  {
                      this.currentState = state;
  

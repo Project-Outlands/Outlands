@@ -118,6 +118,20 @@ public interface RenderBackend {
     }
 
     /**
+     * A device limit, named by the GL enum that asks for it, or {@code 0} when this backend has no honest answer.
+     *
+     * <p>Only consulted when {@link #isOpenGl()} is {@code false}. Same category as {@link #maxTextureSize()}: a
+     * property of the hardware rather than of a rendering operation, and the only reason GL is asked for it at all is
+     * that the game collects the values for telemetry once during startup.</p>
+     *
+     * <p>Zero means "nothing to say", never a limit: no device reports 0 of anything, so a caller can keep falling
+     * through to its own warning instead of publishing a number that looks measured.</p>
+     */
+    default int glLimit(int glEnum) {
+        return 0;
+    }
+
+    /**
      * An identification string ({@code GL_VENDOR}, {@code GL_RENDERER}, {@code GL_VERSION}) for this backend.
      *
      * <p>Only consulted when {@link #isOpenGl()} is {@code false}. Returning {@code null} defers to the loader's

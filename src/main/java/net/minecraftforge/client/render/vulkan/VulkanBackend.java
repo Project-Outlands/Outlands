@@ -260,6 +260,11 @@ public final class VulkanBackend implements RenderBackend {
     }
 
     @Override
+    public int glLimit(int glEnum) {
+        return context != null ? context.glLimit(glEnum) : 0;
+    }
+
+    @Override
     public Object nativeContext() {
         return context;
     }
