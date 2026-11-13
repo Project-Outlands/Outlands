@@ -181,6 +181,15 @@ public class Keyboard {
 
     private static final String[] unlocalizedKeyNameMiniLut = new String[Short.MAX_VALUE];
 
+    /**
+     * Names SDL resolved, indexed by LWJGL2 keycode.
+     *
+     * <p>Written on the main thread only, read from any thread. An element may still be null, and a reader may
+     * see a stale null; both fall back to {@link #unlocalizedKeyNameMiniLut}, which is a name rather than an
+     * error.</p>
+     */
+    private static final String[] sdlKeyNames = new String[Short.MAX_VALUE];
+
     static {
         // Use reflection to find out key names
         Field[] fields = Keyboard.class.getFields();
@@ -383,35 +392,50 @@ public class Keyboard {
     }
 
     /**
-     * Resolves the layout name of an LWJGL2 keycode. SDL key queries are main-thread only, so the lookup is
-     * dispatched there and the result falls back to the built-in key names.
+     * Resolves the layout name of an LWJGL2 keycode.
+     *
+     * <p><b>Why this must not marshal on a miss.</b> SDL key queries are main-thread only, and the first version
+     * dispatched every call there and waited for the answer. That is a blocking cross-thread wait inside a name
+     * getter, and mods call name getters from wherever they happen to be: IC2C asks for key names from the
+     * integrated server thread while it builds the tooltip search tree, once per tooltip line. Each of those calls
+     * waited for the main thread's next frame, which during a world load is one every 200 ms - measured as a world
+     * load that never finished rather than as a slow one. A name lookup therefore answers from the built-in table
+     * when it is not on the main thread, and only the main thread talks to SDL.</p>
      */
     public static String getKeyName(int key) {
         if (key == KEY_NONE) {
             return "NONE";
         }
-        // Resolve through the physical key so the name follows the layout without depending on the event keycode.
-        // Layout changes arrive as SDL_EVENT_KEYMAP_CHANGED.
-        final int scancode = KeyCodes.lwjglToSdlScancode(key);
-        final String sdlName = MainThread.runOnMainThread(() -> {
-            if (scancode <= 0) {
-                return null;
-            }
-            final int sdlKey = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) 0, true);
-            return sdlKey != 0 ? StringUtils.toRootUpperCase(SDLKeyboard.SDL_GetKeyName(sdlKey)) : null;
-        });
-        final String name;
-        if (sdlName == null || sdlName.isEmpty()) {
-            if (key >= 0 && key < unlocalizedKeyNameMiniLut.length) {
-                name = unlocalizedKeyNameMiniLut[key];
-            } else {
-                name = "Key " + key;
-            }
-        } else {
-            name = sdlName;
-        }
+        final String name = resolveKeyName(key);
         reverseKeyMap.put(name, key);
         return name;
+    }
+
+    private static String resolveKeyName(int key) {
+        final boolean resolvable = key >= 0 && key < sdlKeyNames.length;
+        if (resolvable) {
+            final String cached = sdlKeyNames[key];
+            if (cached != null) {
+                return cached;
+            }
+        }
+        if (MainThread.isMainThread()) {
+            // Resolve through the physical key so the name follows the layout without depending on the event keycode.
+            final int scancode = KeyCodes.lwjglToSdlScancode(key);
+            if (scancode > 0) {
+                final int sdlKey = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) 0, true);
+                final String sdlName = sdlKey != 0
+                        ? StringUtils.toRootUpperCase(SDLKeyboard.SDL_GetKeyName(sdlKey))
+                        : null;
+                if (sdlName != null && !sdlName.isEmpty()) {
+                    if (resolvable) {
+                        sdlKeyNames[key] = sdlName;
+                    }
+                    return sdlName;
+                }
+            }
+        }
+        return key >= 0 && key < unlocalizedKeyNameMiniLut.length ? unlocalizedKeyNameMiniLut[key] : "Key " + key;
     }
 
     public static int getKeyIndex(String keyName) {
