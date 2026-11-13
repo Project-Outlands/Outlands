@@ -271,7 +271,7 @@ class CompatRewriterTest {
 
         byte[] clean = sample("()V", mv -> mv.visitInsn(Opcodes.ICONST_0));
         assertNull(CompatRewriter.rewrite(clean));
-        assertFalse(ConstantPoolRefs.hasLwjgl2MemberRef(clean));
-        assertTrue(ConstantPoolRefs.hasLwjgl2MemberRef(original));
+        assertFalse(ConstantPoolRefs.hasLwjgl2MemberRef(clean, null));
+        assertTrue(ConstantPoolRefs.hasLwjgl2MemberRef(original, null));
     }
 }

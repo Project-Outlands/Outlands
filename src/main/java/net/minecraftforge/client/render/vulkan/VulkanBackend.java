@@ -165,6 +165,13 @@ public final class VulkanBackend implements RenderBackend {
             // The consumer is the layer itself: it owns the buffers the meshes become.
             // Enable chunk mesh capture so VulkanTerrainLayer receives chunk meshes.
             ChunkMeshCapture.enable();
+            // Mods draw through GL11, which still links against LWJGL3's own natives and would therefore reach real
+            // GL - a context that does not exist - or, worse, silently change nothing. The retargeted call sites
+            // reach this facade instead, and from here the same frame state vanilla writes to. Installed after the
+            // frame state exists and before the first frame is drawn.
+            net.minecraftforge.client.render.shim.ShimGl.setImpl(new net.minecraftforge.client.render.shim.FrameShim());
+            LOGGER.info("Mod GL calls: routed to the frame state ({} entry points)",
+                    net.minecraftforge.lwjgl.shim.FrameShimRules.INSTANCE.entries().size());
         } catch (RuntimeException | LinkageError e) {
             // The window is already a Vulkan window; there is no GL context to fall back to. Record the failure,
             // log it once, and present nothing rather than throwing from inside the render loop every frame.
@@ -275,6 +282,13 @@ public final class VulkanBackend implements RenderBackend {
 
     @Override
     public void close() {
+        // Before the restore, so the count still describes this backend's run. Zero with mods installed means the
+        // retargeted call sites are not reaching the facade, which is the silent half of this path's failure modes.
+        if (net.minecraftforge.client.render.shim.FrameShim.routedCalls() > 0) {
+            LOGGER.info("Mod GL calls: {} routed to the frame state",
+                    net.minecraftforge.client.render.shim.FrameShim.routedCalls());
+        }
+        net.minecraftforge.client.render.shim.ShimGl.setImpl(null);
         net.minecraftforge.client.render.target.FrameRecordings.install(null);
         if (renderTargets != null) {
             // The game's framebuffer objects outlive the backend and are never deleted on quit, but their Vulkan

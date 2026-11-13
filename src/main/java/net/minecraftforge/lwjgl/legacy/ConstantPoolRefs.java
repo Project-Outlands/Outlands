@@ -1,5 +1,9 @@
 package net.minecraftforge.lwjgl.legacy;
 
+import net.minecraftforge.lwjgl.shim.ShimRegistry;
+
+import org.jspecify.annotations.Nullable;
+
 /**
  * Constant-pool scanner deciding whether a class references LWJGL2 members, without parsing any code.
  */
@@ -16,10 +20,17 @@ final class ConstantPoolRefs {
     }
 
     /**
-     * Second gate: returns true if the class references a member {@link RewriteTable} can rewrite, matched on owner,
-     * name and descriptor. Parse errors are treated as "yes".
+     * Second gate: returns true if the class references a member this rewriter will change, either through
+     * {@link RewriteTable} or through the frozen shim {@code selection}. Parse errors are treated as "yes".
+     *
+     * <p><b>Why the selection has to be consulted here.</b> The gate exists to keep the full ASM pass away from
+     * classes that have nothing to rewrite, and it used to answer that question with the table alone. A retargeted
+     * call site is not a table entry - {@code GL11.glPushMatrix} still exists in LWJGL3, so nothing about it is
+     * "rewritable" in the table's sense - which meant a mod whose entire GL surface is the fixed-function subset was
+     * dropped before the rewriter ever saw it. Measured on IC2Classic: sixty-three call sites, all silently passed
+     * through to real GL. The shim's own owner check is therefore part of the same gate, not a second pass.</p>
      */
-    static boolean hasLwjgl2MemberRef(byte[] b) {
+    static boolean hasLwjgl2MemberRef(byte[] b, ShimRegistry.@Nullable Selection selection) {
         if (b.length < 10) {
             return false;
         }
@@ -84,7 +95,9 @@ final class ConstantPoolRefs {
                 continue;
             }
             final String owner = utf8(b, offset[nameIdx]);
-            if (owner == null || !RewriteTableIndex.OWNERS.contains(owner)) {
+            final boolean tableOwner = owner != null && RewriteTableIndex.OWNERS.contains(owner);
+            final boolean shimOwner = owner != null && selection != null && selection.retargetsOwner(owner);
+            if (!tableOwner && !shimOwner) {
                 continue;
             }
             // The owner alone only says "this class is touched by the table", not that this member is: resolve the
@@ -100,7 +113,13 @@ final class ConstantPoolRefs {
             final int descIdx = u2(b, offset[nameTypeIdx] + 3);
             final int descOffset = descIdx > 0 && descIdx < cpCount ? offset[descIdx] : 0;
             final String desc = utf8(b, descOffset);
-            if (desc != null && RewriteTableIndex.isRewritable(owner, name, desc)) {
+            if (desc == null) {
+                continue;
+            }
+            if (shimOwner && selection.retarget(owner, name, desc) != null) {
+                return true;
+            }
+            if (tableOwner && RewriteTableIndex.isRewritable(owner, name, desc)) {
                 return true;
             }
         }

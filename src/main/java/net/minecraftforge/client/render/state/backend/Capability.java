@@ -46,6 +46,21 @@ public enum Capability {
 
     /** Maps a GL capability constant. Throws for anything outside the set vanilla uses. */
     public static Capability ofGlEnum(int glCapability) {
+        Capability capability = tryOf(glCapability);
+        if (capability == null) {
+            throw new IllegalArgumentException("not a capability GlStateManager toggles: " + glCapability);
+        }
+        return capability;
+    }
+
+    /**
+     * Maps a GL capability constant, or returns {@code null} for one outside the set.
+     *
+     * <p>For callers that cannot let an exception out: a mod's {@code glEnable} reaches the shim facade with
+     * whatever constant its author chose, and throwing there would turn an ignored bit into a crash inside a
+     * render loop. Vanilla goes through {@link #ofGlEnum}, where an unknown constant is a programming error.</p>
+     */
+    public static @org.jspecify.annotations.Nullable Capability tryOf(int glCapability) {
         return switch (glCapability) {
             case 16384 -> LIGHT_0;
             case 16385 -> LIGHT_1;
@@ -69,7 +84,7 @@ public enum Capability {
             case 10754 -> POLYGON_OFFSET_LINE;
             case 32823 -> POLYGON_OFFSET_FILL;
             case 32826 -> RESCALE_NORMAL;
-            default -> throw new IllegalArgumentException("not a capability GlStateManager toggles: " + glCapability);
+            default -> null;
         };
     }
 }

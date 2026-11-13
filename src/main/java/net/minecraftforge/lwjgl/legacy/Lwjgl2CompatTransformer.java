@@ -83,6 +83,13 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
      */
     private static volatile ShimRegistry.Selection shimSelection;
 
+    static {
+        // Registration must happen here and not from a renderer: the selection is frozen on the first class that
+        // reaches transform(), which is during the coremod stage, long before any backend object exists. This class
+        // is constructed at exactly that point, so its initialiser is the last moment registration still counts.
+        net.minecraftforge.lwjgl.shim.FrameShimRules.registerBuiltin();
+    }
+
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (basicClass == null) {
@@ -120,7 +127,7 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
             }
         }
 
-        if (!ConstantPoolRefs.mentionsLwjgl(basicClass) || !ConstantPoolRefs.hasLwjgl2MemberRef(basicClass)) {
+        if (!ConstantPoolRefs.mentionsLwjgl(basicClass) || !ConstantPoolRefs.hasLwjgl2MemberRef(basicClass, selection)) {
             return basicClass;
         }
         try {
@@ -207,6 +214,11 @@ public class Lwjgl2CompatTransformer implements IClassTransformer {
         ShimRegistry.Selection resolved = ShimRegistry.select(ENVIRONMENT);
         shimSelection = resolved;
         return resolved;
+    }
+
+    /** Test hook: forgets the frozen selection so the next class re-reads the registry. */
+    static void resetSelectionForTests() {
+        shimSelection = null;
     }
 
     /**

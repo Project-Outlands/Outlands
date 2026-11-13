@@ -1,0 +1,274 @@
+package net.minecraftforge.client.render.shim;
+
+import net.minecraftforge.client.render.state.backend.Capability;
+import net.minecraftforge.client.render.state.backend.FrameState;
+import net.minecraftforge.client.render.state.backend.FrameStates;
+
+import org.jspecify.annotations.Nullable;
+import org.lwjgl.opengl.GL11;
+
+/**
+ * {@link ShimGl}'s implementation for a renderer that is not OpenGL: mod GL calls land in the same
+ * {@link FrameState} that vanilla's patched {@code GlStateManager} writes to.
+ *
+ * <p><b>Why it forwards instead of implementing.</b> There is no second set of semantics here. Vanilla already
+ * decided what {@code glPushMatrix} means on this backend, in its own patch: one guard, then
+ * {@code state.pushMatrix()}. A mod calling the same entry point must reach the same object, or the two
+ * diverge - the mod's transform would apply to nothing while vanilla's {@code ModelRenderer} drew in the
+ * original frame, which looks like a renderer bug rather than a missing route. So each method below is the
+ * patched vanilla method, one level down.</p>
+ *
+ * <p><b>Why the real-GL fallback is not defensive coding.</b> {@link FrameStates#forNonGl()} returns
+ * {@code null} when the vanilla GL path applies, which includes the window before the backend is installed and
+ * any process that fell back. A mod can call GL during {@code preInit}, before there is any frame state, and
+ * the same is true of vanilla: the guard in the patch exists for exactly that reason. Passing through to
+ * {@code GL11} keeps those calls working instead of throwing from inside mod initialisation.</p>
+ *
+ * <p><b>Cost.</b> One null check and one interface call per GL call, which is what the vanilla patch pays too.</p>
+ */
+public final class FrameShim implements ShimGl.Impl {
+
+    /**
+     * Calls that reached the frame state instead of real GL.
+     *
+     * <p>Counted in one place - {@link #state()} - because that is the single decision every method makes, and
+     * because the alternative (a counter per method) would be eighteen copies of the same increment. Printed when
+     * the backend closes: with a mod installed, zero means the call sites are still going somewhere else, which is
+     * the one failure this whole path can have without an exception.</p>
+     */
+    private static final java.util.concurrent.atomic.LongAdder ROUTED =
+            new java.util.concurrent.atomic.LongAdder();
+
+    /** How many GL calls have been routed to the frame state since the shim was installed. */
+    public static long routedCalls() {
+        return ROUTED.sum();
+    }
+
+    private static @Nullable FrameState state() {
+        FrameState state = FrameStates.forNonGl();
+        if (state != null) {
+            ROUTED.increment();
+        }
+        return state;
+    }
+
+    @Override
+    public void glEnable(int cap) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glEnable(cap);
+            return;
+        }
+        Capability capability = Capability.tryOf(cap);
+        if (capability == null) {
+            // A mod may toggle bits outside the set vanilla uses (GL_COLOR_ARRAY, GL_LINE_SMOOTH, ...). Throwing
+            // would take the process down from inside a render loop over a bit nothing reads, so it is recorded
+            // once per constant and ignored. Vanilla keeps the throwing overload: an unknown constant there is a
+            // programming error, not a mod's choice.
+            FrameStates.reportSkippedOnce("glEnable(" + cap + ")",
+                    "the capability is outside the set vanilla toggles, so it is ignored");
+            return;
+        }
+        state.capability(capability, true);
+    }
+
+    @Override
+    public void glDisable(int cap) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glDisable(cap);
+            return;
+        }
+        Capability capability = Capability.tryOf(cap);
+        if (capability == null) {
+            FrameStates.reportSkippedOnce("glDisable(" + cap + ")",
+                    "the capability is outside the set vanilla toggles, so it is ignored");
+            return;
+        }
+        state.capability(capability, false);
+    }
+
+    @Override
+    public void glPushMatrix() {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glPushMatrix();
+            return;
+        }
+        state.pushMatrix();
+    }
+
+    @Override
+    public void glPopMatrix() {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glPopMatrix();
+            return;
+        }
+        state.popMatrix();
+    }
+
+    @Override
+    public void glTranslatef(float x, float y, float z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glTranslatef(x, y, z);
+            return;
+        }
+        state.translate(x, y, z);
+    }
+
+    @Override
+    public void glTranslated(double x, double y, double z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glTranslated(x, y, z);
+            return;
+        }
+        state.translate(x, y, z);
+    }
+
+    @Override
+    public void glScalef(float x, float y, float z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glScalef(x, y, z);
+            return;
+        }
+        state.scale(x, y, z);
+    }
+
+    @Override
+    public void glRotatef(float angle, float x, float y, float z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glRotatef(angle, x, y, z);
+            return;
+        }
+        state.rotate(angle, x, y, z);
+    }
+
+    @Override
+    public void glMatrixMode(int mode) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glMatrixMode(mode);
+            return;
+        }
+        state.matrixMode(mode);
+    }
+
+    @Override
+    public void glLoadIdentity() {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glLoadIdentity();
+            return;
+        }
+        state.loadIdentity();
+    }
+
+    @Override
+    public void glOrtho(double left, double right, double bottom, double top, double zNear, double zFar) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glOrtho(left, right, bottom, top, zNear, zFar);
+            return;
+        }
+        state.ortho(left, right, bottom, top, zNear, zFar);
+    }
+
+    @Override
+    public void glAlphaFunc(int comparison, float reference) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glAlphaFunc(comparison, reference);
+            return;
+        }
+        state.alphaFunc(comparison, reference);
+    }
+
+    @Override
+    public void glDepthFunc(int comparison) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glDepthFunc(comparison);
+            return;
+        }
+        state.depthFunc(comparison);
+    }
+
+    @Override
+    public void glViewport(int x, int y, int width, int height) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glViewport(x, y, width, height);
+            return;
+        }
+        state.viewport(x, y, width, height);
+    }
+
+    @Override
+    public void glClear(int mask) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glClear(mask);
+            return;
+        }
+        state.clear(mask);
+    }
+
+    @Override
+    public void glColor4f(float red, float green, float blue, float alpha) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glColor4f(red, green, blue, alpha);
+            return;
+        }
+        state.color(red, green, blue, alpha);
+    }
+
+    /**
+     * Records and drops the current normal.
+     *
+     * <p><b>Why dropping is the correct implementation rather than a gap.</b> A fixed-function normal only has
+     * a consumer when {@code GL_LIGHTING} is on, and nothing in 1.12 turns it on: vanilla has drawn with
+     * lightmaps since 1.6, and IC2Classic - the mod this exists for - never enables {@code GL_LIGHTING} either
+     * (measured: its only capability bits are texture, alpha test, depth test and rescale-normal). A normal
+     * that reaches a shader-per-draw pipeline would need a vertex attribute the layout has no room for, so
+     * inventing a consumer now would be inventing the wrong one.</p>
+     *
+     * <p>The log line is the trigger for revisiting this: a mod that enables lighting will name itself here,
+     * and the normal becomes a shader variant plus a {@code FrameState} field at that point.</p>
+     */
+    @Override
+    public void glNormal3f(float x, float y, float z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glNormal3f(x, y, z);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glNormal3f",
+                "a fixed-function normal has no consumer while lighting is off, so it is dropped");
+    }
+
+    /**
+     * Drops the synchronisation request.
+     *
+     * <p>Measured use: one call, on IC2Classic's fatal-error screen, immediately before the process exits. There
+     * is no flush primitive on the frame state to map it to - a draw is recorded into the frame's command buffer
+     * and submitted once - so a "finish" would mean a submit, which is a frame boundary decision rather than a
+     * mod's. Nothing waits on the result here, so dropping it changes no pixel. If a {@code glFinish} ever
+     * appears on a live path that reads back, this becomes "submit the frame so far".</p>
+     */
+    @Override
+    public void glFinish() {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glFinish();
+            return;
+        }
+        FrameStates.reportSkippedOnce("glFinish",
+                "draws are submitted with the frame, so there is nothing to synchronise yet");
+    }
+}

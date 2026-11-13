@@ -50,6 +50,12 @@ public final class ShimRegistry {
                 return;
             }
             for (ShimRewriteRules existing : RULESETS) {
+                if (existing == ruleset) {
+                    // Re-registering the same instance is a no-op, not a conflict. A ruleset that is a singleton
+                    // (FrameShimRules) is registered both by the coremod stage and, in tests, by hand, and the
+                    // order of those two calls is not something either side controls.
+                    return;
+                }
                 if (existing.id().equals(ruleset.id())) {
                     throw new IllegalArgumentException("duplicate shim ruleset id: " + ruleset.id());
                 }
@@ -140,8 +146,15 @@ public final class ShimRegistry {
         return Selection.EMPTY;
     }
 
-    /** Test hook: clears the registry, the exemptions and the selection. */
-    static void resetForTests() {
+    /**
+     * Test hook: clears the registry, the exemptions and the selection.
+     *
+     * <p>Public because the tests that need it live in more than one package: the gate is in
+     * {@code net.minecraftforge.lwjgl.legacy} and the ruleset tests are here. Production code must never call
+     * it - clearing the selection after classes have been rewritten would make the process disagree with
+     * itself.</p>
+     */
+    public static void resetForTests() {
         synchronized (RULESETS) {
             RULESETS.clear();
             EXEMPT_PREFIXES.clear();
@@ -159,6 +172,7 @@ public final class ShimRegistry {
         private final @Nullable String rulesetId;
         private final List<RetargetEntry> entries;
         private final Set<String> exemptPrefixes;
+        private final Set<String> fromOwners;
         private final Map<String, String> byCallSite;
 
         private Selection(@Nullable String rulesetId, List<RetargetEntry> entries, Set<String> exemptPrefixes) {
@@ -166,10 +180,13 @@ public final class ShimRegistry {
             this.entries = entries;
             this.exemptPrefixes = exemptPrefixes;
             Map<String, String> index = new HashMap<>(entries.size() * 2);
+            Set<String> owners = new HashSet<>(entries.size());
             for (RetargetEntry entry : entries) {
                 index.put(key(entry.fromOwner(), entry.name(), entry.desc()), entry.toOwner());
+                owners.add(entry.fromOwner());
             }
             this.byCallSite = Map.copyOf(index);
+            this.fromOwners = Set.copyOf(owners);
         }
 
         private static Selection of(ShimRewriteRules ruleset) {
@@ -205,6 +222,16 @@ public final class ShimRegistry {
          */
         public @Nullable String retarget(String owner, String name, String desc) {
             return byCallSite.get(key(owner, name, desc));
+        }
+
+        /**
+         * Whether this selection rewrites any call site of {@code owner}.
+         *
+         * <p>For the constant-pool gate, which walks every member reference in a class: resolving a
+         * {@code NameAndType} is only worth doing for an owner this selection (or the table) can act on.</p>
+         */
+        public boolean retargetsOwner(String owner) {
+            return fromOwners.contains(owner);
         }
 
         /** Whether a class's call sites are left alone. */
