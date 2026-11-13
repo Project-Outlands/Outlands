@@ -56,7 +56,9 @@ public final class MainThread {
         if (isMainThread()) {
             r.run();
         } else {
+            final long start = System.nanoTime();
             MainThreadExecutor.submit(bindClassLoader(r));
+            reportIfSlow(start);
         }
     }
 
@@ -66,10 +68,58 @@ public final class MainThread {
             if (isMainThread()) {
                 return r.call();
             }
-            return MainThreadExecutor.submit(bindClassLoader(r));
+            final long start = System.nanoTime();
+            final T value = MainThreadExecutor.submit(bindClassLoader(r));
+            reportIfSlow(start);
+            return value;
         } catch (Exception e) {
             throw new IllegalStateException("Main-thread task failed", e);
         }
+    }
+
+    /**
+     * How long a blocking marshal may take before it is reported.
+     *
+     * <p>Not a timeout: the call still waits, because the caller needs its value. It exists because the failure
+     * mode of a blocking marshal is a process that stops with no exception anywhere - measured: a world load that
+     * never finished, with the integrated server parked in {@code MainThreadExecutor.submit} while the main thread
+     * slept in its wait loop. A line naming the caller turns that into a five-minute diagnosis.</p>
+     */
+    private static final long SLOW_MARSHAL_MS = 5_000L;
+
+    /** At most one report per this interval, so a repeatedly blocked call site cannot flood the log. */
+    private static final long SLOW_REPORT_INTERVAL_NANOS = 30_000_000_000L;
+
+    private static final org.apache.logging.log4j.Logger LOGGER =
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|mainthread");
+
+    private static volatile long lastSlowReportAt;
+
+    private static void reportIfSlow(long startNanos) {
+        final long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        if (elapsedMs < SLOW_MARSHAL_MS) {
+            return;
+        }
+        final long now = System.nanoTime();
+        final long last = lastSlowReportAt;
+        if (last != 0L && now - last < SLOW_REPORT_INTERVAL_NANOS) {
+            return;
+        }
+        lastSlowReportAt = now;
+        LOGGER.warn("A main-thread task took {} ms to run. Queued tasks only run from Display.processMessages(), "
+                + "so the main thread has to be pumping; a wait loop that sleeps without draining deadlocks every "
+                + "caller. Caller: {}", elapsedMs, caller());
+    }
+
+    /** The first stack frame outside this class, for the report above. */
+    private static String caller() {
+        for (StackTraceElement frame : new Throwable().getStackTrace()) {
+            if (!frame.getClassName().startsWith("org.lwjgl.MainThread")
+                    && !frame.getClassName().startsWith("java.")) {
+                return frame.toString();
+            }
+        }
+        return "unknown";
     }
 
     public static boolean runOnMainThread(BooleanSupplier r) {
@@ -120,7 +170,14 @@ public final class MainThread {
         });
     }
 
-    /** Runs queued tasks. Must be called from the main thread, at least once per frame. */
+    /** Runs queued tasks. Must be called from the main thread, at least once per frame.
+     *
+     * <p><b>"Once per frame" is not the same as "once per rendered frame".</b> The main thread also spends long
+     * stretches waiting for other threads - starting and stopping an integrated server are the two that matter -
+     * and those waits are frames too, in the only sense this contract cares about: they are the moments when a
+     * thread that needs a value from the main thread is blocked. Both loops in {@code Minecraft} drain for exactly
+     * that reason.</p>
+     */
     public static void drain() {
         MainThreadExecutor.drain();
     }
