@@ -296,6 +296,21 @@ public interface FrameState {
 
     void lineWidth(float width);
 
+    /** The current line width, which is what {@code glGetFloat(GL_LINE_WIDTH)} asks for. */
+    default float lineWidth() {
+        return 1.0F;
+    }
+
+    /**
+     * How many matrices are on the current matrix stack, counting the one in effect.
+     *
+     * <p>GL counts it the same way: {@code GL_MODELVIEW_STACK_DEPTH} is 1 with nothing pushed, so a caller that
+     * wants "how deep was I" can unwind its own pushes. IE's manual page rendering does exactly that.</p>
+     */
+    default int matrixStackDepth() {
+        return 1;
+    }
+
     void polygonMode(int glFace, int glMode);
 
     void polygonOffset(float factor, float units);

@@ -327,6 +327,140 @@ public final class FrameShim implements ShimGl.Impl {
     }
 
     @Override
+    public boolean glIsEnabled(int cap) {
+        FrameState state = state();
+        if (state == null) {
+            return GL11.glIsEnabled(cap);
+        }
+        Capability capability = Capability.tryOf(cap);
+        if (capability == null) {
+            // GL answers false for a capability it does not know (after GL_INVALID_ENUM). Answering the same keeps a
+            // mod's branch on "is this on" from taking the path for a feature this backend does not have.
+            FrameStates.reportSkippedOnce("glIsEnabled(" + cap + ")",
+                    "the capability is outside the set vanilla toggles, so it is reported as off");
+            return false;
+        }
+        return state.isEnabled(capability);
+    }
+
+    @Override
+    public int glGetInteger(int parameterName) {
+        FrameState state = state();
+        if (state == null) {
+            return ShimGl.REAL_GL.glGetInteger(parameterName);
+        }
+        return switch (parameterName) {
+            case 2979 -> state.matrixStackDepth();     // GL_MODELVIEW_STACK_DEPTH
+            default -> {
+                FrameStates.reportSkippedOnce("glGetInteger(" + parameterName + ")",
+                        "that piece of state is not kept in a form this backend can report");
+                yield 0;
+            }
+        };
+    }
+
+    @Override
+    public float glGetFloat(int parameterName) {
+        FrameState state = state();
+        if (state == null) {
+            return ShimGl.REAL_GL.glGetFloat(parameterName);
+        }
+        return switch (parameterName) {
+            case 2849 -> state.lineWidth();            // GL_LINE_WIDTH
+            default -> {
+                FrameStates.reportSkippedOnce("glGetFloat(" + parameterName + ")",
+                        "that piece of state is not kept in a form this backend can report");
+                yield 0.0F;
+            }
+        };
+    }
+
+    @Override
+    public void glGetFloat(int parameterName, java.nio.FloatBuffer out) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glGetFloat(parameterName, out);
+            return;
+        }
+        if (parameterName != 2816) {                   // GL_CURRENT_COLOR
+            FrameStates.reportSkippedOnce("glGetFloat(" + parameterName + ", buffer)",
+                    "that piece of state is not kept in a form this backend can report");
+            return;
+        }
+        // Written at the caller's position and leaving it alone, which is glGetFloatv's contract: it fills the
+        // storage the caller points at. Advancing would consume a buffer the caller reuses every frame.
+        float[] color = state.currentColor();
+        int at = out.position();
+        for (int i = 0; i < 4; i++) {
+            out.put(at + i, color[i]);
+        }
+    }
+
+    @Override
+    public void glLight(int light, int parameterName, java.nio.FloatBuffer params) {
+        if (state() == null) {
+            ShimGl.REAL_GL.glLight(light, parameterName, params);
+            return;
+        }
+        // Same model the patched GlStateManager writes to, so a mod's light and the game's light are the same
+        // light - including the two entry points' shared opinion about which parameters are modelled.
+        FrameStates.glLight(light, parameterName, params);
+    }
+
+    @Override
+    public void glPointSize(float size) {
+        if (state() == null) {
+            ShimGl.REAL_GL.glPointSize(size);
+            return;
+        }
+        // A pipeline has no point size: the vertex shader has to write gl_PointSize, which this backend's stream
+        // shader does not do yet. Points are therefore drawn one pixel wide - reported rather than silently.
+        FrameStates.reportSkippedOnce("glPointSize(" + size + ")",
+                "a pipeline's point size comes from the vertex shader, which does not write gl_PointSize yet, so"
+                        + " point primitives are drawn one pixel wide");
+    }
+
+    @Override
+    public void glStencilFunc(int comparison, int reference, int mask) {
+        if (state() == null) {
+            ShimGl.REAL_GL.glStencilFunc(comparison, reference, mask);
+            return;
+        }
+        skipStencil("glStencilFunc");
+    }
+
+    @Override
+    public void glStencilMask(int mask) {
+        if (state() == null) {
+            ShimGl.REAL_GL.glStencilMask(mask);
+            return;
+        }
+        skipStencil("glStencilMask");
+    }
+
+    @Override
+    public void glStencilOp(int fail, int depthFail, int depthPass) {
+        if (state() == null) {
+            ShimGl.REAL_GL.glStencilOp(fail, depthFail, depthPass);
+            return;
+        }
+        skipStencil("glStencilOp");
+    }
+
+    /**
+     * The stencil family: recorded nowhere yet, because nothing consumes it.
+     *
+     * <p>The swapchain already has a stencil attachment ({@code D32_SFLOAT_S8_UINT}), so what is missing is the
+     * pipeline state and the pass that sets it up, not an attachment. Until then a draw that asked to be clipped by
+     * the stencil is drawn unclipped: visible, and reported once, rather than a crash.</p>
+     */
+    private static void skipStencil(String operation) {
+        FrameStates.reportSkippedOnce("stencil (" + operation + ")",
+                "stencil state is not part of the pipeline yet, so geometry that asked to be clipped by it is"
+                        + " drawn unclipped");
+    }
+
+    @Override
     public void glFinish() {
         FrameState state = state();
         if (state == null) {

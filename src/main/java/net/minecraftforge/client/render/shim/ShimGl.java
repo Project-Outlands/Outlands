@@ -85,6 +85,33 @@ public final class ShimGl {
         /** {@code glHint}: a rasterisation hint, which no pipeline has. */
         void glHint(int target, int mode);
 
+        /** {@code glIsEnabled}: whether a capability is currently on. */
+        boolean glIsEnabled(int cap);
+
+        /** {@code glGetInteger}: one integer of state, by GL enum. */
+        int glGetInteger(int parameterName);
+
+        /** {@code glGetFloat}: one float of state, by GL enum. */
+        float glGetFloat(int parameterName);
+
+        /** {@code glGetFloatv}: a float vector of state, written at the buffer's position without consuming it. */
+        void glGetFloat(int parameterName, java.nio.FloatBuffer out);
+
+        /** {@code glLight}: one parameter of one fixed-function light. */
+        void glLight(int light, int parameterName, java.nio.FloatBuffer params);
+
+        /** {@code glPointSize}: the rasterised diameter of a point primitive. */
+        void glPointSize(float size);
+
+        /** {@code glStencilFunc}: the test a stencil comparison makes. */
+        void glStencilFunc(int comparison, int reference, int mask);
+
+        /** {@code glStencilMask}: which stencil bits a write may change. */
+        void glStencilMask(int mask);
+
+        /** {@code glStencilOp}: what a stencil test does on fail, on depth fail and on pass. */
+        void glStencilOp(int fail, int depthFail, int depthPass);
+
         void glFinish();
     }
 
@@ -203,6 +230,61 @@ public final class ShimGl {
         @Override
         public void glHint(int target, int mode) {
             GL11.glHint(target, mode);
+        }
+
+        @Override
+        public boolean glIsEnabled(int cap) {
+            return GL11.glIsEnabled(cap);
+        }
+
+        @Override
+        public int glGetInteger(int parameterName) {
+            // LWJGL 3 has only the vector form; the single-value one was an LWJGL 2 convenience.
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                java.nio.IntBuffer out = stack.callocInt(16);
+                GL11.glGetIntegerv(parameterName, out);
+                return out.get(0);
+            }
+        }
+
+        @Override
+        public float glGetFloat(int parameterName) {
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                java.nio.FloatBuffer out = stack.callocFloat(16);
+                GL11.glGetFloatv(parameterName, out);
+                return out.get(0);
+            }
+        }
+
+        @Override
+        public void glGetFloat(int parameterName, java.nio.FloatBuffer out) {
+            GL11.glGetFloatv(parameterName, out);
+        }
+
+        @Override
+        public void glLight(int light, int parameterName, java.nio.FloatBuffer params) {
+            // LWJGL 3 dropped the non-v form; the vector one is the same call.
+            GL11.glLightfv(light, parameterName, params);
+        }
+
+        @Override
+        public void glPointSize(float size) {
+            GL11.glPointSize(size);
+        }
+
+        @Override
+        public void glStencilFunc(int comparison, int reference, int mask) {
+            GL11.glStencilFunc(comparison, reference, mask);
+        }
+
+        @Override
+        public void glStencilMask(int mask) {
+            GL11.glStencilMask(mask);
+        }
+
+        @Override
+        public void glStencilOp(int fail, int depthFail, int depthPass) {
+            GL11.glStencilOp(fail, depthFail, depthPass);
         }
 
         @Override
@@ -335,6 +417,42 @@ public final class ShimGl {
 
     public static void glHint(int target, int mode) {
         impl.glHint(target, mode);
+    }
+
+    public static boolean glIsEnabled(int cap) {
+        return impl.glIsEnabled(cap);
+    }
+
+    public static int glGetInteger(int parameterName) {
+        return impl.glGetInteger(parameterName);
+    }
+
+    public static float glGetFloat(int parameterName) {
+        return impl.glGetFloat(parameterName);
+    }
+
+    public static void glGetFloat(int parameterName, java.nio.FloatBuffer out) {
+        impl.glGetFloat(parameterName, out);
+    }
+
+    public static void glLight(int light, int parameterName, java.nio.FloatBuffer params) {
+        impl.glLight(light, parameterName, params);
+    }
+
+    public static void glPointSize(float size) {
+        impl.glPointSize(size);
+    }
+
+    public static void glStencilFunc(int comparison, int reference, int mask) {
+        impl.glStencilFunc(comparison, reference, mask);
+    }
+
+    public static void glStencilMask(int mask) {
+        impl.glStencilMask(mask);
+    }
+
+    public static void glStencilOp(int fail, int depthFail, int depthPass) {
+        impl.glStencilOp(fail, depthFail, depthPass);
     }
 
     public static void glFinish() {

@@ -87,6 +87,22 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glHint", "(II)V"),
             // Baubles tints its inventory slot with the byte form of the current colour.
             entry("glColor3ub", "(BBB)V"),
+            // Immersive Engineering asks what the state already is rather than setting it: the Tesla coil saves and
+            // restores the line width, its manual page unwinds the matrix stack by reading its depth, its text
+            // renderer restores the current colour, and two renderers branch on whether lighting or texturing is on.
+            entry("glIsEnabled", "(I)Z"),
+            entry("glGetInteger", "(I)I"),
+            entry("glGetFloat", "(I)F"),
+            entry("glGetFloat", "(ILjava/nio/FloatBuffer;)V"),
+            // A light parameter set from a shader item's render callback, which the lighting model already carries.
+            entry("glLight", "(IILjava/nio/FloatBuffer;)V"),
+            // Point size and the stencil family: reached by IE's fractal particles, its blueprint lines and the
+            // bottling machine's fluid clipping. Neither has a pipeline equivalent yet, so both are reported once
+            // and ignored - the alternative was a crash on first use.
+            entry("glPointSize", "(F)V"),
+            entry("glStencilFunc", "(III)V"),
+            entry("glStencilMask", "(I)V"),
+            entry("glStencilOp", "(III)V"),
             // Only ever called on IC2C's error path, before the process exits.
             entry("glFinish", "()V"));
 

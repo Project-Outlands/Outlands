@@ -42,6 +42,10 @@ final class FrameStateVk implements FrameState {
             return stack[top];
         }
 
+        int depth() {
+            return top + 1;
+        }
+
         void push() {
             if (top >= stack.length - 1) {
                 throw new StackOverflowError("Matrix stack overflow (depth limit " + stack.length + ")");
@@ -727,6 +731,17 @@ final class FrameStateVk implements FrameState {
     @Override
     public void lineWidth(float width) {
         lineWidth = width;
+    }
+
+    @Override
+    public float lineWidth() {
+        return lineWidth;
+    }
+
+    @Override
+    public int matrixStackDepth() {
+        // GL counts the matrix in effect as one, so an untouched stack is depth 1 and `top` is the index of it.
+        return currentStack().depth();
     }
 
     @Override

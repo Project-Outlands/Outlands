@@ -69,10 +69,15 @@ public final class CompatRewriter {
                 changed |= redirectAllocation((TypeInsnNode) insn);
             } else if (insn.getType() == AbstractInsnNode.METHOD_INSN) {
                 MethodInsnNode call = (MethodInsnNode) insn;
-                boolean tableChanged = rewriteCall(mn, call);
-                changed |= tableChanged;
-                if (!tableChanged && selection != null) {
-                    changed |= retarget(call, selection);
+                // The shim first. It declares the entry points the backend answers, and for those the question is
+                // not what LWJGL 3 calls them: the facade keeps the LWJGL 2 shape and decides itself whether to
+                // reach the frame state or the real GL function. The table then adapts everything else, which is
+                // what it is for. Both orders were tried; with the table first, a member in both tables was renamed
+                // and never reached the shim - silently, since the renamed call is a valid one.
+                boolean retargeted = selection != null && retarget(call, selection);
+                changed |= retargeted;
+                if (!retargeted) {
+                    changed |= rewriteCall(mn, call);
                 }
             }
             insn = next;
