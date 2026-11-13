@@ -33,27 +33,20 @@ public final class TextInputArea {
         TextFieldHandler.setFocusedTextField(field);
 
         final Minecraft mc = Minecraft.getMinecraft();
-        final FontRenderer font = mc.fontRenderer;
         final int scale = new ScaledResolution(mc).getScaleFactor();
         if (scale <= 0) {
             return;
         }
 
-        final boolean background = field.getEnableBackgroundDrawing();
-        final int textX = field.x + (background ? 4 : 0);
-        final int textY = field.y + (background ? (field.height - 8) / 2 : 0);
-
-        final String text = field.getText();
-        final int scroll = Math.min(field.getLineScrollOffset(), text.length());
-        final String visible = font.trimStringToWidth(text.substring(scroll), field.width);
-        final int caretIndex = Math.max(0, Math.min(field.getCursorPosition() - scroll, visible.length()));
-        final int caretPixels = font.getStringWidth(visible.substring(0, caretIndex));
-
-        final int x = textX * scale;
-        final int y = (textY - 1) * scale;
-        final int width = field.width * scale;
-        final int height = Math.max(1, font.FONT_HEIGHT) * scale;
-        final int cursor = caretPixels * scale;
+        // The geometry comes from the field, not from its getters: getEnableBackgroundDrawing() is overridable and
+        // mods override it for its side effect (JEI draws its own background in it), so asking here drew that
+        // background a second time - over the text the field had just drawn.
+        final int[] area = field.getTextInputArea();
+        final int x = area[0] * scale;
+        final int y = (area[1] - 1) * scale;
+        final int width = area[2] * scale;
+        final int height = Math.max(1, area[3]) * scale;
+        final int cursor = area[4] * scale;
 
         publishIfChanged(x, y, width, height, cursor);
     }
@@ -61,7 +54,7 @@ public final class TextInputArea {
     /**
      * Positions the IME window for screens that edit text without a {@link GuiTextField} - signs, books and mod
      * screens. Following the caret there would mean re-implementing their text layout (the sign draws through a 3D
-     * transform, books wrap inside {@code FontRenderer}), which is not worth the fragility, so they all fall back to
+     * transform, books wrap inside {@link FontRenderer}), which is not worth the fragility, so they all fall back to
      * the window's lower left corner. A screen that does know its caret can override
      * {@link GuiScreen#getTextInputArea()} and opt in to caret tracking.
      */

@@ -77,7 +77,7 @@
          }
      }
  
-@@ -603,6 +632,11 @@
+@@ -603,6 +632,49 @@
          return this.cursorPosition;
      }
  
@@ -86,10 +86,48 @@
 +        return this.lineScrollOffset;
 +    }
 +
++    /**
++     * Where the text of this field starts, in GUI units - the origin of the string, not of the box.
++     *
++     * <p><b>Why the field answers this itself.</b> The origin depends on {@code enableBackgroundDrawing}, and the
++     * getter for that - {@link #getEnableBackgroundDrawing()} - is overridable. Mods override it for its side effect:
++     * JEI draws its own background there and returns false. A caller that asks a second time in the same frame (the
++     * input-method anchor does, at the end of {@link #drawTextBox()}) therefore draws that background a second time,
++     * on top of the text the field has just drawn - which is how the JEI search box lost its text the moment it was
++     * clicked. Reading the field directly cannot have that effect, so anything that only needs the geometry uses
++     * these instead.</p>
++     */
++    public int getTextOriginX()
++    {
++        return this.x + (this.enableBackgroundDrawing ? 4 : 0);
++    }
++
++    /** @see #getTextOriginX() */
++    public int getTextOriginY()
++    {
++        return this.y + (this.enableBackgroundDrawing ? (this.height - 8) / 2 : 0);
++    }
++
++    /**
++     * The text origin plus the caret, for whoever has to point at the text: {@code x, y, width, height, caret} in GUI
++     * units. The caret is the pixel offset of the cursor inside the visible text.
++     *
++     * @see #getTextOriginX() for why this is not computed from the getters
++     */
++    public int[] getTextInputArea()
++    {
++        int scroll = Math.min(this.lineScrollOffset, this.text.length());
++        String visible = this.fontRenderer.trimStringToWidth(this.text.substring(scroll), this.width);
++        int caret = Math.max(0, Math.min(this.cursorPosition - scroll, visible.length()));
++        return new int[] {this.getTextOriginX(), this.getTextOriginY(), this.width,
++                Math.max(1, this.fontRenderer.FONT_HEIGHT),
++                this.fontRenderer.getStringWidth(visible.substring(0, caret))};
++    }
++
      public boolean getEnableBackgroundDrawing()
      {
          return this.enableBackgroundDrawing;
-@@ -625,12 +659,22 @@
+@@ -625,12 +697,22 @@
  
      public void setFocused(boolean isFocusedIn)
      {

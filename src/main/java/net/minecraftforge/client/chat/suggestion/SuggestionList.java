@@ -38,12 +38,15 @@ public class SuggestionList {
     // Tracks the connection the knownCommands were learned on. Different connection means a different server
     private static WeakReference<NetHandlerPlayClient> lastConnection = new WeakReference<>(null);
 
+    // The origin comes from the field rather than from getEnableBackgroundDrawing(): that getter is overridable and
+    // mods override it for its side effect (JEI draws its own background there), so asking it from here would draw
+    // into the world twice per frame.
     private static int textOriginX(GuiTextField f) {
-        return f.getEnableBackgroundDrawing() ? f.x + 4 : f.x;
+        return f.getTextOriginX();
     }
 
     private static int textOriginY(GuiTextField f) {
-        return f.getEnableBackgroundDrawing() ? f.y + (f.height - 8) / 2 : f.y;
+        return f.getTextOriginY();
     }
 
     private final GuiTextField field;
