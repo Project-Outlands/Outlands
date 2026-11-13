@@ -85,9 +85,9 @@ public final class VertexConverter {
      */
     public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                               float[] light0, float[] light1, ByteBuffer target, int targetOffset) {
+                               LightingModel lighting, ByteBuffer target, int targetOffset) {
         convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix,
-                light0, light1, null, target, targetOffset);
+                lighting, null, target, targetOffset);
     }
 
     /**
@@ -95,10 +95,10 @@ public final class VertexConverter {
      */
     public static void convert(byte[] source, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                               float[] light0, float[] light1, float[] textureMatrix,
+                               LightingModel lighting, float[] textureMatrix,
                                ByteBuffer target, int targetOffset) {
         convert(source, 0, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled,
-                normalMatrix, light0, light1, textureMatrix, target, targetOffset);
+                normalMatrix, lighting, textureMatrix, target, targetOffset);
     }
 
     /**
@@ -107,7 +107,7 @@ public final class VertexConverter {
      */
     public static void convert(byte[] source, int sourceOffset, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                               float[] light0, float[] light1, float[] textureMatrix,
+                               LightingModel lighting, float[] textureMatrix,
                                ByteBuffer target, int targetOffset) {
         int inStride = layout.stride();
         int required = vertexCount * inStride;
@@ -141,7 +141,7 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
-        float cachedFactor = 1.0F;
+        float[] cachedFactor = {1.0F, 1.0F, 1.0F};
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
@@ -178,7 +178,7 @@ public final class VertexConverter {
                 }
             }
 
-            if (normalAttr != null && lightingEnabled && normalMatrix != null && light0 != null && light1 != null) {
+            if (normalAttr != null && lightingEnabled && normalMatrix != null && lighting != null) {
                 int at = sourceBase + normalAttr.offset();
                 float nx, ny, nz;
                 if (normalAttr.type() == VertexFormatElement.EnumType.BYTE
@@ -198,14 +198,19 @@ public final class VertexConverter {
                     lastNx = nx;
                     lastNy = ny;
                     lastNz = nz;
-                    cachedFactor = computeNormalLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, light0, light1);
+                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting, cachedFactor);
                 }
 
-                if (cachedFactor < 0.9999F) {
-                    r = Math.round(r * cachedFactor);
-                    g = Math.round(g * cachedFactor);
-                    b = Math.round(b * cachedFactor);
+                // With colour material off the vertex colour is not the material, so it takes no part: the
+                // material's lit colour is what GL writes, and white is what multiplies to it here.
+                if (!lighting.usesColorMaterial()) {
+                    r = 255;
+                    g = 255;
+                    b = 255;
                 }
+                r = clampByte(Math.round(r * cachedFactor[0]));
+                g = clampByte(Math.round(g * cachedFactor[1]));
+                b = clampByte(Math.round(b * cachedFactor[2]));
             }
 
             target.putInt(base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
@@ -218,11 +223,11 @@ public final class VertexConverter {
      */
     public static void convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                               float[] light0, float[] light1, float[] textureMatrix,
+                               LightingModel lighting, float[] textureMatrix,
                                ByteBuffer target, int targetOffset) {
         if (source.hasArray()) {
             convert(source.array(), source.arrayOffset() + source.position(), layout, vertexCount,
-                    fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1,
+                    fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, lighting,
                     textureMatrix, target, targetOffset);
             return;
         }
@@ -264,7 +269,7 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
-        float cachedFactor = 1.0F;
+        float[] cachedFactor = {1.0F, 1.0F, 1.0F};
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
@@ -303,7 +308,7 @@ public final class VertexConverter {
                 }
             }
 
-            if (normalAttr != null && lightingEnabled && normalMatrix != null && light0 != null && light1 != null) {
+            if (normalAttr != null && lightingEnabled && normalMatrix != null && lighting != null) {
                 int at = sourceBase + normalAttr.offset();
                 float nx, ny, nz;
                 if (normalAttr.type() == VertexFormatElement.EnumType.BYTE
@@ -323,14 +328,19 @@ public final class VertexConverter {
                     lastNx = nx;
                     lastNy = ny;
                     lastNz = nz;
-                    cachedFactor = computeNormalLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, light0, light1);
+                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting, cachedFactor);
                 }
 
-                if (cachedFactor < 0.9999F) {
-                    r = Math.round(r * cachedFactor);
-                    g = Math.round(g * cachedFactor);
-                    b = Math.round(b * cachedFactor);
+                // With colour material off the vertex colour is not the material, so it takes no part: the
+                // material's lit colour is what GL writes, and white is what multiplies to it here.
+                if (!lighting.usesColorMaterial()) {
+                    r = 255;
+                    g = 255;
+                    b = 255;
                 }
+                r = clampByte(Math.round(r * cachedFactor[0]));
+                g = clampByte(Math.round(g * cachedFactor[1]));
+                b = clampByte(Math.round(b * cachedFactor[2]));
             }
 
             target.putInt(base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
@@ -351,17 +361,18 @@ public final class VertexConverter {
 
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                  float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                                 float[] light0, float[] light1) {
+                                 LightingModel lighting) {
         return convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix,
-                light0, light1, null);
+                lighting, null);
     }
 
     public static byte[] convert(ByteBuffer source, VertexLayout layout, int vertexCount, int fallbackColor,
                                  float[] fallbackLightmap, boolean lightingEnabled, float[] normalMatrix,
-                                 float[] light0, float[] light1, float[] textureMatrix) {
+                                 LightingModel lighting, float[] textureMatrix) {
         byte[] out = new byte[vertexCount * STRIDE];
         ByteBuffer target = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder());
-        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix, light0, light1, textureMatrix, target, 0);
+        convert(source, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled, normalMatrix,
+                lighting, textureMatrix, target, 0);
         return out;
     }
 
@@ -454,9 +465,18 @@ public final class VertexConverter {
         return (byte) Math.max(0, Math.min(255, scaled));
     }
 
-    private static float computeNormalLightingFactor(float nx, float ny, float nz,
-                                                     VertexFormatElement.EnumType type,
-                                                     float[] nm, float[] l0, float[] l1) {
+
+    /**
+     * Computes the lighting factor for one normal and writes it into {@code out}.
+     *
+     * <p>The normal is transformed into eye space, where the lights live, and normalised: a vertex normal is not
+     * unit length in general - a byte normal is 127 long, a float one is whatever the model shipped - and the
+     * Lambert term is only a cosine for a unit vector. A normal that cannot be normalised leaves the factor at 1,
+     * i.e. the vertex is drawn unattenuated rather than black, which is what a model with a zero normal means.</p>
+     */
+    private static void computeLightingFactor(float nx, float ny, float nz,
+                                              VertexFormatElement.EnumType type,
+                                              float[] nm, LightingModel lighting, float[] out) {
         if (type == VertexFormatElement.EnumType.BYTE || type == VertexFormatElement.EnumType.UBYTE) {
             nx /= 127.0F;
             ny /= 127.0F;
@@ -464,7 +484,10 @@ public final class VertexConverter {
         }
         float lenSq = nx * nx + ny * ny + nz * nz;
         if (lenSq <= 0.01F) {
-            return 1.0F;
+            out[0] = 1.0F;
+            out[1] = 1.0F;
+            out[2] = 1.0F;
+            return;
         }
         // Transform normal to eye space using column-major 3x3 normalMatrix:
         float ex = nm[0] * nx + nm[3] * ny + nm[6] * nz;
@@ -472,16 +495,16 @@ public final class VertexConverter {
         float ez = nm[2] * nx + nm[5] * ny + nm[8] * nz;
         float eLenSq = ex * ex + ey * ey + ez * ez;
         if (eLenSq < 1e-4F) {
-            return 1.0F;
+            out[0] = 1.0F;
+            out[1] = 1.0F;
+            out[2] = 1.0F;
+            return;
         }
         float invLen = 1.0F / (float) Math.sqrt(eLenSq);
-        ex *= invLen;
-        ey *= invLen;
-        ez *= invLen;
+        lighting.shadeFactor(ex * invLen, ey * invLen, ez * invLen, out);
+    }
 
-        // OpenGL standard item lighting: ambient 0.4, diffuse 0.6 per light
-        float d0 = Math.max(0.0F, ex * l0[0] + ey * l0[1] + ez * l0[2]);
-        float d1 = Math.max(0.0F, ex * l1[0] + ey * l1[1] + ez * l1[2]);
-        return Math.min(1.0F, 0.4F + 0.6F * d0 + 0.6F * d1);
+    private static int clampByte(int value) {
+        return value < 0 ? 0 : Math.min(value, 255);
     }
 }

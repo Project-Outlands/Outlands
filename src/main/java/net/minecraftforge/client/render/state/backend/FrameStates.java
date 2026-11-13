@@ -258,32 +258,64 @@ public final class FrameStates {
     }
 
     /**
-     * Answers {@code glLight}, {@code glLightModel} and {@code glColorMaterial}: recorded as a skipped effect.
+     * Answers {@code glLight}: a light's ambient colour, diffuse colour and position reach the lighting model.
      *
-     * <p>This is the fixed-function lighting model - two directional lights and a light model the game configures
-     * through {@code RenderHelper.enableStandardItemLighting}, plus per-frame light setup for entities, clouds and
-     * items. On this backend nothing consumes it: the shader takes the vertex colour as final, which is correct for
-     * terrain (vanilla bakes directional shade and ambient occlusion into the vertex before it is written) and flat
-     * for entity models, which expect the light model to shade them.</p>
-     *
-     * <p>Not a throw, because it does not stop a frame from rendering: it makes lit geometry flat. Reported once per
-     * entry point so the log says which of them are still doing nothing.</p>
+     * <p>Everything else on a light is reported once and left alone - specular needs a material specular the model
+     * does not carry (GL's default is black, so the term is zero for every draw the game makes), and spot/attenuation
+     * parameters would need terms the shader does not have.</p>
      */
     public static boolean glLight(int light, int pname, java.nio.FloatBuffer params) {
         FrameState state = forNonGl();
         if (state == null) {
             return false;
         }
-        state.glLight(light, pname, params);
+        switch (pname) {
+            case 4608, 4609, 4611 -> state.glLight(light, pname, params);   // GL_AMBIENT, GL_DIFFUSE, GL_POSITION
+            default -> reportSkippedOnce("fixed-function lighting (glLight " + pname + ")",
+                    "only a light's ambient colour, diffuse colour and position are modelled; a spot light or"
+                            + " attenuation would need terms the shader does not have");
+        }
         return true;
     }
 
-    public static boolean skipLighting(String operation) {
-        if (forNonGl() == null) {
+    /**
+     * Answers {@code glLightModel}: the model ambient is modelled, everything else is reported once.
+     *
+     * <p>{@code GL_LIGHT_MODEL_TWO_SIDE} is the one that would otherwise be silently wrong: it lights back faces with
+     * the reverse normal, which needs a second normal per vertex. Vanilla never sets it.</p>
+     */
+    public static boolean glLightModel(int pname, java.nio.FloatBuffer params) {
+        FrameState state = forNonGl();
+        if (state == null) {
             return false;
         }
-        reportSkippedOnce("fixed-function lighting (" + operation + ")",
-                "geometry whose vertices carry no shade is drawn flat rather than lit");
+        if (pname == 2899) {    // GL_LIGHT_MODEL_AMBIENT
+            state.lightModelAmbient(params);
+        } else {
+            reportSkippedOnce("fixed-function lighting (glLightModel " + pname + ")",
+                    "only the model ambient is modelled; two-sided lighting would need a second normal per vertex");
+        }
+        return true;
+    }
+
+    /**
+     * Answers {@code glColorMaterial}: the mode decides which material components the vertex colour stands in for.
+     *
+     * <p>Only {@code GL_AMBIENT_AND_DIFFUSE} is acted on, which is the mode vanilla sets and the only one it uses. The
+     * other modes make the colour drive one component at a time, which would need the per-component material the
+     * model does not carry; reported once rather than quietly treated as the mode that is implemented.</p>
+     */
+    public static boolean colorMaterial(int face, int mode) {
+        FrameState state = forNonGl();
+        if (state == null) {
+            return false;
+        }
+        if (mode != 5634) {     // GL_AMBIENT_AND_DIFFUSE
+            reportSkippedOnce("fixed-function lighting (glColorMaterial mode " + mode + ")",
+                    "only GL_AMBIENT_AND_DIFFUSE is modelled, which is the mode the game uses");
+            return true;
+        }
+        state.colorMaterial(face, mode);
         return true;
     }
 

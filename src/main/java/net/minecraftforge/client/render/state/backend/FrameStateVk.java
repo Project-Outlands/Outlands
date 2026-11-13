@@ -122,8 +122,27 @@ final class FrameStateVk implements FrameState {
     private boolean hasLightmap;
     /** The texture the game's lightmap lives in, or {@code 0}. */
     private int lightmapTexture;
-    private final float[] light0Eye = {0.1617F, 0.8085F, -0.5659F};
-    private final float[] light1Eye = {-0.1617F, 0.8085F, 0.5659F};
+    /**
+     * The fixed-function lighting model, mutable while the game sets state.
+     *
+     * <p>Colours and directions of all eight lights, plus the model ambient - the pieces {@code glLight},
+     * {@code glLightModel} and {@code glColorMaterial} write. Kept here rather than in the draw because it changes a
+     * handful of times per frame while draws are issued by the thousand: {@link #lighting()} turns it into an
+     * immutable snapshot, and a draw holds that instead of a copy.</p>
+     */
+    private final float[] lightModelAmbient = {0.2F, 0.2F, 0.2F};
+    private final float[] lightAmbient = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+    private final float[] lightDiffuse = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+    private final float[] lightDirection = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+    private int colorMaterialFace = 1032;    // GL_FRONT_AND_BACK, the default
+    private int colorMaterialMode = net.minecraftforge.client.render.vertex.LightingModel.AMBIENT_AND_DIFFUSE;
+    /** The snapshot a draw takes, rebuilt on the first {@link #lighting()} after a change. */
+    private net.minecraftforge.client.render.vertex.LightingModel lightingSnapshot;
+    private boolean lightingDirty = true;
+    /** The light capabilities in {@code GL_LIGHT0..7} order, so the snapshot does not index the enum by ordinal. */
+    private static final Capability[] LIGHT_CAPABILITIES = {
+            Capability.LIGHT_0, Capability.LIGHT_1, Capability.LIGHT_2, Capability.LIGHT_3,
+            Capability.LIGHT_4, Capability.LIGHT_5, Capability.LIGHT_6, Capability.LIGHT_7};
     private final float[] overlayColor = new float[4];
     /** GL_TEXTURE_ENV state, per texture unit: the combine stack is per unit, not global. */
     private static final int TEXTURE_UNITS = 4;
@@ -159,6 +178,14 @@ final class FrameStateVk implements FrameState {
         for (int i = 0; i < textureStacks.length; i++) {
             textureStacks[i] = new MatrixStack(16);
         }
+        // GL's defaults, which GlStateManager.Profile.DEFAULT also installs: light 0 is white and every light points
+        // down the eye's -Z (the game overwrites both before it draws anything that is lit).
+        lightDiffuse[0] = 1.0F;
+        lightDiffuse[1] = 1.0F;
+        lightDiffuse[2] = 1.0F;
+        for (int light = 0; light < net.minecraftforge.client.render.vertex.LightingModel.LIGHTS; light++) {
+            lightDirection[light * 3 + 2] = 1.0F;
+        }
     }
 
     @Override
@@ -175,6 +202,23 @@ final class FrameStateVk implements FrameState {
         } else {
             enabled.remove(capability);
         }
+        if (isLightingCapability(capability)) {
+            lightingDirty = true;
+        }
+    }
+
+    /**
+     * Whether a capability is part of the lighting model.
+     *
+     * <p>The eight lights and colour material are: which lights are on decides which terms of GL's equation apply,
+     * and {@code GL_COLOR_MATERIAL} decides whether the vertex colour is the material. {@code LIGHTING} itself is
+     * not, because it is carried on the draw instead - a draw issued with lighting off never reads the model.</p>
+     */
+    private static boolean isLightingCapability(Capability capability) {
+        return switch (capability) {
+            case LIGHT_0, LIGHT_1, LIGHT_2, LIGHT_3, LIGHT_4, LIGHT_5, LIGHT_6, LIGHT_7, COLOR_MATERIAL -> true;
+            default -> false;
+        };
     }
 
     @Override
@@ -279,42 +323,111 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void glLight(int light, int pname, FloatBuffer params) {
-        if (pname == 4611 && params != null && params.remaining() >= 3) { // GL_POSITION
-            int pos = params.position();
-            float x = params.get(pos);
-            float y = params.get(pos + 1);
-            float z = params.get(pos + 2);
-            Matrix4fc mv = modelView();
-            float ex = mv.m00() * x + mv.m10() * y + mv.m20() * z;
-            float ey = mv.m01() * x + mv.m11() * y + mv.m21() * z;
-            float ez = mv.m02() * x + mv.m12() * y + mv.m22() * z;
-            float len = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
-            if (len > 1e-4F) {
-                float inv = 1.0F / len;
-                ex *= inv;
-                ey *= inv;
-                ez *= inv;
+        if (params == null) {
+            return;
+        }
+        // GL_LIGHT0 is 0x4000, not 0: the index is what the arrays are laid out by.
+        int index = light - 16384;
+        if (index < 0 || index >= net.minecraftforge.client.render.vertex.LightingModel.LIGHTS) {
+            // glLight on GL_LIGHT0..7 only. Anything else is a caller error GL would reject with GL_INVALID_ENUM;
+            // ignoring it keeps a mod's mistake from taking the frame down.
+            return;
+        }
+        int at = index * 3;
+        int pos = params.position();
+        int remaining = params.remaining();
+        switch (pname) {
+            case 4608 -> { // GL_AMBIENT
+                if (remaining < 3) {
+                    return;
+                }
+                lightAmbient[at] = params.get(pos);
+                lightAmbient[at + 1] = params.get(pos + 1);
+                lightAmbient[at + 2] = params.get(pos + 2);
+                lightingDirty = true;
             }
-            if (light == 16384) { // GL_LIGHT0
-                light0Eye[0] = ex;
-                light0Eye[1] = ey;
-                light0Eye[2] = ez;
-            } else if (light == 16385) { // GL_LIGHT1
-                light1Eye[0] = ex;
-                light1Eye[1] = ey;
-                light1Eye[2] = ez;
+            case 4609 -> { // GL_DIFFUSE
+                if (remaining < 3) {
+                    return;
+                }
+                lightDiffuse[at] = params.get(pos);
+                lightDiffuse[at + 1] = params.get(pos + 1);
+                lightDiffuse[at + 2] = params.get(pos + 2);
+                lightingDirty = true;
+            }
+            case 4611 -> { // GL_POSITION
+                if (remaining < 3) {
+                    return;
+                }
+                float x = params.get(pos);
+                float y = params.get(pos + 1);
+                float z = params.get(pos + 2);
+                // GL keeps the light's position in eye space: the modelview that is current when glLight is called
+                // is applied once, here, and not again at draw time. The fourth component decides between a
+                // positional and a directional light; both end up as a direction towards the light, which is what
+                // the diffuse term needs.
+                Matrix4fc mv = modelView();
+                float ex = mv.m00() * x + mv.m10() * y + mv.m20() * z;
+                float ey = mv.m01() * x + mv.m11() * y + mv.m21() * z;
+                float ez = mv.m02() * x + mv.m12() * y + mv.m22() * z;
+                float len = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
+                if (len > 1e-4F) {
+                    float inv = 1.0F / len;
+                    ex *= inv;
+                    ey *= inv;
+                    ez *= inv;
+                }
+                lightDirection[at] = ex;
+                lightDirection[at + 1] = ey;
+                lightDirection[at + 2] = ez;
+                lightingDirty = true;
+            }
+            default -> {
+                // GL_SPECULAR and the spot/attenuation parameters: nothing sets them (GL's default material
+                // specular is black, so the specular term is zero) and a spot light would need a cone test the
+                // shader does not have. Recorded as "not acted on" by FrameStates, which is where the one-time
+                // report lives.
             }
         }
     }
 
     @Override
-    public float[] light0Eye() {
-        return light0Eye;
+    public void lightModelAmbient(FloatBuffer params) {
+        if (params == null || params.remaining() < 3) {
+            return;
+        }
+        int pos = params.position();
+        lightModelAmbient[0] = params.get(pos);
+        lightModelAmbient[1] = params.get(pos + 1);
+        lightModelAmbient[2] = params.get(pos + 2);
+        lightingDirty = true;
     }
 
     @Override
-    public float[] light1Eye() {
-        return light1Eye;
+    public void colorMaterial(int face, int mode) {
+        colorMaterialFace = face;
+        colorMaterialMode = mode;
+        lightingDirty = true;
+    }
+
+    @Override
+    public net.minecraftforge.client.render.vertex.LightingModel lighting() {
+        if (lightingSnapshot == null || lightingDirty) {
+            boolean[] enabledLights = new boolean[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS];
+            for (int light = 0; light < enabledLights.length; light++) {
+                enabledLights[light] = isEnabled(LIGHT_CAPABILITIES[light]);
+            }
+            // GL_COLOR_MATERIAL on its own does not make the front faces use the vertex colour: the face given to
+            // glColorMaterial decides which side does. The shader has one material, so it is the front one that is
+            // modelled - GL_BACK would leave front faces with the default material, and culling means the back
+            // faces of a lit model are the ones nobody sees.
+            boolean frontUsesColor = colorMaterialFace != 1030; // 1030 is GL_BACK
+            lightingSnapshot = new net.minecraftforge.client.render.vertex.LightingModel(
+                    lightModelAmbient, lightAmbient, lightDiffuse, lightDirection, enabledLights,
+                    isEnabled(Capability.COLOR_MATERIAL) && frontUsesColor, colorMaterialMode);
+            lightingDirty = false;
+        }
+        return lightingSnapshot;
     }
 
     @Override

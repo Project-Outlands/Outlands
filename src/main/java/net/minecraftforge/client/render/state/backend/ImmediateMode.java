@@ -20,9 +20,10 @@ import java.util.Arrays;
  * else, which is why it is a small accumulator rather than a general command recorder.</p>
  *
  * <p><b>What it writes.</b> The canonical layout, directly - no conversion step, because there is no input format
- * to convert from. Attributes vanilla sets but the layout has no room for (normals) are accepted and dropped;
- * directional shading is baked into the vertex colour before it reaches here, and fixed-function lighting is not
- * implemented, so a normal would have nothing to act on.</p>
+ * to convert from. Attributes vanilla sets but the layout has no room for (normals) are accepted and dropped:
+ * {@code FontRenderer} is the only caller and text is not lit, so the normal it never sets would have nothing to act
+ * on. Lit geometry reaches the lighting model through the normal <i>inside</i> its vertex format instead - see
+ * {@link net.minecraftforge.client.render.vertex.LightingModel}.</p>
  */
 public final class ImmediateMode {
 

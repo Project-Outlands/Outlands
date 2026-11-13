@@ -24,6 +24,33 @@ class VertexConverterTest {
         return ByteBuffer.allocateDirect(capacity).order(ByteOrder.nativeOrder());
     }
 
+    /**
+     * Exactly what {@code RenderHelper.enableStandardItemLighting} installs: model ambient 0.4, two white lights at
+     * 0.6 diffuse, and colour material on so the vertex colour is the material.
+     *
+     * <p>The expected values in the lit tests below are the numbers this model produces, which are the same numbers
+     * the hard-coded 0.4 + 0.6*d0 + 0.6*d1 produced - the point of the model is that the numbers now come from the
+     * game's own state rather than from a constant that only matches it by coincidence.</p>
+     */
+    static LightingModel standardItemLighting() {
+        float[] ambient = new float[LightingModel.LIGHTS * 3];
+        float[] diffuse = new float[LightingModel.LIGHTS * 3];
+        diffuse[0] = diffuse[1] = diffuse[2] = 0.6F;
+        diffuse[3] = diffuse[4] = diffuse[5] = 0.6F;
+        float[] direction = new float[LightingModel.LIGHTS * 3];
+        direction[0] = 0.1617F;
+        direction[1] = 0.8085F;
+        direction[2] = -0.5659F;
+        direction[3] = -0.1617F;
+        direction[4] = 0.8085F;
+        direction[5] = 0.5659F;
+        boolean[] enabled = new boolean[LightingModel.LIGHTS];
+        enabled[0] = true;
+        enabled[1] = true;
+        return new LightingModel(new float[] {0.4F, 0.4F, 0.4F}, ambient, diffuse, direction, enabled, true,
+                LightingModel.AMBIENT_AND_DIFFUSE);
+    }
+
     @Test
     void blockGoesThroughUnchanged() {
         // The target layout is BLOCK itself, so converting it is the identity - and reusing the verified terrain
@@ -148,7 +175,7 @@ class VertexConverterTest {
 
         ByteBuffer arrayDirectTarget = ByteBuffer.allocateDirect(offset + regular.length).order(ByteOrder.nativeOrder());
         VertexConverter.convert(arraySource, VertexLayout.of(format), 1, 0x11223344, new float[] {100.0F, 200.0F},
-                false, null, null, null, null, arrayDirectTarget, offset);
+                false, null, null, null, arrayDirectTarget, offset);
 
         byte[] fromArray = new byte[regular.length];
         arrayDirectTarget.position(offset);
@@ -234,10 +261,9 @@ class VertexConverterTest {
 
         // When lighting is enabled, diffuse lighting modulates vertex RGB based on normalMatrix and light vectors.
         float[] identity3x3 = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-        float[] l0 = {0.1617F, 0.8085F, -0.5659F};
-        float[] l1 = {-0.1617F, 0.8085F, 0.5659F};
+        LightingModel standardItemLighting = standardItemLighting();
         ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 4,
-                        0xFFFFFFFF, null, true, identity3x3, l0, l1))
+                        0xFFFFFFFF, null, true, identity3x3, standardItemLighting))
                 .order(ByteOrder.nativeOrder());
 
         // Vertex 0: top face factor 1.0 -> 200
@@ -274,10 +300,8 @@ class VertexConverterTest {
 
         int fallbackColor = (0xFF << 24) | (200 << 16) | (200 << 8) | 200;
         float[] identity3x3 = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-        float[] l0 = {0.1617F, 0.8085F, -0.5659F};
-        float[] l1 = {-0.1617F, 0.8085F, 0.5659F};
         ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2, fallbackColor, null,
-                        true, identity3x3, l0, l1))
+                        true, identity3x3, standardItemLighting()))
                 .order(ByteOrder.nativeOrder());
 
         int outStride = VertexConverter.STRIDE;
@@ -310,7 +334,7 @@ class VertexConverterTest {
         m.get(texMat);
 
         ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2,
-                        0xFFFFFFFF, null, false, null, null, null, texMat))
+                        0xFFFFFFFF, null, false, null, null, texMat))
                 .order(ByteOrder.nativeOrder());
 
         int outStride = VertexConverter.STRIDE;
@@ -322,4 +346,69 @@ class VertexConverterTest {
         assertEquals(4.8F, out.getFloat(outStride + 16), 0.001F);
         assertEquals(1.6F, out.getFloat(outStride + 20), 0.001F);
     }
+
+    @Test
+    void aTintedLightTintsTheVertexPerChannel() {
+        // A red light and colour material on: the shaded colour is the vertex colour times the light's own colour, per
+        // channel. A scalar factor could not express this - it would dim all three channels equally.
+        float[] ambient = new float[LightingModel.LIGHTS * 3];
+        float[] diffuse = new float[LightingModel.LIGHTS * 3];
+        diffuse[0] = 1.0F;      // red only
+        float[] direction = new float[LightingModel.LIGHTS * 3];
+        direction[2] = 1.0F;    // straight at the +Z face
+        boolean[] enabled = new boolean[LightingModel.LIGHTS];
+        enabled[0] = true;
+        LightingModel red = new LightingModel(new float[3], ambient, diffuse, direction, enabled, true,
+                LightingModel.AMBIENT_AND_DIFFUSE);
+
+        VertexFormat format = DefaultVertexFormats.ITEM;
+        ByteBuffer source = direct(format.getSize());
+        source.put(12, (byte) 200);
+        source.put(13, (byte) 200);
+        source.put(14, (byte) 200);
+        source.put(15, (byte) 255);
+        source.put(26, (byte) 127);   // normal +Z
+
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 1,
+                        0xFFFFFFFF, null, true, new float[] {1, 0, 0, 0, 1, 0, 0, 0, 1}, red))
+                .order(ByteOrder.nativeOrder());
+
+        assertEquals(200, out.get(12) & 0xFF, "red channel is fully lit");
+        assertEquals(0, out.get(13) & 0xFF, "green has no light");
+        assertEquals(0, out.get(14) & 0xFF, "blue has no light");
+        assertEquals(255, out.get(15) & 0xFF, "alpha is preserved");
+    }
+
+    @Test
+    void withoutColourMaterialTheVertexColourIsNotTheMaterial() {
+        // GL's default material is ambient 0.2 / diffuse 0.8 and the vertex colour takes no part, so two vertices
+        // that differ only in colour come out the same. That is what a mod gets for drawing lit geometry without
+        // enabling colour material, and it is the case the hard-coded model could not represent at all.
+        VertexFormat format = DefaultVertexFormats.ITEM;
+        ByteBuffer source = direct(format.getSize() * 2);
+        for (int i = 0; i < 2; i++) {
+            int base = i * format.getSize();
+            source.put(base + 12, (byte) (i == 0 ? 20 : 200));
+            source.put(base + 13, (byte) (i == 0 ? 20 : 200));
+            source.put(base + 14, (byte) (i == 0 ? 20 : 200));
+            source.put(base + 15, (byte) 255);
+            source.put(base + 25, (byte) 127);   // normal +Y, which neither light points at
+        }
+
+        LightingModel noColourMaterial = new LightingModel(new float[] {0.4F, 0.4F, 0.4F},
+                new float[LightingModel.LIGHTS * 3], new float[LightingModel.LIGHTS * 3],
+                new float[LightingModel.LIGHTS * 3], new boolean[LightingModel.LIGHTS], false,
+                LightingModel.AMBIENT_AND_DIFFUSE);
+
+        ByteBuffer out = ByteBuffer.wrap(VertexConverter.convert(source, VertexLayout.of(format), 2,
+                        0xFFFFFFFF, null, true, new float[] {1, 0, 0, 0, 1, 0, 0, 0, 1}, noColourMaterial))
+                .order(ByteOrder.nativeOrder());
+
+        // 0.2 * 0.4 = 0.08, which is 20 on the byte scale, for both vertices.
+        int stride = VertexConverter.STRIDE;
+        assertEquals(20, out.get(12) & 0xFF);
+        assertEquals(out.get(12) & 0xFF, out.get(stride + 12) & 0xFF,
+                "the vertex colour takes no part when colour material is off");
+    }
+
 }

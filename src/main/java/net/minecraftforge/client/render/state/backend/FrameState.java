@@ -190,18 +190,33 @@ public interface FrameState {
     int lightmapTexture();
 
     /**
-     * Intercepts fixed-function {@code glLight} for directional lights in eye space.
+     * Sets one parameter of one fixed-function light: its ambient or diffuse colour, or its position.
+     *
+     * <p>The position arrives in object space and is kept in eye space, because that is where GL keeps it: the
+     * modelview current at the {@code glLight} call is applied once, there, and not again at draw time.</p>
      */
     default void glLight(int light, int pname, java.nio.FloatBuffer params) {}
 
-    /** Eye-space direction vector for light 0. */
-    default float[] light0Eye() {
-        return new float[] {0.1617F, 0.8085F, -0.5659F};
-    }
+    /** Sets {@code GL_LIGHT_MODEL_AMBIENT}: the ambient every light adds, independent of the vertex normal. */
+    default void lightModelAmbient(java.nio.FloatBuffer params) {}
 
-    /** Eye-space direction vector for light 1. */
-    default float[] light1Eye() {
-        return new float[] {-0.1617F, 0.8085F, 0.5659F};
+    /**
+     * Sets which components and which face {@code GL_COLOR_MATERIAL} takes from the current vertex colour.
+     *
+     * <p>Recorded, and only {@code GL_AMBIENT_AND_DIFFUSE} on the front face is acted on - see
+     * {@link net.minecraftforge.client.render.vertex.LightingModel}.</p>
+     */
+    default void colorMaterial(int face, int mode) {}
+
+    /**
+     * The fixed-function lighting model as it currently stands.
+     *
+     * <p>One immutable snapshot rather than a getter per light: a draw has to keep the model it was issued under, and
+     * copying eight lights' worth of colours and directions into every draw would be both slower and easier to get
+     * wrong than sharing a snapshot that changes only when the game changes the model.</p>
+     */
+    default net.minecraftforge.client.render.vertex.LightingModel lighting() {
+        return net.minecraftforge.client.render.vertex.LightingModel.GL_DEFAULT;
     }
 
     // endregion

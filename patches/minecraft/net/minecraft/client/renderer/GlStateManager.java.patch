@@ -29,8 +29,7 @@
          {
              colorMaterialState.face = face;
              colorMaterialState.mode = mode;
-+            net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+            if (net.minecraftforge.client.render.state.backend.FrameStates.skipLighting("glColorMaterial")) { return; }
++            if (net.minecraftforge.client.render.state.backend.FrameStates.colorMaterial(face, mode)) { return; }
              GL11.glColorMaterial(face, mode);
          }
      }
@@ -45,15 +44,16 @@
      public static void glLightModel(int pname, FloatBuffer params)
      {
 -        GL11.glLightModel(pname, params);
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.skipLighting("glLightModel")) { return; }
++        if (net.minecraftforge.client.render.state.backend.FrameStates.glLightModel(pname, params)) { return; }
 +        GL11.glLightModelfv(pname, params);
      }
  
      public static void glNormal3f(float nx, float ny, float nz)
      {
 +        net.minecraftforge.client.render.state.backend.FrameState state2 = net.minecraftforge.client.render.state.backend.FrameStates.forNonGl();
-+        // Accepted and dropped: the canonical layout has no normal, and fixed-function lighting - the only thing
-+        // that would consume one - is not implemented either.
++        // Accepted and dropped: the canonical layout has no normal. Lighting is modelled, but from the normals that
++        // arrive inside a vertex format (items and entity models carry one); a normal set between glBegin and glEnd
++        // has nowhere to go in a layout that is built per draw rather than per vertex.
 +        if (state2 != null) { return; }
          GL11.glNormal3f(nx, ny, nz);
      }

@@ -10,6 +10,7 @@ import java.nio.FloatBuffer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -204,7 +205,7 @@ class FrameStateVkTest {
         FloatBuffer pos0 = FloatBuffer.wrap(new float[] {1.0F, 0.0F, 0.0F, 0.0F});
         state.glLight(16384, 4611, pos0); // GL_LIGHT0, GL_POSITION
 
-        float[] l0 = state.light0Eye();
+        float[] l0 = state.lighting().lightDirection(0);
         // (1, 0, 0) rotated by 90 Y is (0, 0, -1) in eye space
         assertEquals(0.0F, l0[0], 1.0e-5F);
         assertEquals(0.0F, l0[1], 1.0e-5F);
@@ -266,10 +267,66 @@ class FrameStateVkTest {
         assertSame(state.viewport(), state.viewport());
         assertSame(state.scissorBox(), state.scissorBox());
         assertSame(state.colorMask(), state.colorMask());
-        assertSame(state.light0Eye(), state.light0Eye());
-        assertSame(state.light1Eye(), state.light1Eye());
+        // The lighting snapshot is shared until the game changes the model: that is what lets a draw hold it
+        // without copying eight lights' worth of state.
+        assertSame(state.lighting(), state.lighting());
 
         state.color(0.5F, 0.5F, 0.5F, 1.0F);
         assertEquals(0.5F, state.currentColor()[0], 0.001F);
     }
+
+    @Test
+    void aChangedLightingModelProducesANewSnapshot() {
+        FrameStateVk state = new FrameStateVk();
+        // Colour material on, as vanilla leaves it for lit geometry: then the material ambient is the vertex colour
+        // and the factor is the lighting sum itself rather than 0.2 times it.
+        state.capability(Capability.COLOR_MATERIAL, true);
+        var before = state.lighting();
+        assertSame(before, state.lighting(), "nothing changed, so the same snapshot comes back");
+
+        state.lightModelAmbient(FloatBuffer.wrap(new float[] {0.5F, 0.5F, 0.5F, 1.0F}));
+        var afterAmbient = state.lighting();
+        assertNotSame(before, afterAmbient, "the model ambient changed");
+        float[] factor = new float[3];
+        // A normal pointing away from both default lights leaves only the ambient term.
+        afterAmbient.shadeFactor(0.0F, -1.0F, 0.0F, factor);
+        assertEquals(0.5F, factor[0], 1.0e-5F, "the ambient reaches the shaded result");
+    }
+
+    @Test
+    void glLightDiffuseAndAmbientReachTheModel() {
+        FrameStateVk state = new FrameStateVk();
+        state.lightModelAmbient(FloatBuffer.wrap(new float[] {0.5F, 0.5F, 0.5F, 1.0F}));
+        state.glLight(16384, 4609, FloatBuffer.wrap(new float[] {0.2F, 0.05F, 0.05F, 1.0F}));   // GL_DIFFUSE
+        state.glLight(16384, 4608, FloatBuffer.wrap(new float[] {0.1F, 0.0F, 0.0F, 1.0F}));     // GL_AMBIENT
+        state.capability(Capability.LIGHT_0, true);
+        state.capability(Capability.COLOR_MATERIAL, true);
+
+        // The seeded default direction of every light is +Z, so this normal faces light 0 head on.
+        float[] factor = new float[3];
+        state.lighting().shadeFactor(0.0F, 0.0F, 1.0F, factor);
+
+        assertEquals(0.5F + 0.1F + 0.2F, factor[0], 1.0e-4F, "model ambient + light ambient + red diffuse");
+        assertEquals(0.5F + 0.05F, factor[1], 1.0e-4F, "green gets the ambients and its own diffuse");
+        assertEquals(0.5F + 0.05F, factor[2], 1.0e-4F, "blue gets the ambients and its own diffuse");
+    }
+
+    @Test
+    void aDisabledLightContributesNothing() {
+        FrameStateVk state = new FrameStateVk();
+        state.glLight(16384, 4609, FloatBuffer.wrap(new float[] {0.6F, 0.6F, 0.6F, 1.0F}));
+        state.glLight(16384, 4611, FloatBuffer.wrap(new float[] {0.0F, 1.0F, 0.0F, 0.0F}));
+        state.lightModelAmbient(FloatBuffer.wrap(new float[] {0.4F, 0.4F, 0.4F, 1.0F}));
+        state.capability(Capability.COLOR_MATERIAL, true);
+
+        float[] factor = new float[3];
+        // Light 0 is off (GL's default), so a normal pointing straight at it is lit by the ambient alone.
+        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor);
+        assertEquals(0.4F, factor[0], 1.0e-5F, "a disabled light is not a light");
+
+        state.capability(Capability.LIGHT_0, true);
+        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor);
+        assertEquals(1.0F, factor[0], 1.0e-5F, "0.4 ambient + 0.6 diffuse, clamped");
+    }
+
 }

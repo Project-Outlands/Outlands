@@ -35,17 +35,15 @@ public final class DrawState {
     private final float[] normalMatrix = new float[9];
     private boolean hasNormalMatrix;
     /**
-     * The two lights the draw was issued under, in eye space.
+     * The lighting model the draw was issued under.
      *
-     * <p><b>Copied, not referenced.</b> {@code glLight} rewrites the state's light vectors in place, so holding the
-     * array meant every draw in the frame read whatever direction the <i>last</i> {@code glLight} call set. Vanilla
-     * re-specifies the lights per pass - GUI items, then the world, then entities, each under a different modelview -
-     * so a replay-time read gave item draws the world's light direction and the shaded face landed wherever the frame
-     * order put it.</p>
+     * <p><b>Referenced, not copied, and that is safe because the model is immutable.</b> The alternative - copying
+     * eight lights' colours and directions into every draw - is what the two light vectors did before, and it was
+     * there for a real reason: {@code glLight} rewrote the state's vectors in place, so a replay-time read gave item
+     * draws the world's light direction. A snapshot that is replaced rather than mutated has the same guarantee
+     * without the copy.</p>
      */
-    private final float[] light0 = new float[3];
-    private final float[] light1 = new float[3];
-    private boolean hasLights;
+    private LightingModel lighting = LightingModel.GL_DEFAULT;
     private final float[] textureMatrix = new float[16];
     private boolean hasTextureMatrix;
     private boolean fogEnabled;
@@ -84,7 +82,7 @@ public final class DrawState {
                      int texture, boolean scissorEnabled, int[] scissor, float[] color, boolean texture2d,
                      boolean alphaTest, float alphaReference, int alphaComparison, int[] viewport,
                      boolean[] colorMask, float[] lightmap,
-                     boolean lightingEnabled, float[] normalMatrix, float[] light0, float[] light1,
+                     boolean lightingEnabled, float[] normalMatrix, LightingModel lighting,
                      float[] textureMatrix) {
         if (mvp.length != 16) {
             throw new IllegalArgumentException("an mvp matrix has 16 values, got " + mvp.length);
@@ -136,13 +134,7 @@ public final class DrawState {
         } else {
             this.hasNormalMatrix = false;
         }
-        if (light0 != null && light1 != null) {
-            System.arraycopy(light0, 0, this.light0, 0, 3);
-            System.arraycopy(light1, 0, this.light1, 0, 3);
-            this.hasLights = true;
-        } else {
-            this.hasLights = false;
-        }
+        this.lighting = lighting != null ? lighting : LightingModel.GL_DEFAULT;
         if (textureMatrix != null) {
             this.hasTextureMatrix = true;
             System.arraycopy(textureMatrix, 0, this.textureMatrix, 0, 16);
@@ -182,9 +174,7 @@ public final class DrawState {
         if (this.hasNormalMatrix) {
             System.arraycopy(other.normalMatrix, 0, this.normalMatrix, 0, 9);
         }
-        System.arraycopy(other.light0, 0, this.light0, 0, 3);
-        System.arraycopy(other.light1, 0, this.light1, 0, 3);
-        this.hasLights = other.hasLights;
+        this.lighting = other.lighting;
         this.hasTextureMatrix = other.hasTextureMatrix;
         if (this.hasTextureMatrix) {
             System.arraycopy(other.textureMatrix, 0, this.textureMatrix, 0, 16);
@@ -258,18 +248,10 @@ public final class DrawState {
             } else {
                 this.hasNormalMatrix = false;
             }
-            float[] l0 = state.light0Eye();
-            float[] l1 = state.light1Eye();
-            if (l0 != null && l1 != null) {
-                System.arraycopy(l0, 0, this.light0, 0, 3);
-                System.arraycopy(l1, 0, this.light1, 0, 3);
-                this.hasLights = true;
-            } else {
-                this.hasLights = false;
-            }
+            LightingModel model = state.lighting();
+            this.lighting = model != null ? model : LightingModel.GL_DEFAULT;
         } else {
             this.hasNormalMatrix = false;
-            this.hasLights = false;
         }
 
         float[] tm = state.textureMatrix();
@@ -391,9 +373,10 @@ public final class DrawState {
     public boolean[] colorMask() { return colorMask; }
     public float[] lightmap() { return hasLightmap ? lightmap : null; }
     public boolean lightingEnabled() { return lightingEnabled; }
+
+    /** The lighting model this draw was issued under; never {@code null}. */
+    public LightingModel lighting() { return lighting; }
     public float[] normalMatrix() { return hasNormalMatrix ? normalMatrix : null; }
-    public float[] light0() { return hasLights ? light0 : null; }
-    public float[] light1() { return hasLights ? light1 : null; }
     public float[] textureMatrix() { return hasTextureMatrix ? textureMatrix : null; }
     public boolean fogEnabled() { return fogEnabled; }
     public int fogMode() { return fogMode; }
