@@ -23,8 +23,10 @@ import org.lwjgl.opengl.GL11;
  * than by what would read well. Everything here returns {@code void} and takes only primitives, which is what
  * makes that constraint painless: no boxing, no argument recipes, no stack-map work.</p>
  *
- * <p><b>The set is measured, not guessed.</b> These eighteen methods are the entire raw-GL surface of
- * IC2Classic 1.12-1.5.8; the next mod that needs another one adds it here, in
+ * <p><b>The set is measured, not guessed.</b> Eighteen of these methods are the entire raw-GL surface of
+ * IC2Classic 1.12-1.5.8. Six more came from the rest of the pack: JEI's ghost-ingredient drag draws its line with
+ * {@code glBegin}/{@code glVertex3f}/{@code glEnd} plus {@code glLineWidth} and {@code glHint}, and Baubles tints
+ * its slot with {@code glColor3ub}. The next mod that needs another one adds it here, in
  * {@code net.minecraftforge.lwjgl.shim.FrameShimRules}, and in {@link FrameShim}. {@code FrameShimRulesTest}
  * fails if those three disagree.</p>
  */
@@ -64,7 +66,24 @@ public final class ShimGl {
 
         void glColor4f(float red, float green, float blue, float alpha);
 
+        /** {@code glColor3ub}: the byte form of the current colour, with an implied opaque alpha. */
+        void glColor3ub(byte red, byte green, byte blue);
+
         void glNormal3f(float x, float y, float z);
+
+        /** {@code glBegin}: opens the immediate-mode accumulator. */
+        void glBegin(int mode);
+
+        /** {@code glEnd}: submits whatever the accumulator collected as one draw. */
+        void glEnd();
+
+        /** {@code glVertex3f}: one vertex of the open immediate-mode primitive. */
+        void glVertex3f(float x, float y, float z);
+
+        void glLineWidth(float width);
+
+        /** {@code glHint}: a rasterisation hint, which no pipeline has. */
+        void glHint(int target, int mode);
 
         void glFinish();
     }
@@ -152,8 +171,38 @@ public final class ShimGl {
         }
 
         @Override
+        public void glColor3ub(byte red, byte green, byte blue) {
+            GL11.glColor3ub(red, green, blue);
+        }
+
+        @Override
         public void glNormal3f(float x, float y, float z) {
             GL11.glNormal3f(x, y, z);
+        }
+
+        @Override
+        public void glBegin(int mode) {
+            GL11.glBegin(mode);
+        }
+
+        @Override
+        public void glEnd() {
+            GL11.glEnd();
+        }
+
+        @Override
+        public void glVertex3f(float x, float y, float z) {
+            GL11.glVertex3f(x, y, z);
+        }
+
+        @Override
+        public void glLineWidth(float width) {
+            GL11.glLineWidth(width);
+        }
+
+        @Override
+        public void glHint(int target, int mode) {
+            GL11.glHint(target, mode);
         }
 
         @Override
@@ -260,8 +309,32 @@ public final class ShimGl {
         impl.glColor4f(red, green, blue, alpha);
     }
 
+    public static void glColor3ub(byte red, byte green, byte blue) {
+        impl.glColor3ub(red, green, blue);
+    }
+
     public static void glNormal3f(float x, float y, float z) {
         impl.glNormal3f(x, y, z);
+    }
+
+    public static void glBegin(int mode) {
+        impl.glBegin(mode);
+    }
+
+    public static void glEnd() {
+        impl.glEnd();
+    }
+
+    public static void glVertex3f(float x, float y, float z) {
+        impl.glVertex3f(x, y, z);
+    }
+
+    public static void glLineWidth(float width) {
+        impl.glLineWidth(width);
+    }
+
+    public static void glHint(int target, int mode) {
+        impl.glHint(target, mode);
     }
 
     public static void glFinish() {

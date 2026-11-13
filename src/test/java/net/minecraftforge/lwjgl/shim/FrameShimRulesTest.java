@@ -36,7 +36,7 @@ class FrameShimRulesTest {
     void entriesAreTheMeasuredSurface() {
         List<RetargetEntry> entries = FrameShimRules.INSTANCE.entries();
 
-        assertEquals(18, entries.size(), "the measured IC2C surface is eighteen entry points");
+        assertEquals(24, entries.size(), "the measured surface of the pack: IC2C's eighteen plus JEI's five and Baubles' one");
         for (RetargetEntry entry : entries) {
             assertEquals(FrameShimRules.GL11, entry.fromOwner(), entry.name());
             assertEquals(FrameShimRules.FACADE, entry.toOwner(), entry.name());

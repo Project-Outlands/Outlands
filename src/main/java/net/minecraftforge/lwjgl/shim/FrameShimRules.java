@@ -78,6 +78,15 @@ public final class FrameShimRules implements ShimRewriteRules {
             // Current colour and current normal. Colour is real state; normal has no consumer without lighting.
             entry("glColor4f", "(FFFF)V"),
             entry("glNormal3f", "(FFF)V"),
+            // Immediate mode and line state: JEI's ghost-ingredient drag draws the line from the source slot to the
+            // cursor with glBegin/glVertex3f/glEnd, and asks for a thin, smooth line on the way in.
+            entry("glBegin", "(I)V"),
+            entry("glEnd", "()V"),
+            entry("glVertex3f", "(FFF)V"),
+            entry("glLineWidth", "(F)V"),
+            entry("glHint", "(II)V"),
+            // Baubles tints its inventory slot with the byte form of the current colour.
+            entry("glColor3ub", "(BBB)V"),
             // Only ever called on IC2C's error path, before the process exits.
             entry("glFinish", "()V"));
 

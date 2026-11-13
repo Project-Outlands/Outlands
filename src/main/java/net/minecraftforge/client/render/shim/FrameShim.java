@@ -262,6 +262,71 @@ public final class FrameShim implements ShimGl.Impl {
      * appears on a live path that reads back, this becomes "submit the frame so far".</p>
      */
     @Override
+    public void glColor3ub(byte red, byte green, byte blue) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glColor3ub(red, green, blue);
+            return;
+        }
+        // GL's byte form is unsigned: the alpha is implied to be opaque, which is what GL does.
+        state.color((red & 0xFF) / 255.0F, (green & 0xFF) / 255.0F, (blue & 0xFF) / 255.0F, 1.0F);
+    }
+
+    @Override
+    public void glBegin(int mode) {
+        if (state() == null) {
+            GL11.glBegin(mode);
+            return;
+        }
+        // Same accumulator vanilla's patched FontRenderer writes through: a mod drawing a line and the game drawing
+        // text are the same immediate-mode primitive, and giving them two accumulators would reorder one of them.
+        FrameStates.immediate().begin(mode);
+    }
+
+    @Override
+    public void glEnd() {
+        if (state() == null) {
+            GL11.glEnd();
+            return;
+        }
+        FrameStates.immediate().end();
+    }
+
+    @Override
+    public void glVertex3f(float x, float y, float z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glVertex3f(x, y, z);
+            return;
+        }
+        // The colour is read here rather than passed in because that is where GL keeps it: glColor* sets it once and
+        // it applies to every vertex until it changes.
+        FrameStates.immediate().vertex(x, y, z, state.currentColor());
+    }
+
+    @Override
+    public void glLineWidth(float width) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glLineWidth(width);
+            return;
+        }
+        state.lineWidth(width);
+    }
+
+    @Override
+    public void glHint(int target, int mode) {
+        if (state() == null) {
+            GL11.glHint(target, mode);
+            return;
+        }
+        // A hint is permission to trade quality for speed, never a command: GL itself is allowed to ignore it, and
+        // this backend has one rasterisation path to apply it to. Reported once so the log shows who asked.
+        FrameStates.reportSkippedOnce("glHint(" + target + ")",
+                "a rasterisation hint has no pipeline equivalent, so the one rasterisation path is used");
+    }
+
+    @Override
     public void glFinish() {
         FrameState state = state();
         if (state == null) {
