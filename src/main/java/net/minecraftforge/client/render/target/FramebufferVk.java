@@ -214,21 +214,22 @@ final class FramebufferVk implements FramebufferBackend {
     }
 
     /**
-     * Stencil is not implemented, and asking for it says so.
+     * Stencil is not implemented, and asking for it is answered rather than thrown at.
      *
      * <p>Recording the flag and carrying on would give a mod a target whose stencil it cannot use, and the symptom
-     * would be a mask that does nothing - a picture that is wrong with no error anywhere. Nothing in vanilla asks for
-     * one; the entity outline uses alpha, not stencil.</p>
+     * would be a mask that does nothing - a picture that is wrong with no error anywhere. So the answer is false,
+     * which is the answer the vanilla API asks for and the one a mod can branch on: Immersive Engineering asks in
+     * {@code preInit} and, on false, draws its bottling machine without the fluid split instead of not loading.
+     * Throwing here was the version of "no silent degradation" that degraded into a crash.</p>
      */
     @Override
-    public void setStencil(boolean enabled) {
+    public boolean setStencil(boolean enabled) {
         if (enabled) {
-            throw new UnsupportedOperationException(
-                    "stencil attachments are not implemented on the Vulkan backend. A target created without one and a"
-                            + " shader that writes to it would produce a mask nobody applies. See"
-                            + " docs/vulkan-backend-plan.md 11.6.");
+            LOGGER.info("stencil was requested for a {} framebuffer and is not available; the caller is told no",
+                    window ? "window" : "offscreen");
         }
         this.stencil = false;
+        return !enabled;
     }
 
     @Override

@@ -186,6 +186,25 @@ class FramebufferVkTest {
         assertTrue(failure.getMessage().contains("renderer"), failure.getMessage());
     }
 
+    /**
+     * Asking for stencil is answered, not thrown at.
+     *
+     * <p>Measured: Immersive Engineering asks in {@code preInit} -
+     * {@code if (OpenGlHelper.framebufferSupported && IEConfig.stencilBufferEnabled && !fb.isStencilEnabled())
+     * stencilBufferEnabled = fb.enableStencil();} - and both of its conditions are true on this backend, so the
+     * exception that used to be here failed mod loading. The vanilla contract is a boolean, and a mod that gets
+     * false draws its effect without the mask (IE draws the bottling machine's item unclipped) instead of the game
+     * not starting.</p>
+     */
+    @Test
+    void askingForStencilIsAnsweredFalseRatherThanThrownAt() {
+        FramebufferVk framebuffer = new FramebufferVk(false);
+        framebuffer.create(100, 100, true);
+
+        assertEquals(false, framebuffer.setStencil(true), "no stencil on this backend, said as an answer");
+        assertEquals(true, framebuffer.setStencil(false), "not asking for one always succeeds");
+    }
+
     @Test
     void bindingAnOffscreenTargetWithNoFrameSaysSo() {
         // Nothing is collecting, so there is no frame to put the switch in. Saying that is better than appending to a

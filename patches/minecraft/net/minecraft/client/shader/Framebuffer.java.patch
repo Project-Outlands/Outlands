@@ -180,7 +180,7 @@
          this.bindFramebuffer(true);
          GlStateManager.clearColor(this.framebufferColor[0], this.framebufferColor[1], this.framebufferColor[2], this.framebufferColor[3]);
          int i = 16384;
-@@ -278,4 +357,37 @@
+@@ -278,4 +357,46 @@
          GlStateManager.clear(i);
          this.unbindFramebuffer();
      }
@@ -201,7 +201,16 @@
 +     */
 +    public boolean enableStencil()
 +    {
-+        if (this.backend != null) { this.backend.setStencil(true); stencilEnabled = true; this.createBindFramebuffer(framebufferWidth, framebufferHeight); return true; }
++        if (this.backend != null)
++        {
++            // The backend answers the question. A backend that cannot give this target stencil says no, which is what
++            // the boolean is for: mods branch on it (Immersive Engineering draws its bottling machine without the
++            // fluid split), and an exception here would fail mod loading instead of a visual effect.
++            if (!this.backend.setStencil(true)) return false;
++            stencilEnabled = true;
++            this.createBindFramebuffer(framebufferWidth, framebufferHeight);
++            return true;
++        }
 +        if (!OpenGlHelper.isFramebufferEnabled()) return false;
 +        stencilEnabled = true;
 +        this.createBindFramebuffer(framebufferWidth, framebufferHeight);

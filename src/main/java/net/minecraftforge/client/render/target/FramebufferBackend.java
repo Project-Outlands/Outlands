@@ -80,8 +80,15 @@ public interface FramebufferBackend {
     /** Releases {@link #bindTexture}. */
     void unbindTexture();
 
-    /** Requests a depth-stencil buffer on the next {@link #create}. */
-    void setStencil(boolean enabled);
+    /**
+     * Requests a depth-stencil buffer on the next {@link #create}.
+     *
+     * <p>Answers whether the target has one. A backend that cannot provide stencil says so instead of throwing:
+     * the caller is {@code Framebuffer.enableStencil()}, whose contract is a boolean and whose callers are mods
+     * asking a question ("may I use stencil?") rather than drawing an assumption. Throwing there turns a question
+     * into a crash during mod loading - measured with Immersive Engineering, which asks in {@code preInit}.</p>
+     */
+    boolean setStencil(boolean enabled);
 
     /** Throws if the target is not usable the way a GL framebuffer completeness check would. */
     void checkComplete();
