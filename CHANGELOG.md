@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.14] - 2026-11-14
+
+### 🐛 Bug Fixes
+
+- [`7b7a2fe`](https://github.com/Project-Outlands/Outlands/commit/7b7a2fedfdab8f231a966b37fc16e6a2d3afb24b) - Renamer log spam *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### 🚜 Refactor
+
+- [`249ddc4`](https://github.com/Project-Outlands/Outlands/commit/249ddc46428207c25a42aeb1a5a2a50f0fdf648a) - Switch to new Foundation & RFB style SDL handle *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`ff77f55`](https://github.com/Project-Outlands/Outlands/commit/ff77f5559b1b7be2aa6b0bef635ee647eba66c1b) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.11] - 2026-11-11
 
 ### 🚀 Features
