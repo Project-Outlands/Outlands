@@ -35,7 +35,6 @@ final class FramebufferVk implements FramebufferBackend {
     private int width;
     private int height;
     private boolean useDepth;
-    private boolean stencil;
     private int filter = 9729;
     private float red = 1.0F;
     private float green = 1.0F;
@@ -224,12 +223,11 @@ final class FramebufferVk implements FramebufferBackend {
      */
     @Override
     public boolean setStencil(boolean enabled) {
-        if (enabled) {
-            LOGGER.info("stencil was requested for a {} framebuffer and is not available; the caller is told no",
-                    window ? "window" : "offscreen");
-        }
-        this.stencil = false;
-        return !enabled;
+        // Always yes now: every depth format this backend picks carries 8 stencil bits and every depth image view
+        // covers both aspects, so the attachment is there whether or not anything asked for it. The window's target
+        // uses the swapchain's depth image, the offscreen ones allocate their own, and both are D32_SFLOAT_S8_UINT
+        // (or D24_UNORM_S8_UINT) by construction.
+        return true;
     }
 
     @Override

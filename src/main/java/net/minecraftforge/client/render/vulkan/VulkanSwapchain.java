@@ -945,7 +945,10 @@ final class VulkanSwapchain {
         depthImageMemory = memoryOut.get(0);
         VkCheck.check(vkBindImageMemory(device, depthImage, depthImageMemory, 0L), "vkBindImageMemory");
 
-        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, stack);
+        // Both aspects: the stencil half of the format is what a mod's glStencilFunc writes to, and a depth-only
+        // view cannot be attached as a stencil target.
+        depthImageView = createImageView(depthImage, depthFormat,
+                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, stack);
     }
 
     private int memoryType(int allowedBits, int required, MemoryStack stack) {
@@ -967,7 +970,7 @@ final class VulkanSwapchain {
                 .image(image)
                 .viewType(VK_IMAGE_VIEW_TYPE_2D)
                 .format(format)
-                .subresourceRange(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ? depthViewRange(stack) : colorRange(stack));
+                .subresourceRange(aspect == VK_IMAGE_ASPECT_COLOR_BIT ? colorRange(stack) : depthViewRange(stack));
         LongBuffer viewOut = stack.mallocLong(1);
         VkCheck.check(vkCreateImageView(device, createInfo, null, viewOut), "vkCreateImageView");
         return viewOut.get(0);

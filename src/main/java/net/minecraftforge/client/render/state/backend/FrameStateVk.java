@@ -121,6 +121,14 @@ final class FrameStateVk implements FrameState {
     private boolean radialFog;
     /** glPointSize: 1.0 until something asks for another size, which is GL's initial value. */
     private float pointSize = 1.0F;
+    /** Stencil state, at GL's initial values: ALWAYS, reference 0, all bits, KEEP/KEEP/KEEP. */
+    private int stencilComparison = 519;
+    private int stencilReference;
+    private int stencilCompareMask = 0xFFFFFFFF;
+    private int stencilWriteMask = 0xFFFFFFFF;
+    private int stencilFail = 7680;
+    private int stencilDepthFail = 7680;
+    private int stencilPass = 7680;
     private final float[] fogColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private float fogDensity = 1.0F;
     private float fogStart = 0.0F;
@@ -470,6 +478,62 @@ final class FrameStateVk implements FrameState {
     @Override
     public float pointSize() {
         return pointSize;
+    }
+
+    @Override
+    public void stencilFunc(int comparison, int reference, int mask) {
+        // Recorded as the GL enums the caller passed; VulkanPipeline maps them and throws for one it does not know,
+        // which is the right place - a mask that silently compares the wrong way is worse than a rejected pipeline.
+        stencilComparison = comparison;
+        stencilReference = reference;
+        stencilCompareMask = mask;
+    }
+
+    @Override
+    public void stencilMask(int mask) {
+        stencilWriteMask = mask;
+    }
+
+    @Override
+    public void stencilOp(int fail, int depthFail, int depthPass) {
+        stencilFail = fail;
+        stencilDepthFail = depthFail;
+        stencilPass = depthPass;
+    }
+
+    @Override
+    public int stencilComparison() {
+        return stencilComparison;
+    }
+
+    @Override
+    public int stencilReference() {
+        return stencilReference;
+    }
+
+    @Override
+    public int stencilCompareMask() {
+        return stencilCompareMask;
+    }
+
+    @Override
+    public int stencilWriteMask() {
+        return stencilWriteMask;
+    }
+
+    @Override
+    public int stencilFail() {
+        return stencilFail;
+    }
+
+    @Override
+    public int stencilDepthFail() {
+        return stencilDepthFail;
+    }
+
+    @Override
+    public int stencilPass() {
+        return stencilPass;
     }
 
     @Override

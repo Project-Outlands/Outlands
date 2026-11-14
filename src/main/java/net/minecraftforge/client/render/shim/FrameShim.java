@@ -421,42 +421,32 @@ public final class FrameShim implements ShimGl.Impl {
 
     @Override
     public void glStencilFunc(int comparison, int reference, int mask) {
-        if (state() == null) {
+        FrameState state = state();
+        if (state == null) {
             ShimGl.REAL_GL.glStencilFunc(comparison, reference, mask);
             return;
         }
-        skipStencil("glStencilFunc");
+        state.stencilFunc(comparison, reference, mask);
     }
 
     @Override
     public void glStencilMask(int mask) {
-        if (state() == null) {
+        FrameState state = state();
+        if (state == null) {
             ShimGl.REAL_GL.glStencilMask(mask);
             return;
         }
-        skipStencil("glStencilMask");
+        state.stencilMask(mask);
     }
 
     @Override
     public void glStencilOp(int fail, int depthFail, int depthPass) {
-        if (state() == null) {
+        FrameState state = state();
+        if (state == null) {
             ShimGl.REAL_GL.glStencilOp(fail, depthFail, depthPass);
             return;
         }
-        skipStencil("glStencilOp");
-    }
-
-    /**
-     * The stencil family: recorded nowhere yet, because nothing consumes it.
-     *
-     * <p>The swapchain already has a stencil attachment ({@code D32_SFLOAT_S8_UINT}), so what is missing is the
-     * pipeline state and the pass that sets it up, not an attachment. Until then a draw that asked to be clipped by
-     * the stencil is drawn unclipped: visible, and reported once, rather than a crash.</p>
-     */
-    private static void skipStencil(String operation) {
-        FrameStates.reportSkippedOnce("stencil (" + operation + ")",
-                "stencil state is not part of the pipeline yet, so geometry that asked to be clipped by it is"
-                        + " drawn unclipped");
+        state.stencilOp(fail, depthFail, depthPass);
     }
 
     @Override

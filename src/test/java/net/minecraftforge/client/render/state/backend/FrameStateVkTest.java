@@ -73,10 +73,11 @@ class FrameStateVkTest {
     void capabilitiesAreTrackedAndNotJustRecorded() {
         FrameStateVk state = new FrameStateVk();
         // 13 toggles that vanilla drives through BooleanState, plus SCISSOR_TEST (3089), plus the eight GL_LIGHTn
-        // sources that RenderHelper.enableGUIStandardItemLighting turns on when an item icon is drawn. The count is
+        // sources that RenderHelper.enableGUIStandardItemLighting turns on when an item icon is drawn, plus
+        // STENCIL_TEST (2960), which only a mod enables - Immersive Engineering's bottling machine. The count is
         // asserted so that adding a capability is a deliberate act rather than a side effect - and so that removing one,
         // which would make some draw silently unrepresented, fails here.
-        assertEquals(22, Capability.values().length);
+        assertEquals(23, Capability.values().length);
         assertEquals(Capability.LIGHT_0, Capability.ofGlEnum(16384));
         assertEquals(Capability.LIGHT_7, Capability.ofGlEnum(16391));
 

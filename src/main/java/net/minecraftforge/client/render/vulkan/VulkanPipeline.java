@@ -6,6 +6,7 @@ import org.lwjgl.vulkan.VkGraphicsPipelineCreateInfo;
 import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
 import org.lwjgl.vulkan.VkPipelineColorBlendStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineDepthStencilStateCreateInfo;
+import org.lwjgl.vulkan.VkStencilOpState;
 import org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineInputAssemblyStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
@@ -108,7 +109,9 @@ final class VulkanPipeline implements AutoCloseable {
      */
     record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, int depthFunc, boolean blend,
                          boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask,
-                         boolean flippedWinding) {
+                         boolean flippedWinding, boolean stencilTest, int stencilFunc, int stencilReference,
+                         int stencilCompareMask, int stencilWriteMask, int stencilFail, int stencilDepthFail,
+                         int stencilPass) {
         /** Every colour channel, which is what a pipeline built without a mask writes. */
         static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                 | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -116,7 +119,8 @@ final class VulkanPipeline implements AutoCloseable {
         /** The state the terrain phase has always used for opaque and cutout geometry. */
         static PipelineState terrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, 515, false, true,
-                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS, false);
+                    GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS, false,
+                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680);
         }
 
         /**
@@ -137,13 +141,17 @@ final class VulkanPipeline implements AutoCloseable {
                     | (mask[3] ? VK_COLOR_COMPONENT_A_BIT : 0);
             return new PipelineState(topology, state.depthTest(), state.depthWrite(), state.depthFunc(),
                     state.blend(), state.cull(), state.blendSourceRgb(), state.blendDestinationRgb(),
-                    state.blendSourceAlpha(), state.blendDestinationAlpha(), channels, flipped);
+                    state.blendSourceAlpha(), state.blendDestinationAlpha(), channels, flipped,
+                    state.stencilTest(), state.stencilComparison(), state.stencilReference(),
+                    state.stencilCompareMask(), state.stencilWriteMask(), state.stencilFail(),
+                    state.stencilDepthFail(), state.stencilPass());
         }
 
         /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
         static PipelineState translucentTerrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, 515, true, true,
-                    770, 771, 1, 0, ALL_CHANNELS, false);
+                    770, 771, 1, 0, ALL_CHANNELS, false,
+                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680);
         }
     }
 
@@ -397,7 +405,21 @@ final class VulkanPipeline implements AutoCloseable {
                 .sType$Default()
                 .depthTestEnable(state.depthTest())
                 .depthWriteEnable(state.depthWrite())
-                .depthCompareOp(compareOp(state.depthFunc()));
+                .depthCompareOp(compareOp(state.depthFunc()))
+                .stencilTestEnable(state.stencilTest());
+        if (state.stencilTest()) {
+            // GL has one stencil state for both faces unless glStencilFuncSeparate was used, which nothing in the
+            // game or the surveyed mods calls, so front and back get the same values.
+            VkStencilOpState stencil = VkStencilOpState.calloc(stack)
+                    .failOp(stencilOp(state.stencilFail()))
+                    .passOp(stencilOp(state.stencilPass()))
+                    .depthFailOp(stencilOp(state.stencilDepthFail()))
+                    .compareOp(stencilCompareOp(state.stencilFunc()))
+                    .compareMask(state.stencilCompareMask())
+                    .writeMask(state.stencilWriteMask())
+                    .reference(state.stencilReference());
+            depthStencil.front(stencil).back(stencil);
+        }
 
         VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
                 VkPipelineColorBlendAttachmentState.calloc(1, stack);
@@ -507,6 +529,35 @@ final class VulkanPipeline implements AutoCloseable {
             case 776 -> VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;              // GL_SRC_ALPHA_SATURATE
             default -> throw new IllegalArgumentException("blend factor " + glFactor + " is not translated");
         };
+    }
+
+    /**
+     * Maps a GL stencil operation.
+     *
+     * <p>Strict, unlike {@link #compareOp}: the depth function comes from vanilla, where an unknown value means a
+     * patch went wrong and a defensive default is the lesser evil, while these come from a mod and an unmapped one
+     * would silently become KEEP - a mask that does not mask.</p>
+     */
+    static int stencilOp(int glOp) {
+        return switch (glOp) {
+            case 0 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_ZERO;                    // GL_ZERO
+            case 7680 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_KEEP;                 // GL_KEEP
+            case 7681 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_REPLACE;              // GL_REPLACE
+            case 7682 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_INCREMENT_AND_CLAMP;  // GL_INCR
+            case 7683 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_DECREMENT_AND_CLAMP;  // GL_DECR
+            case 5386 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_INVERT;               // GL_INVERT
+            case 34055 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_INCREMENT_AND_WRAP;  // GL_INCR_WRAP
+            case 34056 -> org.lwjgl.vulkan.VK10.VK_STENCIL_OP_DECREMENT_AND_WRAP;  // GL_DECR_WRAP
+            default -> throw new IllegalArgumentException("stencil operation " + glOp + " is not translated");
+        };
+    }
+
+    /** Maps a GL stencil comparison, which shares its range with the depth one but not its tolerance. */
+    static int stencilCompareOp(int glFunc) {
+        if (glFunc < 512 || glFunc > 519) {
+            throw new IllegalArgumentException("stencil comparison " + glFunc + " is not translated");
+        }
+        return compareOp(glFunc);
     }
 
     static int compareOp(int glFunc) {

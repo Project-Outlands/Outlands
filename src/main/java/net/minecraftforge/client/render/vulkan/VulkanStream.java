@@ -136,18 +136,8 @@ final class VulkanStream implements AutoCloseable {
     private final List<FrameDraws.Draw> draws = new ArrayList<>();
     private int drawsThisFrame;
 
-    private VulkanPipeline.VK10Topology cachedTopology;
-    private boolean cachedDepthTest;
-    private boolean cachedDepthWrite;
-    private int cachedDepthFunc;
-    private boolean cachedBlend;
-    private boolean cachedCull;
-    private int cachedSrcRgb;
-    private int cachedDstRgb;
-    private int cachedSrcAlpha;
-    private int cachedDstAlpha;
-    private int cachedChannels;
-    private boolean cachedFlipsWinding;
+    /** The key of the pipeline bound for the last streamed draw, or null before the first. */
+    private VulkanPipeline.PipelineState cachedPipelineState;
     private VulkanPipeline cachedPipeline;
 
     private ByteBuffer hostVboStaging;
@@ -482,7 +472,11 @@ final class VulkanStream implements AutoCloseable {
                     int mask = clearOp.mask();
                     boolean clearColor = (mask & 0x4000) != 0;
                     boolean clearDepth = (mask & 0x100) != 0;
-                    int count = (clearColor ? 1 : 0) + (clearDepth ? 1 : 0);
+                    // GL_STENCIL_BUFFER_BIT (0x400). One attachment covers depth and stencil, so a clear of either
+                    // is one clear of the depth/stencil aspect - and clearing one of the two would clear the other
+                    // with it, which is why the aspect below is DEPTH|STENCIL whenever either bit is set.
+                    boolean clearStencil = (mask & 0x400) != 0;
+                    int count = (clearColor ? 1 : 0) + ((clearDepth || clearStencil) ? 1 : 0);
                     if (count > 0) {
                         org.lwjgl.vulkan.VkClearAttachment.Buffer clearAttachments =
                                 org.lwjgl.vulkan.VkClearAttachment.calloc(count, stack);
@@ -502,9 +496,12 @@ final class VulkanStream implements AutoCloseable {
                                     .float32(0, c[0]).float32(1, c[1]).float32(2, c[2]).float32(3, c[3]);
                             atIdx++;
                         }
-                        if (clearDepth) {
-                            clearAttachments.get(atIdx)
-                                    .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT);
+                        if (clearDepth || clearStencil) {
+                            clearAttachments.get(atIdx).aspectMask(
+                                    org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT
+                                            | org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_STENCIL_BIT);
+                            // GL's clear value for stencil is glClearStencil's, which defaults to 0 and which nothing
+                            // in the game or the surveyed mods changes. The depth value is passed through as before.
                             clearAttachments.get(atIdx).clearValue().depthStencil()
                                     .depth((float) clearOp.depth()).stencil(0);
                             atIdx++;
@@ -609,32 +606,16 @@ final class VulkanStream implements AutoCloseable {
 
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                         targetFlipsWinding);
+                // Compared as one value rather than as a dozen fields: the key is a record, so a field added to it
+                // is compared without anyone remembering to extend a condition here. The version of this that listed
+                // the fields by hand would have gone on reusing a pipeline across a stencil change, silently.
+                VulkanPipeline.PipelineState wanted = VulkanPipeline.PipelineState.of(topo, ds, targetFlipsWinding);
                 VulkanPipeline pipeline;
-                if (cachedPipeline != null && topo == cachedTopology && targetFlipsWinding == cachedFlipsWinding
-                        && ds.depthTest() == cachedDepthTest && ds.depthWrite() == cachedDepthWrite
-                        && ds.depthFunc() == cachedDepthFunc && ds.blend() == cachedBlend && ds.cull() == cachedCull
-                        && ds.blendSourceRgb() == cachedSrcRgb && ds.blendDestinationRgb() == cachedDstRgb
-                        && ds.blendSourceAlpha() == cachedSrcAlpha && ds.blendDestinationAlpha() == cachedDstAlpha
-                        && channels == cachedChannels) {
+                if (cachedPipeline != null && wanted.equals(cachedPipelineState)) {
                     pipeline = cachedPipeline;
                 } else {
-                    VulkanPipeline.PipelineState ps = new VulkanPipeline.PipelineState(topo,
-                            ds.depthTest(), ds.depthWrite(), ds.depthFunc(), ds.blend(), ds.cull(),
-                            ds.blendSourceRgb(), ds.blendDestinationRgb(), ds.blendSourceAlpha(),
-                            ds.blendDestinationAlpha(), channels, targetFlipsWinding);
-                    pipeline = pipelineFor(ps);
-                    cachedTopology = topo;
-                    cachedDepthTest = ds.depthTest();
-                    cachedDepthWrite = ds.depthWrite();
-                    cachedDepthFunc = ds.depthFunc();
-                    cachedBlend = ds.blend();
-                    cachedCull = ds.cull();
-                    cachedSrcRgb = ds.blendSourceRgb();
-                    cachedDstRgb = ds.blendDestinationRgb();
-                    cachedSrcAlpha = ds.blendSourceAlpha();
-                    cachedDstAlpha = ds.blendDestinationAlpha();
-                    cachedChannels = channels;
-                    cachedFlipsWinding = targetFlipsWinding;
+                    pipeline = pipelineFor(wanted);
+                    cachedPipelineState = wanted;
                     cachedPipeline = pipeline;
                 }
                 if (pipeline.handle() != boundPipeline) {

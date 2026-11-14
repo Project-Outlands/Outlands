@@ -42,7 +42,14 @@ public enum Capability {
     /** Fixed-function: a normal-rescaling mode with no Vulkan equivalent. */
     RESCALE_NORMAL,
     /** Fixed-function: normal vector normalization with no Vulkan equivalent. */
-    NORMALIZE;
+    NORMALIZE,
+    /**
+     * The stencil test.
+     *
+     * <p>In the set because a mod asks for it, not vanilla: Immersive Engineering's bottling machine masks the part
+     * of an item that sits below the fluid level. Vanilla 1.12.2 uses no stencil anywhere.</p>
+     */
+    STENCIL_TEST;
 
     /** Maps a GL capability constant. Throws for anything outside the set vanilla uses. */
     public static Capability ofGlEnum(int glCapability) {
@@ -76,6 +83,7 @@ public enum Capability {
             case 2912 -> FOG;
             case 2929 -> DEPTH_TEST;
             case 2977 -> NORMALIZE;
+            case 2960 -> STENCIL_TEST;
             case 3008 -> ALPHA_TEST;
             case 3042 -> BLEND;
             case 3058 -> COLOR_LOGIC_OP;

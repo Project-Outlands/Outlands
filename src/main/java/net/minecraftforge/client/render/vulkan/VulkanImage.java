@@ -150,15 +150,20 @@ final class VulkanImage implements AutoCloseable {
     /**
      * An image that is depth-tested against: the depth attachment of a render target.
      *
-     * <p>Its aspect is DEPTH, and that difference is the whole reason this exists next to the colour one: a view of
-     * a depth image that claims COLOR is rejected by the validation layers, and a depth attachment without
-     * {@code DEPTH_STENCIL_ATTACHMENT} in its usage cannot be rendered to at all.</p>
+     * <p>Its aspect is DEPTH|STENCIL, and that difference is the whole reason this exists next to the colour one: a
+     * view of a depth image that claims COLOR is rejected by the validation layers, a depth attachment without
+     * {@code DEPTH_STENCIL_ATTACHMENT} in its usage cannot be rendered to at all, and a view that leaves out the
+     * stencil aspect cannot be attached as a stencil target - which is what a mod's {@code glStencilFunc} needs.</p>
      */
     static VulkanImage createDepth(VkDevice device, VulkanContext context, int width, int height, int format) {
+        // DEPTH|STENCIL, not DEPTH: every depth format this backend picks carries 8 stencil bits, and a view whose
+        // aspect leaves them out cannot be used as a stencil attachment at all. The stencil aspect costs nothing when
+        // nothing writes to it, and asking for it later would mean recreating every target and every image view.
         return create(device, context, width, height, format,
                 org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
                         | VK_IMAGE_USAGE_SAMPLED_BIT,
-                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT, "depth attachment");
+                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT
+                        | org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_STENCIL_BIT, "depth attachment");
     }
 
     /**

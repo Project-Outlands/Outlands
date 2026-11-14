@@ -172,7 +172,10 @@ class FramebufferVkTest {
             assertEquals(0, ((FrameDraws.TargetBind) ops.get(1)).target(), "0 is the window's image");
             assertTrue(!recording.targetDefault, "none of it was recorded as the window's own target");
         } finally {
-            FrameDraws.beginCollecting();
+            // drain(), not beginCollecting(): the latter *starts* collecting, which leaked a live collector into
+            // every test that ran after this one - DisplayListVkTest's "replaying needs a frame" case then found a
+            // frame and passed the wrong branch.
+            FrameDraws.drain();
             FrameRecordings.install(null);
         }
     }
@@ -197,11 +200,14 @@ class FramebufferVkTest {
      * not starting.</p>
      */
     @Test
-    void askingForStencilIsAnsweredFalseRatherThanThrownAt() {
+    void askingForStencilIsAnsweredRatherThanThrownAt() {
         FramebufferVk framebuffer = new FramebufferVk(false);
         framebuffer.create(100, 100, true);
 
-        assertEquals(false, framebuffer.setStencil(true), "no stencil on this backend, said as an answer");
+        // The depth format this backend picks always carries 8 stencil bits and the image view covers both aspects,
+        // so the attachment is there and the answer is yes. What matters for the crash this replaced is that the
+        // answer is an answer: Immersive Engineering asks in preInit and branches on it.
+        assertEquals(true, framebuffer.setStencil(true), "the depth attachment has stencil bits");
         assertEquals(true, framebuffer.setStencil(false), "not asking for one always succeeds");
     }
 

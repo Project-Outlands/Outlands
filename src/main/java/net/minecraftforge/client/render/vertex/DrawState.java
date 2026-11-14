@@ -56,6 +56,14 @@ public final class DrawState {
     private float fogTanX;
     private float fogTanY;
     private float pointSize = 1.0F;
+    private boolean stencilTest;
+    private int stencilComparison = 519;
+    private int stencilReference;
+    private int stencilCompareMask = 0xFFFFFFFF;
+    private int stencilWriteMask = 0xFFFFFFFF;
+    private int stencilFail = 7680;
+    private int stencilDepthFail = 7680;
+    private int stencilPass = 7680;
     private final float[] overlayColor = new float[4];
     /** 1 when {@link #overlayColor} is outline mode (replace the light, alpha from the lightmap), 0 for a mix. */
     private int overlayMode;
@@ -192,6 +200,14 @@ public final class DrawState {
         this.fogTanX = other.fogTanX;
         this.fogTanY = other.fogTanY;
         this.pointSize = other.pointSize;
+        this.stencilTest = other.stencilTest;
+        this.stencilComparison = other.stencilComparison;
+        this.stencilReference = other.stencilReference;
+        this.stencilCompareMask = other.stencilCompareMask;
+        this.stencilWriteMask = other.stencilWriteMask;
+        this.stencilFail = other.stencilFail;
+        this.stencilDepthFail = other.stencilDepthFail;
+        this.stencilPass = other.stencilPass;
         System.arraycopy(other.overlayColor, 0, this.overlayColor, 0, 4);
         this.overlayMode = other.overlayMode;
         this.program = other.program;
@@ -302,6 +318,16 @@ public final class DrawState {
             this.fogTanY = 0.0f;
         }
         this.pointSize = state.pointSize();
+        this.stencilTest = state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.STENCIL_TEST);
+        if (this.stencilTest) {
+            this.stencilComparison = state.stencilComparison();
+            this.stencilReference = state.stencilReference();
+            this.stencilCompareMask = state.stencilCompareMask();
+            this.stencilWriteMask = state.stencilWriteMask();
+            this.stencilFail = state.stencilFail();
+            this.stencilDepthFail = state.stencilDepthFail();
+            this.stencilPass = state.stencilPass();
+        }
 
         captureProgram();
 
@@ -417,6 +443,16 @@ public final class DrawState {
 
     /** glPointSize in effect at the draw. */
     public float pointSize() { return pointSize; }
+
+    /** Whether the stencil test was enabled. */
+    public boolean stencilTest() { return stencilTest; }
+    public int stencilComparison() { return stencilComparison; }
+    public int stencilReference() { return stencilReference; }
+    public int stencilCompareMask() { return stencilCompareMask; }
+    public int stencilWriteMask() { return stencilWriteMask; }
+    public int stencilFail() { return stencilFail; }
+    public int stencilDepthFail() { return stencilDepthFail; }
+    public int stencilPass() { return stencilPass; }
 
     public boolean hasViewport() {
         return viewport[2] > 0 && viewport[3] > 0;

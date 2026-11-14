@@ -191,6 +191,65 @@ public interface FrameState {
 
     int fogMode();
     float[] fogColor();
+
+    // region stencil
+    //
+    // GL's stencil state is four calls: glStencilFunc(compare, reference, compareMask), glStencilMask(writeMask),
+    // glStencilOp(fail, depthFail, pass) and glEnable/glDisable(GL_STENCIL_TEST). Vulkan has the same pieces per
+    // pipeline, plus the test bit; the values are recorded here and become part of the pipeline key.
+    //
+    // Nothing in vanilla asks for any of it. The caller this exists for is Immersive Engineering's bottling machine,
+    // which masks the part of an item below the fluid level so the two halves can be drawn with different colours.
+
+    /** {@code glStencilFunc}: the comparison, the reference value and the bits the comparison reads. */
+    default void stencilFunc(int comparison, int reference, int mask) {
+        throw new UnsupportedOperationException("stencil is not implemented by this backend");
+    }
+
+    /** {@code glStencilMask}: the bits a write may change. */
+    default void stencilMask(int mask) {
+        throw new UnsupportedOperationException("stencil is not implemented by this backend");
+    }
+
+    /** {@code glStencilOp}: what happens on fail, on depth fail and on pass. */
+    default void stencilOp(int fail, int depthFail, int depthPass) {
+        throw new UnsupportedOperationException("stencil is not implemented by this backend");
+    }
+
+    /** The stencil comparison function, GL enum. GL's initial value is {@code GL_ALWAYS} (519). */
+    default int stencilComparison() {
+        return 519;
+    }
+
+    /** The stencil reference value. GL's initial value is 0. */
+    default int stencilReference() {
+        return 0;
+    }
+
+    /** The bits the stencil comparison reads. GL's initial value is all ones. */
+    default int stencilCompareMask() {
+        return 0xFFFFFFFF;
+    }
+
+    /** The bits a stencil write may change. GL's initial value is all ones. */
+    default int stencilWriteMask() {
+        return 0xFFFFFFFF;
+    }
+
+    /** The operation on stencil-test failure, GL enum. GL's initial value is {@code GL_KEEP} (7680). */
+    default int stencilFail() {
+        return 7680;
+    }
+
+    /** The operation on depth-test failure, GL enum. GL's initial value is {@code GL_KEEP}. */
+    default int stencilDepthFail() {
+        return 7680;
+    }
+
+    /** The operation on pass, GL enum. GL's initial value is {@code GL_KEEP}. */
+    default int stencilPass() {
+        return 7680;
+    }
     float fogDensity();
     float fogStart();
     float fogEnd();
