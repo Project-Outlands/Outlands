@@ -46,8 +46,9 @@ base {
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
-    // userdev's 'sources' entry points at this jar (patched Minecraft + loader sources)
-    withSourcesJar()
+    // No 'withSourcesJar()': it would produce a second 'outlands-<version>-sources.jar' (patched Minecraft plus the
+    // loader) next to 'loaderSourcesJar' - same file name, different content - and userdev's 'sources' entry must be
+    // the loader only anyway. The patched sources ship as the 'dev-sources' classifier instead.
 }
 
 evaluationDependsOn(':mcpbase')
@@ -141,7 +142,10 @@ def genVersion = tasks.register('genVersion', top.outlands.gradle.helpers.tasks.
 //
 // The split is done by name: the loader's own tree is known, everything else in the compiled tree came from the
 // patched Minecraft sources. Names are the same in every name space here (the loader is never obfuscated).
-def patchedMcSources = patches.patched
+// ':mcpbase:applyPatches' writes this tree, so every task that reads it (compile, javadoc, dev-sources) needs a
+// dependency on it. Taking the task's own output provider - not the extension's directory, which is a plain path and
+// carries no producer - lets Gradle infer that instead of failing the build with an 'implicit dependency' problem.
+def patchedMcSources = project(':mcpbase').tasks.named('applyPatches').flatMap { it.outputDirectory }
 def generatedVersionSources = genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile }
 
 // Read lazily: a clean checkout has no generated sources before their tasks ran.
@@ -345,9 +349,10 @@ def jarForReobf = tasks.register('jarForReobf', Jar) {
     archiveClassifier = 'reobf-input'
     destinationDirectory = layout.buildDirectory.dir('reobf-input')
     from sourceSets.main.output
-    // The vanilla resources that processResources copies in are for the dev classpath only. They must not end up in
-    // a published jar: the launcher's client jar already carries them, and they are Mojang's to distribute.
-    exclude 'assets/**'
+    // The vanilla resource tree that processResources copies in is for the dev classpath only. It must not end up in
+    // a published jar: the launcher's client jar already carries it, and it is not ours to distribute. Only
+    // 'assets/minecraft' is removed - 'assets/outlands', 'assets/forge', 'assets/fml', ... are the loader's own.
+    exclude 'assets/minecraft/**'
 }
 
 def reobf = tasks.register('reobf', Reobf) {
@@ -375,6 +380,15 @@ def reobfObf = tasks.register('reobfObf', Reobf) {
     loaderSpace.set(layout.file(mcpBase.map2Srg))
     output.set(layout.buildDirectory.file('reobf-input/minecraft-obf.jar'))
     disableAbstractParams.set(false)
+}
+
+// Forge Renamer prints one line per entry it writes into the output jar ('  net/minecraft/...', ~6.5k per pass) plus
+// one per library class it cannot resolve while walking the class hierarchy. Two passes over the fused tree make
+// that ~13k console lines per build. The tool's exit code is the contract, and its full output is still written to
+// build/minecraftforge/forgedev/<task>/log.txt, so both passes only show it at INFO ('./gradlew build --info').
+// 'standardOutputLogLevel' is a @Console property: changing it never invalidates a task.
+tasks.withType(Reobf).configureEach {
+    standardOutputLogLevel.set(LogLevel.INFO)
 }
 
 // Only Minecraft: the patcher must not emit 'this class does not exist in the vanilla jar' entries for the loader's
@@ -443,9 +457,12 @@ def vanillaCleanJar = { String side, Provider<File> vanilla ->
 
 // The universal jar: what a launcher puts on the classpath. Srg named loader classes, the resources (deobf data,
 // cleanmix info) and the binary patches that turn Minecraft into the patched classes at startup.
-// The plain 'jar' task still exists for debugging (MCP named, loader only), it is not published.
+// The plain 'jar' task is a debugging aid only: it holds the whole compiled tree (MCP named Minecraft classes
+// included) and the resource copy, so it must not be published or globbed by a release. It is written outside
+// 'libs/' for exactly that reason.
 tasks.named('jar') {
     archiveClassifier = 'mcp'
+    destinationDirectory = layout.buildDirectory.dir('debug')
 }
 
 def universalJar = tasks.register('universalJar', Jar) {
@@ -459,8 +476,10 @@ def universalJar = tasks.register('universalJar', Jar) {
     // loader classes only, every Minecraft class comes from the patches at runtime
     exclude { entry -> entry.path.endsWith('.class') && !isClassOf(loaderNames, entry.path) }
     from(sourceSets.main.output.resourcesDir)
-    // see jarForReobf: the resource tree is a dev-run convenience, not part of the loader
-    exclude 'assets/**'
+    // see jarForReobf: the vanilla resource tree is a dev-run convenience, the loader's own assets stay
+    exclude 'assets/minecraft/**'
+    // the excluded Minecraft classes would otherwise leave their (empty) package directories behind
+    includeEmptyDirs = false
     from(binpatchesPack) {
         rename { 'binpatches.pack.lzma' }
     }
@@ -564,9 +583,7 @@ def devenvJson = tasks.register('devenvJson') {
 // separate classifier because '-sources' must stay loader-only (userdev applies patches to it).
 tasks.register('devSourcesJar', Jar) {
     archiveClassifier = 'dev-sources'
-    // the patched tree belongs to :mcpbase, and wiring its directory in directly hides the producer from Gradle
-    dependsOn ':mcpbase:applyPatches'
-    from(patches.patched)
+    from(patchedMcSources)
     from("$rootDir/src/main/java") {
         exclude 'net/minecraft/**'
     }
@@ -747,4 +764,55 @@ checks.base(project(':mcpbase').forgedev.mcpBase)
 // checks.sas {}
 checks.patches { it.patchDir.set(rootProject.layout.projectDirectory.dir('patches/minecraft')) }
 checks.execs {}
+// endregion
+
+// region shipped artifact guard ---------------------------------------------
+// A shipped artifact must not carry Mojang's classes, sources or resources: a launcher installs the vanilla client
+// jar next to the loader, the loader only patches it at runtime, and redistributing the game is not ours to do. The
+// 'dev-sources', 'srg' and 'devenv' classifiers contain Minecraft material on purpose (they are the ForgeDev dev
+// target, the same shape as Forge's own mcp_config), so they are not part of this check - everything a player or a
+// launcher downloads is.
+tasks.register('verifyArtifacts') {
+    group = 'verification'
+    description = 'Fails when a shipped artifact contains Minecraft classes, sources or resources'
+    def shipped = [universalJar, tasks.named('loaderSourcesJar'), tasks.named('userdevJar')]
+    dependsOn shipped
+    doLast {
+        def forbidden = [
+                ~/^net\/minecraft\/.*\.class$/,
+                ~/^net\/minecraft\/.*\.java$/,
+                ~/^assets\/minecraft\/.*/,
+                ~/^assets\/\.mcassetsroot$/
+        ]
+        def found = [:]
+        shipped.each { task ->
+            def file = task.get().archiveFile.get().asFile
+            if (!file.isFile()) return
+            def hits = new java.util.zip.ZipFile(file).withCloseable { zip ->
+                zip.entries().findAll { entry ->
+                    !entry.directory && forbidden.any { it.matcher(entry.name).matches() }
+                }*.name
+            }
+            if (!hits.isEmpty()) found[file.name] = hits
+        }
+        if (!found.isEmpty())
+            throw new GradleException('Shipped artifacts contain Minecraft material:\n' + found.collect { name, hits ->
+                "  ${name}: ${hits.size()} entr${hits.size() == 1 ? 'y' : 'ies'}, e.g. ${hits.take(3).join(', ')}"
+            }.join('\n'))
+
+        // The other half of the same mistake: an exclude that is too broad removes the loader's own resources
+        // (banner, icon, forge/fml translations) and nobody notices until the mod list shows a blank tile.
+        def required = ['assets/outlands/banner.png', 'assets/outlands/icon.png', 'assets/forge/lang/en_us.lang']
+        def universal = universalJar.get().archiveFile.get().asFile
+        def missing = new java.util.zip.ZipFile(universal).withCloseable { zip ->
+            required.findAll { name -> zip.getEntry(name) == null }
+        }
+        if (!missing.isEmpty())
+            throw new GradleException("The universal jar is missing loader resources: ${missing.join(', ')}")
+
+        logger.lifecycle("Shipped artifacts are clean (${shipped.size()} checked), and the loader's own resources are present")
+    }
+}
+
+tasks.named('check') { dependsOn 'verifyArtifacts' }
 // endregion
