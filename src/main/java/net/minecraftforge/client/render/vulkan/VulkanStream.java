@@ -414,6 +414,7 @@ final class VulkanStream implements AutoCloseable {
             lastPushedLayout = 0L;
             // What the instance is currently open over. A frame starts on the window's image and every switch moves it.
             FrameRenderTarget current = windowTarget;
+            FrameDump.maybeDump(ops);
             for (FrameDraws.Operation op : ops) {
                 if (op instanceof FrameDraws.TargetBind bind) {
                     // A switch to the target already being drawn into is what GL would call a no-op; it is recorded
@@ -585,11 +586,19 @@ final class VulkanStream implements AutoCloseable {
                 // second row is negated), so what it needs is one more inversion to land display-correct in the
                 // window - and both inside a target, where the flip is what makes the target's storage GL's.
                 //
-                // A *program* draw has no such pre-inversion: its own matrix produced GL clip space, so it needs
-                // exactly the opposite. Into the window that is the flip (clip +1 is the top of the picture, and only
-                // a negative viewport puts it in row 0); into a target the viewport must stay unflipped, because the
-                // target is already stored bottom-up and clip +1 has to reach its last row.
-                boolean programFlips = !current.flipsVertically();
+                // A *program* draw with a matrix of its own has no such pre-inversion - that matrix produced GL clip
+                // space - so it needs exactly the opposite. Into the window that is the flip (clip +1 is the top of
+                // the picture, and only a negative viewport puts it in row 0); into a target the viewport must stay
+                // unflipped, because the target is already stored bottom-up and clip +1 has to reach its last row.
+                //
+                // A program that reads the *push-constant* matrix is the other case, and it is the common one now that
+                // the fixed-function translation maps gl_ModelViewProjectionMatrix to it: that matrix is the stream's
+                // own, already negated by writeMvp, so the shader has done the stream path's inversion. Giving it the
+                // program path's opposite flip inverted it a second time, and the two mirrors cancelled: every part of
+                // a model drawn with one of Immersive Intelligence's shaders came out reflected across the middle of
+                // the screen - a magazine under the gun became a belt of cartridges against the top-right edge.
+                boolean ownMatrix = ds.program() != null && !ds.program().usesFixedFunctionMatrix();
+                boolean programFlips = ownMatrix ? !current.flipsVertically() : current.flipsVertically();
                 // The winding is a *second* question, and it is the one that decides whether the quad survives culling.
                 // The stream path mirrors clip y with its matrix and the target's viewport mirrors it again, so its
                 // pipeline says "clockwise" exactly when the target's viewport is flipped. A program's own matrix
@@ -597,6 +606,10 @@ final class VulkanStream implements AutoCloseable {
                 // about is the *target's* flip, not the flip applied here. Passing this draw's own flip instead culled
                 // the blit experiment's quad away entirely: an odd number of mirrors is counter-clockwise, and the
                 // pipeline was told to expect clockwise.
+                //
+                // Both cases end up with one mirror - the viewport for a program's own matrix, the matrix for the
+                // fixed-function one - which is why this value is the same for both and did not have to change with
+                // the flip above.
                 boolean programWinding = current.flipsVertically();
 
                 if (ds.program() != null) {

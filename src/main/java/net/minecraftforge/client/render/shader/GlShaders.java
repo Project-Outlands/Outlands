@@ -54,7 +54,8 @@ public final class GlShaders {
     public static final int LINK_STATUS = 35714;
 
     /** One shader object: a stage's source, and its module once compiled. */
-    public record Shader(int id, int glType, String source, byte[] spirv, String log) {
+    public record Shader(int id, int glType, String source, byte[] spirv, String log,
+                         boolean fixedFunctionMatrix) {
         public boolean compiled() {
             return spirv != null;
         }
@@ -177,6 +178,25 @@ public final class GlShaders {
         }
 
         /** The SPIR-V of a stage, or null when the program has no such stage. */
+        /**
+         * Whether the vertex stage reads the push-constant matrix.
+         *
+         * <p>It does when {@link net.minecraftforge.client.render.vulkan.shader.GlslPreprocessor} translated
+         * {@code gl_ModelViewProjectionMatrix}/{@code ftransform()}/{@code gl_ModelViewMatrix} for it. That matters to
+         * the draw, not to the shader: the block holds the stream's matrix, already negated for Vulkan's clip space,
+         * so such a program has to be drawn the way a streamed draw is - with the same viewport flip - or the geometry
+         * comes out mirrored across the middle of the screen.</p>
+         */
+        public boolean usesFixedFunctionMatrix() {
+            for (int stageId : stages) {
+                Shader candidate = SHADERS.get(stageId);
+                if (candidate != null && candidate.fixedFunctionMatrix()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public byte[] stageModule(int glType) {
             for (int stageId : stages) {
                 Shader candidate = SHADERS.get(stageId);
@@ -249,7 +269,7 @@ public final class GlShaders {
             return 0;
         }
         int id = nextObjectId++;
-        SHADERS.put(id, new Shader(id, glType, "", null, ""));
+        SHADERS.put(id, new Shader(id, glType, "", null, "", false));
         return id;
     }
 
@@ -260,7 +280,7 @@ public final class GlShaders {
             return;
         }
         SHADERS.put(shader, new Shader(shader, existing.glType(), source == null ? "" : source,
-                existing.spirv(), existing.log()));
+                existing.spirv(), existing.log(), existing.fixedFunctionMatrix()));
     }
 
     /**
@@ -282,16 +302,22 @@ public final class GlShaders {
                 ? GlslCompiler.Stage.VERTEX : GlslCompiler.Stage.FRAGMENT;
         try {
             String forward = GlslPreprocessor.forVulkan(existing.source(), stage);
+            // Whether this stage reads the push-constant matrix, which decides the clip convention the draw needs:
+            // the matrix in the block is the stream's own, already negated for Vulkan, so a shader that uses it must
+            // not also be drawn with the program path's opposite viewport flip. Detected on the forwarded source
+            // because that is the only place the injected name appears - a mod shader never writes it.
+            boolean fixedFunctionMatrix = stage == GlslCompiler.Stage.VERTEX && forward.contains("outlandsMvp");
             byte[] spirv = GlslCompiler.compile(forward, stage, "shader" + shader, true);
-            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), spirv, ""));
+            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), spirv, "",
+                    fixedFunctionMatrix));
         } catch (GlslCompiler.GlslCompileException e) {
-            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, e.log()));
+            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, e.log(), false));
             LOGGER.warn("shader {} (type {}) did not compile:\n{}", shader, existing.glType(), e.log());
         } catch (RuntimeException | LinkageError e) {
             // The native compiler missing is not the shader's fault, so it is reported as a failure with a reason
             // rather than as a crash. The game will disable the feature that needed it.
             String reason = "GLSL compiler unavailable: " + e;
-            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, reason));
+            SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, reason, false));
             LOGGER.error("shader {} could not be compiled: {}", shader, reason);
         }
     }
@@ -321,7 +347,8 @@ public final class GlShaders {
         if (existing == null || spirv == null) {
             return;
         }
-        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), spirv, ""));
+        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), spirv, "",
+                existing.fixedFunctionMatrix()));
     }
 
     /**
@@ -336,7 +363,7 @@ public final class GlShaders {
         if (existing == null) {
             return;
         }
-        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, reason));
+        SHADERS.put(shader, new Shader(shader, existing.glType(), existing.source(), null, reason, false));
     }
 
     public static void deleteShader(int shader) {
