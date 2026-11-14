@@ -45,13 +45,22 @@ CalVer：`YYYY.MM.DD`，用 UTC，**不带任何其它信息**——没有 commi
 ./gradlew runOutlandsServer
 ```
 
-工作目录都是 `projects/outlands/run/`。客户端通过 Slime Launcher（ForgeDev）获取 Minecraft classpath、assets 与 natives。
+工作目录都是 `projects/outlands/run/`。classpath 就是项目的 runtime classpath（mcp config 的库 + 为客户端 jar 内资源的
+`extra` jar），FML 通过 `net.minecraftforge.boot.MainClient` 直接启动，中间没有 launcher，所以没人会去下载原版资源。
+`runOutlandsClient` 会先下好：资源索引和它的 1305 个 objects（音效、除 `en_us` 外的 105 种语言、realms 图标）放进
+`$GRADLE_USER_HOME/caches/outlands/assets`。它是缓存：只下一次，之后复用，`clean` 不会删，且只有客户端运行依赖它。
+
+| 属性 | 含义 |
+|---|---|
+| `-PassetDirectory=<dir>` | 直接使用已有的资源目录（比如某个启动器的），不下载 |
+| `-PassetsRepo=<url>` | 对象主机，默认 `https://resources.download.minecraft.net/` |
+| `-PassetsConnections=<n>` | 并行下载数，默认 8 |
 
 ## 仓库结构
 
 | 路径 | 内容 |
 |---|---|
-| `projects/mcpbase` | MCP 层：反编译、访问转换、mcpcleanup、MCP→SRG 重命名、补丁应用 |
+| `projects/mcpbase` | MCP 层：反编译、访问转换、mcpcleanup、补丁应用。产出 `projects/mcpbase/minecraft` 与 `.../patched` 两棵源码树 |
 | `projects/outlands` | loader 源码（与打好补丁的 Minecraft 一起编译）、重混淆、二进制补丁、打包、userdev、安装器、启动器整合包 |
 | `patches/minecraft` | 修改后的 Minecraft 源码，以可 git apply 的补丁形式维护 |
 | `templates` | `LoaderVersion.java`，构建时填入当前版本 |
@@ -68,7 +77,20 @@ Minecraft 源码通过 `patches/minecraft/**.java.patch` 修改。它们是标�
 前缀和完整 hunk 头，`git apply -p2`、`patch -p2` 和 IDE 都能直接读。
 
 * `./gradlew :outlands:checkPatches` 校验所有补丁仍然可用
-* `:mcpbase:makePatches` 从 `projects/mcpbase/build/patched` 重新生成补丁集
+* `:mcpbase:makePatches` 从 `projects/mcpbase/patched` 重新生成补丁集
+
+未打补丁的基线与打完补丁的树并排放，都是 MCP 名、都是生成物（gitignore）、都由 `:mcpbase:clean` 删除：
+
+| 路径 | 内容 |
+|---|---|
+| `projects/mcpbase/minecraft` | 基线，未打补丁（`:mcpbase:extractBase`） |
+| `projects/mcpbase/patched` | 已应用 `patches/minecraft`（`:mcpbase:applyPatches`） |
+
+所以补丁可以直接当 diff 读：`diff -ru projects/mcpbase/minecraft projects/mcpbase/patched`，或者在 IDE 里两目录对比。
+`:outlands` 编译的就是 `patched` 那棵。
+
+基线树在 `:mcpbase` 里注册成了一个 source set，供 IDE 索引（`compileMinecraftJava` 被禁用——不参与编译，patched 树
+已经由 `:outlands` 编译）；也正是这个 source set 让基线的 import 有 classpath 可以解析。
 
 ## 发布（维护者）
 

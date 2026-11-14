@@ -47,14 +47,24 @@ Only *releases* get a number: the first release of a day is `2026.10.23`, the ne
 ./gradlew runOutlandsServer
 ```
 
-Both run out of `projects/outlands/run/`. The client uses Slime Launcher (ForgeDev) for the Minecraft classpath,
-assets and natives.
+Both run out of `projects/outlands/run/`. The classpath is the project's runtime classpath (the mcp config's
+libraries plus its `extra` jar for the resources inside the client jar), and FML is booted directly through
+`net.minecraftforge.boot.MainClient` - no launcher sits in between, so nothing would fetch the vanilla assets.
+`runOutlandsClient` downloads them first: the asset index and its 1305 objects (sounds, the 105 languages besides
+`en_us`, the realms icons) go into `$GRADLE_USER_HOME/caches/outlands/assets`. It is a cache - fetched once, reused
+afterwards, untouched by `clean` - and only the client run depends on it.
+
+| Property | Meaning |
+|---|---|
+| `-PassetDirectory=<dir>` | Use an existing assets directory (a launcher's, for example) instead of downloading |
+| `-PassetsRepo=<url>` | Object host, defaults to `https://resources.download.minecraft.net/` |
+| `-PassetsConnections=<n>` | Parallel downloads, default 8 |
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `projects/mcpbase` | MCP layer: decompile, access transformers, mcpcleanup, MCP->SRG rename, patch application |
+| `projects/mcpbase` | MCP layer: decompile, access transformers, mcpcleanup, patch application. Generates the two source trees below `projects/mcpbase/minecraft` and `.../patched` |
 | `projects/outlands` | loader sources (compiled against the patched Minecraft), reobf, binary patches, packaging, userdev, installer, launcher pack |
 | `patches/minecraft` | the patched Minecraft sources, as git-applyable patches |
 | `templates` | `LoaderVersion.java`, filled in with the current version at build time |
@@ -72,7 +82,22 @@ Minecraft sources are modified through `patches/minecraft/**.java.patch`. They a
 them.
 
 * `./gradlew :outlands:checkPatches` verifies that every patch still applies
-* `:mcpbase:makePatches` regenerates the patch set from `projects/mcpbase/build/patched`
+* `:mcpbase:makePatches` regenerates the patch set from `projects/mcpbase/patched`
+
+The unpatched base is materialized next to the patched tree, both MCP named, both generated (gitignored) and both
+removed by `:mcpbase:clean`:
+
+| Path | Contents |
+|---|---|
+| `projects/mcpbase/minecraft` | the base, no patches applied (`:mcpbase:extractBase`) |
+| `projects/mcpbase/patched` | `patches/minecraft` applied (`:mcpbase:applyPatches`) |
+
+So a patch can be read as a diff without any tooling: `diff -ru projects/mcpbase/minecraft projects/mcpbase/patched`,
+or the two directories can be compared side by side in an IDE. `:outlands` compiles the patched tree directly.
+
+The base tree is registered as a source set of `:mcpbase` so IDEs index it (`compileMinecraftJava` is disabled -
+nothing compiles it, `:outlands` already compiles the patched tree); that is also what gives its imports a
+classpath to resolve against.
 
 ## Releasing (maintainers)
 

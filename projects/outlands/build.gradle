@@ -26,6 +26,7 @@ import java.util.jar.JarOutputStream
 import org.apache.commons.compress.compressors.lzma.LZMACompressorInputStream
 import org.apache.commons.compress.compressors.lzma.LZMACompressorOutputStream
 import top.outlands.gradle.helpers.ProjectConstants
+import top.outlands.gradle.helpers.tasks.DownloadAssetsTask
 import top.outlands.gradle.helpers.tasks.Util
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -140,7 +141,7 @@ def genVersion = tasks.register('genVersion', top.outlands.gradle.helpers.tasks.
 //
 // The split is done by name: the loader's own tree is known, everything else in the compiled tree came from the
 // patched Minecraft sources. Names are the same in every name space here (the loader is never obfuscated).
-def patchedMcSources = project(':mcpbase').layout.buildDirectory.dir('patched-mcp/src')
+def patchedMcSources = patches.patched
 def generatedVersionSources = genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile }
 
 // Read lazily: a clean checkout has no generated sources before their tasks ran.
@@ -170,8 +171,8 @@ sourceSets {
     main {
         java {
             srcDirs = []
-            // generated: flatMap keeps the task dependency on applyPatches
-            // patched sources are srg named (the pipeline runs with 'stable' mappings); the loader is written in mcp
+            // generated into :mcpbase's project directory (not build/): patched, MCP named, and diffable against
+            // ':mcpbase:extractBase' -> projects/mcpbase/minecraft
             srcDir(patchedMcSources)
             srcDir(genVersion.map { it.versionClass.parentFile.parentFile.parentFile.parentFile })
             srcDir("$rootDir/src/main/java")
@@ -256,14 +257,28 @@ def assetIndex = providers.provider {
         zip.close()
     }
 }
-// Assets/natives caches are shared with the old ForgeGradle setup until :outlands provisions its own.
+// The dev client's '--assetsDir'. Textures, models and en_us.lang reach the client through the classpath (the mcp
+// config's 'extra' jar), but sounds, the other 105 languages and the realms icons are asset index objects that a
+// launcher fetches - a development run has none, so 'downloadAssets' fills the directory instead. It is a cache in
+// the Gradle user home ('clean' leaves it alone) and only the client run depends on it; '-PassetDirectory' points
+// the run at a launcher's own assets directory instead, and '-PassetsRepo' at a mirror.
 // Resolve against gradle's own user home: it moves to D:/gradle on this setup, and hardcoding
 // ~/.gradle points the launcher at a directory that does not exist.
 def gradleUserHome = gradle.gradleUserHomeDir.absolutePath
-def assetsDir = providers.gradleProperty('assetDirectory').getOrElse(
-    new File(gradleUserHome, 'caches/forge_gradle/assets').absolutePath)
+def assetDirectory = providers.gradleProperty('assetDirectory')
+def assetsDir = assetDirectory.map { project.file(it).absolutePath }.getOrElse(
+    new File(gradleUserHome, 'caches/outlands/assets').absolutePath)
 def nativesDir = providers.gradleProperty('nativesDirectory').getOrElse(
     layout.buildDirectory.dir('natives').get().asFile.absolutePath)
+
+def downloadAssets = tasks.register('downloadAssets', DownloadAssetsTask) { task ->
+    task.group = 'setup'
+    task.description = 'Downloads the vanilla asset index and every object it references (sounds, languages) for the dev client'
+    task.metadata.fileProvider(mcpBase.metadata)
+    task.output.fileValue(new File(assetsDir))
+    task.repository.set(providers.gradleProperty('assetsRepo').getOrElse('https://resources.download.minecraft.net/'))
+    task.connections.set(providers.gradleProperty('assetsConnections').map { it as int }.getOrElse(8))
+}
 
 def loaderEnv = { String target, String tweaker ->
     [
@@ -309,10 +324,13 @@ forgedev.runs {
 }
 // endregion
 
-// the run configs need the plain text mappings file on disk
+// the run configs need the plain text mappings file on disk, and the client the vanilla asset objects
 tasks.configureEach {
     if (name == 'runOutlandsClient' || name == 'runOutlandsServer')
         dependsOn(mcpToSrg)
+    // a server has no resources, and an overridden directory is somebody else's to provide
+    if (name == 'runOutlandsClient' && !assetDirectory.isPresent())
+        dependsOn(downloadAssets)
 }
 
 
@@ -327,6 +345,9 @@ def jarForReobf = tasks.register('jarForReobf', Jar) {
     archiveClassifier = 'reobf-input'
     destinationDirectory = layout.buildDirectory.dir('reobf-input')
     from sourceSets.main.output
+    // The vanilla resources that processResources copies in are for the dev classpath only. They must not end up in
+    // a published jar: the launcher's client jar already carries them, and they are Mojang's to distribute.
+    exclude 'assets/**'
 }
 
 def reobf = tasks.register('reobf', Reobf) {
@@ -438,6 +459,8 @@ def universalJar = tasks.register('universalJar', Jar) {
     // loader classes only, every Minecraft class comes from the patches at runtime
     exclude { entry -> entry.path.endsWith('.class') && !isClassOf(loaderNames, entry.path) }
     from(sourceSets.main.output.resourcesDir)
+    // see jarForReobf: the resource tree is a dev-run convenience, not part of the loader
+    exclude 'assets/**'
     from(binpatchesPack) {
         rename { 'binpatches.pack.lzma' }
     }
@@ -662,7 +685,7 @@ tasks.register('createMMCPack', CreateMMCPackTask) {
 }
 
 tasks.named('assemble') { dependsOn 'createMMCPack' }
-tasks.named('compileJava') { dependsOn ':mcpbase:renamePatchedSources' }
+tasks.named('compileJava') { dependsOn ':mcpbase:applyPatches' }
 // endregion
 
 // region publishing ---------------------------------------------------------
