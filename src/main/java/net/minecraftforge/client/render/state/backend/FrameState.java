@@ -333,6 +333,14 @@ public interface FrameState {
     default void texEnvi(int target, int parameterName, int parameter) {}
 
     /**
+     * {@code glTexEnvf}: one scalar float of texture environment state.
+     *
+     * <p>Separate from the buffer form because the call sites pass a literal ({@code glTexEnvf(..., GL_ALPHA_SCALE,
+     * 2.0F)}); building a buffer for it in the facade would allocate on a path that is called once per mod.</p>
+     */
+    default void texEnvf(int target, int parameterName, float parameter) {}
+
+    /**
      * Which combine stage the overlay colour describes: 0 for the hurt-flash interpolate, 1 for outline mode.
      *
      * <p>Defaulted rather than declared because only one backend reports it: the fixed-function outline material is a
@@ -450,6 +458,15 @@ public interface FrameState {
 
     /** {@code glMultMatrixf}: composes the given column-major matrix on the right. */
     void multiply(java.nio.FloatBuffer columnMajor16);
+
+    /**
+     * {@code glLoadMatrixf}: replaces the current matrix instead of multiplying into it.
+     *
+     * <p>Immersive Intelligence's mine renderers and modularui's matrix helper both do this: they compute a matrix
+     * themselves and load it, rather than composing it from the stack's operations. Multiplying it in would apply
+     * the caller's transform on top of whatever the stack already held, which is a different picture.</p>
+     */
+    void loadMatrix(java.nio.FloatBuffer columnMajor16);
 
     void ortho(double left, double right, double bottom, double top, double zNear, double zFar);
 

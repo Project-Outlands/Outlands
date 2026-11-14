@@ -984,6 +984,21 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public void loadMatrix(FloatBuffer columnMajor16) {
+        // Same copy-through-a-float[] reason as multiply(): Matrix4f.set(FloatBuffer) dereferences the buffer's
+        // native address field on a heap buffer and dies at address 0. The position is left alone for the same
+        // reason too - mods reuse these buffers.
+        FloatBuffer view = columnMajor16.duplicate();
+        view.rewind();
+        if (view.remaining() < 16) {
+            throw new IllegalArgumentException("a 4x4 matrix needs 16 floats, the buffer has " + view.remaining());
+        }
+        view.get(multiplyScratchValues);
+        // Column-major, the layout glLoadMatrixf reads, so no transpose happens here.
+        current().set(multiplyScratchValues);
+    }
+
+    @Override
     public void ortho(double left, double right, double bottom, double top, double zNear, double zFar) {
         current().ortho((float) left, (float) right, (float) bottom, (float) top, (float) zNear, (float) zFar);
     }

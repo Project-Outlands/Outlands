@@ -115,6 +115,32 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glStencilOp", "(III)V"),
             // Only ever called on IC2C's error path, before the process exits.
             entry("glFinish", "()V"),
+
+            // State setters the pack calls directly, measured across all 231 jars in the instance: 156 raw-GL
+            // state-setting call sites, of which these are the ones the frame state already implements. The names
+            // are LWJGL 2's, because the shim pass runs before the table that renames them - a call site is brought
+            // to its final shape only after the retarget has had its chance (see CompatRewriter).
+            entry("glBlendFunc", "(II)V"),          // 31 sites, the largest group: HeatAndClimate, RebornCore
+            entry("glScissor", "(IIII)V"),          // 18 sites: Immersive Intelligence's GUI clipping, JourneyMap
+            entry("glDepthMask", "(Z)V"),           // 6 sites
+            entry("glShadeModel", "(I)V"),          // 6 sites
+            entry("glClearColor", "(FFFF)V"),       // 5 sites
+            entry("glColorMask", "(ZZZZ)V"),        // 1 site, Actinium
+            entry("glPolygonMode", "(II)V"),        // 1 site, Actinium's wireframe pass
+            entry("glClearDepth", "(D)V"),          // 1 site, Actinium
+            entry("glLogicOp", "(I)V"),             // 1 site, subpocket
+            entry("glTexEnvi", "(III)V"),           // 2 sites
+            entry("glTexEnvf", "(IIF)V"),           // 1 site, mcjtylib
+            entry("glTexEnv", "(IILjava/nio/FloatBuffer;)V"),   // 1 site, subpocket
+            // Matrices loaded rather than composed: modularui and Immersive Intelligence's mine renderers.
+            entry("glLoadMatrix", "(Ljava/nio/FloatBuffer;)V"),
+            entry("glLoadMatrixf", "(Ljava/nio/FloatBuffer;)V"),
+            entry("glMultMatrix", "(Ljava/nio/FloatBuffer;)V"),
+            entry("glMultMatrixf", "(Ljava/nio/FloatBuffer;)V"),
+            entry("glMultMatrix", "(Ljava/nio/DoubleBuffer;)V"),
+            // Fixed-function dash patterns. No pipeline equivalent, but reaching real GL from a window that has no
+            // GL context is worse than reporting once, so the entry exists to catch the call.
+            entry("glLineStipple", "(IS)V"),
             // Immersive Intelligence asks whether culling is on before it changes the mode. The single-value form
             // exists in LWJGL 3 as well, so this is a retarget and not a table entry.
             entry("glGetBoolean", "(I)Z"),

@@ -41,6 +41,14 @@ public final class FrameShim implements ShimGl.Impl {
     private static final int GL_TEXTURE_MATRIX = 2984;
 
     /**
+     * Scratch for the double-precision matrix form, so {@code glMultMatrixd} does not allocate per call.
+     *
+     * <p>Safe as a static because matrices are only ever composed on the render thread, the same thread the frame
+     * state lives on.</p>
+     */
+    private static final java.nio.FloatBuffer MATRIX_SCRATCH = java.nio.FloatBuffer.allocate(16);
+
+    /**
      * Calls that reached the frame state instead of real GL.
      *
      * <p>Counted in one place - {@link #state()} - because that is the single decision every method makes, and
@@ -496,6 +504,184 @@ public final class FrameShim implements ShimGl.Impl {
             return;
         }
         state.stencilOp(fail, depthFail, depthPass);
+    }
+
+
+    @Override
+    public void glBlendFunc(int glSourceFactor, int glDestinationFactor) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glBlendFunc(glSourceFactor, glDestinationFactor);
+            return;
+        }
+        state.blendFunc(glSourceFactor, glDestinationFactor);
+    }
+    @Override
+    public void glScissor(int x, int y, int width, int height) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glScissor(x, y, width, height);
+            return;
+        }
+        state.scissor(x, y, width, height);
+    }
+    @Override
+    public void glDepthMask(boolean enabled) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glDepthMask(enabled);
+            return;
+        }
+        state.depthMask(enabled);
+    }
+    @Override
+    public void glShadeModel(int glModel) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glShadeModel(glModel);
+            return;
+        }
+        state.shadeModel(glModel);
+    }
+    @Override
+    public void glClearColor(float red, float green, float blue, float alpha) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glClearColor(red, green, blue, alpha);
+            return;
+        }
+        state.clearColor(red, green, blue, alpha);
+    }
+    @Override
+    public void glColorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glColorMask(red, green, blue, alpha);
+            return;
+        }
+        state.colorMask(red, green, blue, alpha);
+    }
+    @Override
+    public void glPolygonMode(int glFace, int glMode) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glPolygonMode(glFace, glMode);
+            return;
+        }
+        state.polygonMode(glFace, glMode);
+    }
+    @Override
+    public void glClearDepth(double depth) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glClearDepth(depth);
+            return;
+        }
+        state.clearDepth(depth);
+    }
+    @Override
+    public void glLogicOp(int glOpcode) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glLogicOp(glOpcode);
+            return;
+        }
+        state.logicOp(glOpcode);
+    }
+    @Override
+    public void glTexEnvi(int target, int parameterName, int parameter) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glTexEnvi(target, parameterName, parameter);
+            return;
+        }
+        state.texEnvi(target, parameterName, parameter);
+    }
+    @Override
+    public void glTexEnvf(int target, int parameterName, float parameter) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glTexEnvf(target, parameterName, parameter);
+            return;
+        }
+        state.texEnvf(target, parameterName, parameter);
+    }
+    @Override
+    public void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glTexEnv(target, parameterName, parameters);
+            return;
+        }
+        state.texEnv(target, parameterName, parameters);
+    }
+    @Override
+    public void glLoadMatrix(java.nio.FloatBuffer matrix) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glLoadMatrix(matrix);
+            return;
+        }
+        state.loadMatrix(matrix);
+    }
+    @Override
+    public void glLoadMatrixf(java.nio.FloatBuffer matrix) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glLoadMatrixf(matrix);
+            return;
+        }
+        state.loadMatrix(matrix);
+    }
+    @Override
+    public void glMultMatrix(java.nio.FloatBuffer matrix) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glMultMatrix(matrix);
+            return;
+        }
+        state.multiply(matrix);
+    }
+    @Override
+    public void glMultMatrixf(java.nio.FloatBuffer matrix) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glMultMatrixf(matrix);
+            return;
+        }
+        state.multiply(matrix);
+    }
+    @Override
+    public void glMultMatrix(java.nio.DoubleBuffer matrix) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glMultMatrix(matrix);
+            return;
+        }
+        // Converted into a reusable float buffer rather than allocating one per call: the stack is float32, and the
+        // caller's buffer is left alone (position included), which is what glMultMatrixd promises.
+        java.nio.DoubleBuffer view = matrix.duplicate();
+        view.rewind();
+        if (view.remaining() < 16) {
+            throw new IllegalArgumentException("a 4x4 matrix needs 16 doubles, the buffer has " + view.remaining());
+        }
+        for (int i = 0; i < 16; i++) {
+            MATRIX_SCRATCH.put(i, (float) view.get(i));
+        }
+        state.multiply(MATRIX_SCRATCH);
+    }
+
+    @Override
+    public void glLineStipple(int factor, short pattern) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glLineStipple(factor, pattern);
+            return;
+        }
+        // A dash pattern applied by the GL rasteriser to line primitives. Lines here are expanded into triangles
+        // before anything could stipple them, so the pattern has nowhere to go; the line is drawn solid instead.
+        FrameStates.reportSkippedOnce("glLineStipple(" + factor + ")",
+                "a dash pattern needs the GL line rasteriser, and lines are triangles here");
     }
 
     // region ARB_shader_objects

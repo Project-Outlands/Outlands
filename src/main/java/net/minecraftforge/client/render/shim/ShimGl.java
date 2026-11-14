@@ -130,6 +130,55 @@ public final class ShimGl {
 
         void glFinish();
 
+        /** {@code glBlendFunc}. */
+        void glBlendFunc(int glSourceFactor, int glDestinationFactor);
+        /** {@code glScissor}. */
+        void glScissor(int x, int y, int width, int height);
+        /** {@code glDepthMask}. */
+        void glDepthMask(boolean enabled);
+        /** {@code glShadeModel}. */
+        void glShadeModel(int glModel);
+        /** {@code glClearColor}. */
+        void glClearColor(float red, float green, float blue, float alpha);
+        /** {@code glColorMask}. */
+        void glColorMask(boolean red, boolean green, boolean blue, boolean alpha);
+        /** {@code glPolygonMode}. */
+        void glPolygonMode(int glFace, int glMode);
+        /** {@code glClearDepth}. */
+        void glClearDepth(double depth);
+        /** {@code glLogicOp}. */
+        void glLogicOp(int glOpcode);
+        /** {@code glTexEnvi}. */
+        void glTexEnvi(int target, int parameterName, int parameter);
+        /** {@code glTexEnvf}. */
+        void glTexEnvf(int target, int parameterName, float parameter);
+        /** {@code glTexEnv}. */
+        void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters);
+        /** {@code glLoadMatrix}. */
+        void glLoadMatrix(java.nio.FloatBuffer matrix);
+        /** {@code glLoadMatrixf}. */
+        void glLoadMatrixf(java.nio.FloatBuffer matrix);
+        /** {@code glMultMatrix}. */
+        void glMultMatrix(java.nio.FloatBuffer matrix);
+        /** {@code glMultMatrixf}. */
+        void glMultMatrixf(java.nio.FloatBuffer matrix);
+        /**
+         * {@code glMultMatrix} with a double buffer.
+         *
+         * <p>Its own entry point rather than an overload of the float form, because a retarget may not change a
+         * descriptor: the call site passes a {@code DoubleBuffer} and the facade has to accept one.</p>
+         */
+        void glMultMatrix(java.nio.DoubleBuffer matrix);
+
+        /**
+         * {@code glLineStipple}: a fixed-function dash pattern for lines.
+         *
+         * <p>No pipeline equivalent, and not something this backend can imitate: the pattern is applied by the GL
+         * rasteriser to line primitives, and lines here are expanded into triangles before anything could stipple
+         * them. Reported once rather than silently reaching a GL context that does not exist.</p>
+         */
+        void glLineStipple(int factor, short pattern);
+
         // region ARB_shader_objects
         // The same object model as the core entry points OpenGlHelper uses, under the names the ARB extension gave
         // it. A mod that was written against GL 2.0 calls these and nothing else, so without them its shaders never
@@ -353,6 +402,81 @@ public final class ShimGl {
         @Override
         public void glStencilOp(int fail, int depthFail, int depthPass) {
             GL11.glStencilOp(fail, depthFail, depthPass);
+        }
+
+
+        @Override
+        public void glBlendFunc(int glSourceFactor, int glDestinationFactor) {
+            GL11.glBlendFunc(glSourceFactor, glDestinationFactor);
+        }
+        @Override
+        public void glScissor(int x, int y, int width, int height) {
+            GL11.glScissor(x, y, width, height);
+        }
+        @Override
+        public void glDepthMask(boolean enabled) {
+            GL11.glDepthMask(enabled);
+        }
+        @Override
+        public void glShadeModel(int glModel) {
+            GL11.glShadeModel(glModel);
+        }
+        @Override
+        public void glClearColor(float red, float green, float blue, float alpha) {
+            GL11.glClearColor(red, green, blue, alpha);
+        }
+        @Override
+        public void glColorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+            GL11.glColorMask(red, green, blue, alpha);
+        }
+        @Override
+        public void glPolygonMode(int glFace, int glMode) {
+            GL11.glPolygonMode(glFace, glMode);
+        }
+        @Override
+        public void glClearDepth(double depth) {
+            GL11.glClearDepth(depth);
+        }
+        @Override
+        public void glLogicOp(int glOpcode) {
+            GL11.glLogicOp(glOpcode);
+        }
+        @Override
+        public void glTexEnvi(int target, int parameterName, int parameter) {
+            GL11.glTexEnvi(target, parameterName, parameter);
+        }
+        @Override
+        public void glTexEnvf(int target, int parameterName, float parameter) {
+            GL11.glTexEnvf(target, parameterName, parameter);
+        }
+        @Override
+        public void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
+            GL11.glTexEnvfv(target, parameterName, parameters);
+        }
+        @Override
+        public void glLoadMatrix(java.nio.FloatBuffer matrix) {
+            GL11.glLoadMatrixf(matrix);
+        }
+        @Override
+        public void glLoadMatrixf(java.nio.FloatBuffer matrix) {
+            GL11.glLoadMatrixf(matrix);
+        }
+        @Override
+        public void glMultMatrix(java.nio.FloatBuffer matrix) {
+            GL11.glMultMatrixf(matrix);
+        }
+        @Override
+        public void glMultMatrixf(java.nio.FloatBuffer matrix) {
+            GL11.glMultMatrixf(matrix);
+        }
+        @Override
+        public void glMultMatrix(java.nio.DoubleBuffer matrix) {
+            GL11.glMultMatrixd(matrix);
+        }
+
+        @Override
+        public void glLineStipple(int factor, short pattern) {
+            GL11.glLineStipple(factor, pattern);
         }
 
         @Override
@@ -605,6 +729,63 @@ public final class ShimGl {
 
     public static void glFinish() {
         impl.glFinish();
+    }
+
+
+    public static void glBlendFunc(int glSourceFactor, int glDestinationFactor) {
+        impl.glBlendFunc(glSourceFactor, glDestinationFactor);
+    }
+    public static void glScissor(int x, int y, int width, int height) {
+        impl.glScissor(x, y, width, height);
+    }
+    public static void glDepthMask(boolean enabled) {
+        impl.glDepthMask(enabled);
+    }
+    public static void glShadeModel(int glModel) {
+        impl.glShadeModel(glModel);
+    }
+    public static void glClearColor(float red, float green, float blue, float alpha) {
+        impl.glClearColor(red, green, blue, alpha);
+    }
+    public static void glColorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+        impl.glColorMask(red, green, blue, alpha);
+    }
+    public static void glPolygonMode(int glFace, int glMode) {
+        impl.glPolygonMode(glFace, glMode);
+    }
+    public static void glClearDepth(double depth) {
+        impl.glClearDepth(depth);
+    }
+    public static void glLogicOp(int glOpcode) {
+        impl.glLogicOp(glOpcode);
+    }
+    public static void glTexEnvi(int target, int parameterName, int parameter) {
+        impl.glTexEnvi(target, parameterName, parameter);
+    }
+    public static void glTexEnvf(int target, int parameterName, float parameter) {
+        impl.glTexEnvf(target, parameterName, parameter);
+    }
+    public static void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
+        impl.glTexEnv(target, parameterName, parameters);
+    }
+    public static void glLoadMatrix(java.nio.FloatBuffer matrix) {
+        impl.glLoadMatrix(matrix);
+    }
+    public static void glLoadMatrixf(java.nio.FloatBuffer matrix) {
+        impl.glLoadMatrixf(matrix);
+    }
+    public static void glMultMatrix(java.nio.FloatBuffer matrix) {
+        impl.glMultMatrix(matrix);
+    }
+    public static void glMultMatrixf(java.nio.FloatBuffer matrix) {
+        impl.glMultMatrixf(matrix);
+    }
+    public static void glMultMatrix(java.nio.DoubleBuffer matrix) {
+        impl.glMultMatrix(matrix);
+    }
+
+    public static void glLineStipple(int factor, short pattern) {
+        impl.glLineStipple(factor, pattern);
     }
 
     public static boolean glGetBoolean(int parameterName) {

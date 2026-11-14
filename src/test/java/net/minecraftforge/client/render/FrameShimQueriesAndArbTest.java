@@ -1,9 +1,8 @@
 package net.minecraftforge.client.render;
 
-import net.minecraftforge.client.render.shim.FrameShim;
-import net.minecraftforge.client.render.shim.ShimGl;
 
 import net.minecraftforge.client.render.shader.GlShaders;
+import net.minecraftforge.client.render.shim.ShimGl;
 import net.minecraftforge.client.render.state.backend.FrameState;
 import net.minecraftforge.client.render.state.backend.FrameStates;
 
@@ -37,33 +36,12 @@ class FrameShimQueriesAndArbTest {
 
     @BeforeEach
     void selectANonGlBackend() {
-        RenderBackends.resetForTests();
-        RenderBackendSelection.resetForTests();
-        GlShaders.reset();
-
-        RenderBackend backend = new RenderBackend() {
-            @Override
-            public String id() {
-                return "test-non-gl";
-            }
-
-            @Override
-            public long sdlWindowFlags() {
-                return 0L;
-            }
-        };
-        RenderBackends.register(backend);
-        RenderBackendSelection.register(new RenderBackendSelection.Candidate(backend, () -> true, 10));
-        RenderBackendSelection.select();
-        ShimGl.setImpl(new FrameShim());
+        NonGlTestBackend.select();
     }
 
     @AfterEach
     void restoreTheRealGlPath() {
-        ShimGl.setImpl(ShimGl.REAL_GL);
-        GlShaders.reset();
-        RenderBackends.resetForTests();
-        RenderBackendSelection.resetForTests();
+        NonGlTestBackend.restore();
     }
 
     private static FrameState state() {
