@@ -103,13 +103,14 @@ final class FramebufferVk implements FramebufferBackend {
             // A recorded switch, in its place in the frame's sequence: the backend ends the instance it is in, moves
             // both images to their layouts and opens another one over this target.
             if (!FrameDraws.recordTargetBind(target.textureId(), width, height, setViewport)) {
-                throw needsFrame("bind " + width + "x" + height);
+                reportNoFrame("bind " + width + "x" + height);
             }
             return;
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
-            throw needsFrame("bind");
+            reportNoFrame("bind");
+            return;
         }
         // The window's image is what the frame is already painting, so binding it is the frame's default target.
         recording.targetDefault(width, height, setViewport);
@@ -120,13 +121,14 @@ final class FramebufferVk implements FramebufferBackend {
         if (!window) {
             // Back to the window's image, which is where a frame starts and usually ends.
             if (!FrameDraws.recordTargetBind(0, width, height, false)) {
-                throw needsFrame("unbind " + width + "x" + height);
+                reportNoFrame("unbind " + width + "x" + height);
             }
             return;
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
-            throw needsFrame("unbind");
+            reportNoFrame("unbind");
+            return;
         }
         // Returning to the screen is the same request as binding it, because they are the same image.
         recording.targetDefault(width, height, false);
@@ -142,7 +144,8 @@ final class FramebufferVk implements FramebufferBackend {
         }
         FrameRecording recording = FrameRecordings.current();
         if (recording == null) {
-            throw needsFrame("clear (" + width + "x" + height + ", depth=" + useDepth + ")");
+            reportNoFrame("clear (" + width + "x" + height + ", depth=" + useDepth + ")");
+            return;
         }
         // The colour is this target's own; the depth value is whatever GlStateManager.clearDepth last set, because
         // that is the call that owns it. Both converge on the frame recording.
@@ -168,7 +171,8 @@ final class FramebufferVk implements FramebufferBackend {
     @Override
     public void render(int width, int height, boolean disableBlend) {
         if (FrameRecordings.current() == null) {
-            throw needsFrame("render " + width + "x" + height);
+            reportNoFrame("render " + width + "x" + height);
+            return;
         }
         if (!window) {
             throw new IllegalStateException("composite of an offscreen framebuffer reached the backend directly;"
@@ -241,11 +245,23 @@ final class FramebufferVk implements FramebufferBackend {
         return target;
     }
 
-    private static UnsupportedOperationException needsFrame(String what) {
-        return new UnsupportedOperationException(
-                "cannot " + what + " on the Vulkan backend yet: no frame is being recorded, so there is no command"
-                        + " buffer to put the command in. Needed: a recording context on the render graph node, and"
-                        + " render-target attachments the graph owns. See docs/vulkan-backend-plan.md 8.4.2.");
+    /**
+     * Records that a framebuffer operation arrived with no frame being recorded, and does nothing about it.
+     *
+     * <p><b>Why this is not an exception.</b> It used to be, and the first normal shutdown turned it into a crash
+     * report: {@code Minecraft.updateDisplay} binds the main framebuffer to draw the "Stopping!" screen, which happens
+     * after the renderer has stopped presenting. A frame that failed for any reason produces the same sequence - the
+     * backend stops presenting, and the next {@code updateDisplay} binds a framebuffer nobody is recording into. Both
+     * are teardown, and neither is a reason to take the process down on the way out.</p>
+     *
+     * <p>Nothing is hidden by the leniency: a <i>draw</i> in that state still fails loudly in the stream path, and the
+     * report below says what was skipped and why.</p>
+     */
+    private static void reportNoFrame(String what) {
+        net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("framebuffer " + what,
+                "no frame is being recorded, so there is no command buffer to put the command in - which is the"
+                        + " teardown path (the game binds the main framebuffer to draw its stopping screen after the"
+                        + " renderer stopped presenting) and also what a failed frame leaves behind");
     }
 
     private static UnsupportedOperationException needsTargetSwitch(String what) {

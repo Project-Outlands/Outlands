@@ -32,6 +32,25 @@ class PrimitiveShapeTest {
     }
 
     @Test
+    void aPolygonIsAFan() {
+        // GL_POLYGON: a convex polygon of n vertices. GL documents the result as undefined for a non-convex one, which
+        // is the same assumption a fan makes - so mode 9 and mode 6 produce the same indices. A mod in the pack draws
+        // with mode 9, and rejecting it failed the whole frame.
+        PrimitiveShape polygon = PrimitiveShape.ofGlMode(9);
+        PrimitiveShape fan = PrimitiveShape.ofGlMode(6);
+
+        assertEquals(fan.topology(), polygon.topology());
+        assertEquals(fan.indexCount(7), polygon.indexCount(7));
+        assertTrue(polygon.needsIndexing());
+
+        java.nio.IntBuffer polygonIndices = java.nio.IntBuffer.allocate(polygon.indexCount(7));
+        java.nio.IntBuffer fanIndices = java.nio.IntBuffer.allocate(fan.indexCount(7));
+        polygon.writeIndices(7, polygonIndices);
+        fan.writeIndices(7, fanIndices);
+        assertEquals(fanIndices, polygonIndices, "the same fan, vertex for vertex");
+    }
+
+    @Test
     void modesVulkanAcceptsArePassedThroughWithoutIndices() {
         // These are drawn straight from the uploaded bytes; building an index buffer would be work for nothing.
         for (int mode : new int[] {0, 1, 3, 4, 5}) {

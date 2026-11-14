@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -212,16 +213,23 @@ class FramebufferVkTest {
     }
 
     @Test
-    void bindingAnOffscreenTargetWithNoFrameSaysSo() {
-        // Nothing is collecting, so there is no frame to put the switch in. Saying that is better than appending to a
-        // list nobody will replay.
+    void bindingWithNoFrameIsIgnoredRatherThanFatal() {
+        // This used to throw, and the first normal shutdown turned it into a crash report: Minecraft.updateDisplay
+        // binds the main framebuffer to draw its "Stopping!" screen after the renderer stopped presenting. A failed
+        // frame leaves the same state behind. Nothing is appended to a list nobody replays, and nothing is thrown.
         FrameRecordings.install(null);
-        FramebufferVk framebuffer = new FramebufferVk(false);
-        framebuffer.create(100, 100, false);
-        UnsupportedOperationException failure = assertThrows(UnsupportedOperationException.class,
-                () -> framebuffer.bind(false));
-        assertTrue(failure.getMessage().contains("no frame"), failure.getMessage());
-        assertNull(FrameRecordings.current());
+        FramebufferVk offscreen = new FramebufferVk(false);
+        offscreen.create(100, 100, false);
+        assertDoesNotThrow(() -> offscreen.bind(false));
+        assertDoesNotThrow(offscreen::unbind);
+        assertNull(FrameRecordings.current(), "and nothing was recorded");
+
+        FramebufferVk window = new FramebufferVk(true);
+        window.create(100, 100, true);
+        assertDoesNotThrow(() -> window.bind(false));
+        assertDoesNotThrow(window::unbind);
+        assertDoesNotThrow(() -> window.clear());
+        assertDoesNotThrow(() -> window.render(100, 100, false));
     }
 
     /** A target that records what was asked of it. */

@@ -48,6 +48,8 @@ public final class PrimitiveShape {
     private static final int GL_TRIANGLE_FAN = 6;
     private static final int GL_QUADS = 7;
     private static final int GL_QUAD_STRIP = 8;
+    /** {@code GL_POLYGON}: a convex polygon of n vertices, which is a triangle fan. */
+    private static final int GL_POLYGON = 9;
 
     /** Largest index a 16-bit index buffer can hold. */
     private static final int MAX_UINT16_VERTICES = 0xFFFF;
@@ -55,14 +57,18 @@ public final class PrimitiveShape {
     private final int glMode;
     private final Topology topology;
 
-    private static final PrimitiveShape[] CACHE = new PrimitiveShape[9];
+    private static final PrimitiveShape[] CACHE = new PrimitiveShape[10];
     static {
-        for (int m = 0; m <= 8; m++) {
+        for (int m = 0; m <= 9; m++) {
             Topology t = switch (m) {
                 case GL_POINTS -> Topology.POINT_LIST;
                 case GL_LINES, GL_LINE_LOOP -> Topology.LINE_LIST;
                 case GL_LINE_STRIP -> Topology.LINE_STRIP;
-                case GL_TRIANGLES, GL_TRIANGLE_FAN, GL_QUADS, GL_QUAD_STRIP -> Topology.TRIANGLE_LIST;
+                // GL_POLYGON is here for the same reason GL_TRIANGLE_FAN is: a convex polygon of n vertices is the
+                // fan of the same vertices. GL itself documents the result as undefined for a non-convex polygon, so
+                // the two modes make exactly the same assumption. Measured: a mod in the pack draws with mode 9, and
+                // rejecting it failed the whole frame - which then turned into a crash at shutdown.
+                case GL_TRIANGLES, GL_TRIANGLE_FAN, GL_POLYGON, GL_QUADS, GL_QUAD_STRIP -> Topology.TRIANGLE_LIST;
                 case GL_TRIANGLE_STRIP -> Topology.TRIANGLE_STRIP;
                 default -> throw new IllegalStateException();
             };
@@ -86,7 +92,7 @@ public final class PrimitiveShape {
             return CACHE[glMode];
         }
         throw new IllegalArgumentException("no Vulkan topology for GL primitive mode " + glMode
-                + "; the modes this code knows are 0..8");
+                + "; the modes this code knows are 0..9");
     }
 
     /** The GL constant this was built from. */
@@ -107,7 +113,7 @@ public final class PrimitiveShape {
      */
     public boolean needsIndexing() {
         return switch (glMode) {
-            case GL_LINE_LOOP, GL_TRIANGLE_FAN, GL_QUADS, GL_QUAD_STRIP -> true;
+            case GL_LINE_LOOP, GL_TRIANGLE_FAN, GL_POLYGON, GL_QUADS, GL_QUAD_STRIP -> true;
             default -> false;
         };
     }
@@ -118,8 +124,8 @@ public final class PrimitiveShape {
         return switch (glMode) {
             // A loop of n vertices is n segments: the strip plus the closing one.
             case GL_LINE_LOOP -> vertexCount * 2;
-            // A fan of n vertices is n-2 triangles.
-            case GL_TRIANGLE_FAN -> (vertexCount - 2) * 3;
+            // A fan of n vertices is n-2 triangles, and so is a convex polygon of n vertices.
+            case GL_TRIANGLE_FAN, GL_POLYGON -> (vertexCount - 2) * 3;
             case GL_QUADS -> vertexCount / 4 * 6;
             // A strip of n vertices is (n-2)/2 quads, each shared with the next.
             case GL_QUAD_STRIP -> (vertexCount - 2) / 2 * 6;
@@ -171,7 +177,7 @@ public final class PrimitiveShape {
                     dest.put(base + 3);
                 }
             }
-            case GL_TRIANGLE_FAN -> {
+            case GL_TRIANGLE_FAN, GL_POLYGON -> {
                 for (int triangle = 0; triangle < vertexCount - 2; triangle++) {
                     dest.put(0);
                     dest.put(triangle + 1);
@@ -225,7 +231,7 @@ public final class PrimitiveShape {
                     out[at++] = base + 3;
                 }
             }
-            case GL_TRIANGLE_FAN -> {
+            case GL_TRIANGLE_FAN, GL_POLYGON -> {
                 for (int triangle = 0; triangle < vertexCount - 2; triangle++) {
                     out[at++] = 0;
                     out[at++] = triangle + 1;
@@ -277,7 +283,7 @@ public final class PrimitiveShape {
                     put(out, base + 3, index32);
                 }
             }
-            case GL_TRIANGLE_FAN -> {
+            case GL_TRIANGLE_FAN, GL_POLYGON -> {
                 for (int triangle = 0; triangle < vertexCount - 2; triangle++) {
                     put(out, 0, index32);
                     put(out, triangle + 1, index32);
