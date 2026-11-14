@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.state.backend;
 
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraftforge.client.render.vertex.FrameDraws;
 import net.minecraftforge.client.render.vertex.VertexLayout;
 
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,44 @@ class DisplayListVkTest {
         DisplayListVk lists = new DisplayListVk();
         // Returning false rather than throwing is what lets the stream backend fall through to its normal path.
         assertTrue(!lists.capture(VertexLayout.of(DefaultVertexFormats.BLOCK), GL_QUADS, 4, vertices(1)));
+    }
+
+    @Test
+    void replayRecordsTheDrawsAgainWhenAFrameIsCollecting() {
+        // The replay takes its state from the frame at call time, which is GL's rule: the list bakes the vertices
+        // and not the matrix. So this needs a backend that has a frame state at all.
+        net.minecraftforge.client.render.NonGlTestBackend.select();
+        DisplayListVk lists = new DisplayListVk();
+        int id = lists.generate(1);
+        lists.begin(id, GL_COMPILE);
+        lists.capture(VertexLayout.of(DefaultVertexFormats.BLOCK), GL_QUADS, 4, vertices(1));
+        lists.end();
+
+        FrameDraws.beginCollecting();
+        try {
+            lists.call(id);
+            var recorded = FrameDraws.drain();
+            assertEquals(1, recorded.size(), "the replay put one draw into the frame");
+            FrameDraws.Draw draw = (FrameDraws.Draw) recorded.get(0);
+            assertEquals(4, draw.vertexCount(), "with the vertex count the list was compiled with");
+            assertEquals(GL_QUADS, draw.mode());
+            assertEquals(VertexLayout.of(DefaultVertexFormats.BLOCK), draw.layout());
+        } finally {
+            if (FrameDraws.isCollecting()) {
+                FrameDraws.drain();
+            }
+            net.minecraftforge.client.render.NonGlTestBackend.restore();
+        }
+    }
+
+    @Test
+    void aGeneratedButNeverCompiledListIsEmptyRatherThanMissing() {
+        DisplayListVk lists = new DisplayListVk();
+        int id = lists.generate(1);
+
+        // GL treats an uncompiled name as an empty list. Reporting it as "holds 0 draws, needs a frame" would
+        // send whoever reads the log looking for a frame that is not the problem.
+        assertDoesNotThrow(() -> lists.call(id));
     }
 
     @Test

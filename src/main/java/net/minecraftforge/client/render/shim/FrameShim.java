@@ -1,6 +1,8 @@
 package net.minecraftforge.client.render.shim;
 
 import net.minecraftforge.client.render.shader.GlShaders;
+import net.minecraftforge.client.render.state.backend.DisplayListBackend;
+import net.minecraftforge.client.render.state.backend.DisplayLists;
 import net.minecraftforge.client.render.state.backend.Capability;
 import net.minecraftforge.client.render.state.backend.FrameState;
 import net.minecraftforge.client.render.state.backend.FrameStates;
@@ -62,6 +64,20 @@ public final class FrameShim implements ShimGl.Impl {
     /** How many GL calls have been routed to the frame state since the shim was installed. */
     public static long routedCalls() {
         return ROUTED.sum();
+    }
+
+    /**
+     * The display-list backend, or {@code null} when the vanilla GL path applies.
+     *
+     * <p>Not {@link #state()}: recording a list needs no frame - that is the point of it, and it is how the sky and
+     * cloud lists are built during startup. Only the replay needs one, and the backend says so itself.</p>
+     */
+    private static @Nullable DisplayListBackend lists() {
+        DisplayListBackend lists = DisplayLists.forNonGl();
+        if (lists != null) {
+            ROUTED.increment();
+        }
+        return lists;
     }
 
     private static @Nullable FrameState state() {
@@ -669,6 +685,36 @@ public final class FrameShim implements ShimGl.Impl {
             MATRIX_SCRATCH.put(i, (float) view.get(i));
         }
         state.multiply(MATRIX_SCRATCH);
+    }
+
+    @Override
+    public void glNewList(int list, int glMode) {
+        DisplayListBackend lists = lists();
+        if (lists == null) {
+            ShimGl.REAL_GL.glNewList(list, glMode);
+            return;
+        }
+        lists.begin(list, glMode);
+    }
+
+    @Override
+    public void glEndList() {
+        DisplayListBackend lists = lists();
+        if (lists == null) {
+            ShimGl.REAL_GL.glEndList();
+            return;
+        }
+        lists.end();
+    }
+
+    @Override
+    public void glCallList(int list) {
+        DisplayListBackend lists = lists();
+        if (lists == null) {
+            ShimGl.REAL_GL.glCallList(list);
+            return;
+        }
+        lists.call(list);
     }
 
     @Override

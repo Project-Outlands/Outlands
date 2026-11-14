@@ -108,6 +108,13 @@ public final class ImmediateMode {
             return 0;
         }
         ByteBuffer data = ByteBuffer.wrap(vertices, 0, submitted * STRIDE).order(ByteOrder.nativeOrder());
+        // A display list being compiled keeps the bytes instead of drawing them. This has to come first: during
+        // glNewList there is no frame, and the branch below treats that as an error - which is right for a draw
+        // issued out of nowhere and wrong for one being recorded.
+        if (net.minecraftforge.client.render.state.backend.DisplayLists.capture(
+                VertexLayout.of(DefaultVertexFormats.BLOCK), submittedMode, submitted, data)) {
+            return submitted;
+        }
         // Straight into the frame's draw list: it is already in the canonical layout, so no conversion follows.
         // A false return means no frame was collecting, and dropping the draw silently is exactly the failure mode
         // this project keeps rejecting - it looks like missing text with no explanation.

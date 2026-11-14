@@ -138,6 +138,13 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glMultMatrix", "(Ljava/nio/FloatBuffer;)V"),
             entry("glMultMatrixf", "(Ljava/nio/FloatBuffer;)V"),
             entry("glMultMatrix", "(Ljava/nio/DoubleBuffer;)V"),
+            // Display lists. Immersive Intelligence's AMT model renderers compile their quads once and replay them
+            // per frame; the names come from GLAllocation, which the patch already routes, so only the three calls
+            // the mod makes itself need entries. glGenLists/glDeleteLists are deliberately absent: no mod in the
+            // pack calls them directly, and the ones that allocate a list go through GLAllocation.
+            entry("glNewList", "(II)V"),
+            entry("glEndList", "()V"),
+            entry("glCallList", "(I)V"),
             // Fixed-function dash patterns. No pipeline equivalent, but reaching real GL from a window that has no
             // GL context is worse than reporting once, so the entry exists to catch the call.
             entry("glLineStipple", "(IS)V"),

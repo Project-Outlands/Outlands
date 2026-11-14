@@ -134,6 +134,11 @@ final class DisplayListVk implements DisplayListBackend {
             // turned a harmless call the game has always made into a crash on the frame the sky first rendered.
             return;
         }
+        if (draws.isEmpty()) {
+            // A generated name that was never compiled. GL treats it as an empty list, and so must this: the call
+            // would otherwise report "it holds 0 draws" as if something were missing.
+            return;
+        }
         if (!FrameDraws.isCollecting()) {
             int vertices = draws.stream().mapToInt(Draw::vertexCount).sum();
             throw new UnsupportedOperationException(

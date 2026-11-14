@@ -171,6 +171,19 @@ public final class ShimGl {
         void glMultMatrix(java.nio.DoubleBuffer matrix);
 
         /**
+         * {@code glNewList}: starts recording drawing commands into a list.
+         *
+         * @param glMode {@code GL_COMPILE} (4864); {@code GL_COMPILE_AND_EXECUTE} is not supported
+         */
+        void glNewList(int list, int glMode);
+
+        /** {@code glEndList}: stops recording. */
+        void glEndList();
+
+        /** {@code glCallList}: replays a recorded list. */
+        void glCallList(int list);
+
+        /**
          * {@code glLineStipple}: a fixed-function dash pattern for lines.
          *
          * <p>No pipeline equivalent, and not something this backend can imitate: the pattern is applied by the GL
@@ -472,6 +485,21 @@ public final class ShimGl {
         @Override
         public void glMultMatrix(java.nio.DoubleBuffer matrix) {
             GL11.glMultMatrixd(matrix);
+        }
+
+        @Override
+        public void glNewList(int list, int glMode) {
+            GL11.glNewList(list, glMode);
+        }
+
+        @Override
+        public void glEndList() {
+            GL11.glEndList();
+        }
+
+        @Override
+        public void glCallList(int list) {
+            GL11.glCallList(list);
         }
 
         @Override
@@ -782,6 +810,18 @@ public final class ShimGl {
     }
     public static void glMultMatrix(java.nio.DoubleBuffer matrix) {
         impl.glMultMatrix(matrix);
+    }
+
+    public static void glNewList(int list, int glMode) {
+        impl.glNewList(list, glMode);
+    }
+
+    public static void glEndList() {
+        impl.glEndList();
+    }
+
+    public static void glCallList(int list) {
+        impl.glCallList(list);
     }
 
     public static void glLineStipple(int factor, short pattern) {

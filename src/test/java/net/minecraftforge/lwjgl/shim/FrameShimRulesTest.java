@@ -42,9 +42,9 @@ class FrameShimRulesTest {
     void entriesAreTheMeasuredSurface() {
         List<RetargetEntry> entries = FrameShimRules.INSTANCE.entries();
 
-        assertEquals(67, entries.size(), "the measured surface: the pack, Immersive Engineering's queries and"
+        assertEquals(70, entries.size(), "the measured surface: the pack, Immersive Engineering's queries and"
                 + " raster/stencil entries, one boolean query, the ARB shader block, and the state setters the"
-                + " whole instance was scanned for");
+                + " whole instance was scanned for, and the display-list calls");
         Set<String> owners = Set.of(FrameShimRules.GL11, FrameShimRules.ARB_SHADER_OBJECTS);
         for (RetargetEntry entry : entries) {
             assertTrue(owners.contains(entry.fromOwner()), entry.name() + " from " + entry.fromOwner());

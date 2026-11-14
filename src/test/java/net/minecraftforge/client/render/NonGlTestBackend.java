@@ -12,11 +12,11 @@ import net.minecraftforge.client.render.shim.ShimGl;
  * selection and the installed facade leak into every later test in the same JVM, and the next class to ask
  * {@code FrameStates.forNonGl()} gets a frame state it did not install.</p>
  */
-final class NonGlTestBackend {
+public final class NonGlTestBackend {
 
     private NonGlTestBackend() {}
 
-    static void select() {
+    public static void select() {
         RenderBackends.resetForTests();
         RenderBackendSelection.resetForTests();
         GlShaders.reset();
@@ -38,7 +38,7 @@ final class NonGlTestBackend {
         ShimGl.setImpl(new FrameShim());
     }
 
-    static void restore() {
+    public static void restore() {
         ShimGl.setImpl(ShimGl.REAL_GL);
         GlShaders.reset();
         RenderBackends.resetForTests();
