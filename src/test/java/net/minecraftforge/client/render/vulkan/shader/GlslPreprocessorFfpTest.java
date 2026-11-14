@@ -120,7 +120,14 @@ class GlslPreprocessorFfpTest {
         String rewritten = GlslPreprocessor.forVulkan(JM_VERT, GlslCompiler.Stage.VERTEX);
 
         assertTrue(rewritten.contains("#define ftransform() (outlandsMvp * outlandsVertex)"), rewritten);
-        assertTrue(rewritten.contains("#define gl_MultiTexCoord0 outlandsUv"), rewritten);
+        // The multi-texture coordinates resolve to the varyings, not to the attributes: the lightmap attribute is a
+        // 16-bit unorm carrying a 0..240 coordinate, and GL hands a shader the raw number. Sampling the normalised
+        // one put every such lookup in the lightmap's darkest texel, which is how a magazine drawn with one of
+        // Immersive Intelligence's shaders came out solid black.
+        assertTrue(rewritten.contains("#define gl_MultiTexCoord0 outlandsTexCoord[0]"), rewritten);
+        assertTrue(rewritten.contains("#define gl_MultiTexCoord1 outlandsTexCoord[1]"), rewritten);
+        assertTrue(rewritten.contains("outlandsTexCoord[1] = vec4(outlandsLightmap * 65535.0, 0.0, 1.0);"),
+                "the raw lightmap coordinate, not the normalised attribute: " + rewritten);
         assertTrue(rewritten.contains("#define gl_Color outlandsVertexColor"), rewritten);
         shader(GlShaders.VERTEX_SHADER, JM_VERT);
     }

@@ -230,8 +230,12 @@ public final class GlslPreprocessor {
                 inject.add("layout(push_constant) uniform OutlandsFfpMatrices { mat4 outlandsMvp; };");
                 inject.add("#define gl_Vertex outlandsVertex");
                 inject.add("#define gl_Color outlandsVertexColor");
-                inject.add("#define gl_MultiTexCoord0 outlandsUv");
-                inject.add("#define gl_MultiTexCoord1 outlandsLightmap");
+                // Both multi-texture coordinates are the *interpolated varyings*, not the attributes: the lightmap
+                // attribute is a 16-bit unorm carrying a 0..240 coordinate, and GL hands a shader the raw number.
+                // Sampling the normalised one instead put every such lookup in the lightmap's darkest texel - which
+                // is how a magazine drawn with one of Immersive Intelligence's shaders came out solid black.
+                inject.add("#define gl_MultiTexCoord0 outlandsTexCoord[0]");
+                inject.add("#define gl_MultiTexCoord1 outlandsTexCoord[1]");
                 inject.add("#define gl_ModelViewProjectionMatrix outlandsMvp");
                 // GLSL 1.20's own shorthand for the same thing, and journeymap's vertex shader uses it.
                 inject.add("#define ftransform() (outlandsMvp * outlandsVertex)");
@@ -258,7 +262,7 @@ public final class GlslPreprocessor {
                     lines.add("");
                     lines.add("void main() {");
                     lines.add("    outlandsTexCoord[0] = vec4(outlandsUv, 0.0, 1.0);");
-                    lines.add("    outlandsTexCoord[1] = vec4(outlandsLightmap, 0.0, 1.0);");
+                    lines.add("    outlandsTexCoord[1] = vec4(outlandsLightmap * 65535.0, 0.0, 1.0);");
                     lines.add("    outlandsFfpColor = outlandsVertexColor;");
                     lines.add("    outlandsMain();");
                     lines.add("}");

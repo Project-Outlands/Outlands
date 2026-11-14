@@ -868,7 +868,9 @@ public final class GlShaders {
             void main() {
                 gl_Position = outlandsMvp * outlandsVertex;
                 outlandsTexCoord[0] = vec4(outlandsUv, 0.0, 1.0);
-                outlandsTexCoord[1] = vec4(outlandsLightmap, 0.0, 1.0);
+                // 65535: the lightmap attribute is a 16-bit unorm holding a 0..240 coordinate, and gl_TexCoord[1] in
+                // GL is the raw number - a shader samples it with the sampler's wrap mode doing the clamping.
+                outlandsTexCoord[1] = vec4(outlandsLightmap * 65535.0, 0.0, 1.0);
                 outlandsFfpColor = outlandsVertexColor;
             }
             """;
