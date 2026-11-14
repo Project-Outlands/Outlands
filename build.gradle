@@ -115,7 +115,7 @@ tasks.register('setup') {
     group = 'setup'
     description = 'Prepares the patched Minecraft sources and the loader workspace.'
     // Lazily resolved so we do not need evaluationDependsOnChildren
-    dependsOn ':mcpbase:applyPatches'
+    dependsOn ':mcpbase:applyPatches', ':mcpbase:extractBase'
 }
 
 subprojects {

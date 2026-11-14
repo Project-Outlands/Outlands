@@ -10,6 +10,10 @@ build/
 version.txt
 /.serena/
 
+# generated source trees: these live in the project directory (not build/) so they can be read and diffed
+/projects/mcpbase/minecraft/
+/projects/mcpbase/patched/
+
 !/.idea/icon.svg
 
 /tools/**/__pycache__/

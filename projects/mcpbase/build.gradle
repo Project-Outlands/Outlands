@@ -14,6 +14,10 @@ plugins {
     id 'top.outlands.forgedev' version '7.0.0-beta.59-cr4'
 }
 
+// Gives this project source sets and the lifecycle tasks without any compilation. The only sources they describe
+// are the generated trees, see the source set at the bottom of this file.
+apply plugin: 'java-base'
+
 import top.outlands.gradle.helpers.ProjectConstants
 
 repositories {
@@ -46,13 +50,17 @@ forgedev {
     }
 
     // The patch base. Same files as the old ForgeGradle 6 patcher used, but now every step lives in this project.
+    //
+    // 'patched' is generated into the project directory instead of build/: it is the tree the loader is compiled
+    // against and the one patches are written against, so it has to be readable, diffable against 'minecraft' and
+    // attachable in the IDE. 'clean' removes both trees explicitly (see below).
     patches {
         base = mcpBase
         patches.set(file("$rootDir/patches/minecraft"))
-        patched.set(layout.buildDirectory.dir('patched'))
+        patched.set(layout.projectDirectory.dir('patched'))
     }
     // The patch set is maintained in MCP names and applied to the MCP-named base (that is what ForgeDev's patcher
-    // consumes); the SRG-named copies that ship with userdev are produced separately.
+    // consumes). The result is the tree ':outlands' compiles and the one 'devSourcesJar' ships.
     // Prefixes are kept at before/after and --auto-header is off so the files stay `git apply`/`patch -p1` compatible:
     // ForgeDev defaults to '@@ -a,b +_,c @@' headers, which git's patch parser rejects.
     patches.apply {
@@ -74,10 +82,26 @@ tasks.register('mcpInfo') {
     def base = forgedev.mcpBase
     def patches = forgedev.patches
     doLast {
-        println 'srg      : ' + base.unnamedSources.get()
-        println 'named    : ' + base.namedSources.get()
+        println 'srg jar  : ' + base.unnamedSources.get()
+        println 'mcp jar  : ' + base.namedSources.get()
+        println 'base tree: ' + project.file('minecraft')
         println 'patched  : ' + patches.patched.get().asFile
     }
+}
+
+// The unpatched, MCP named tree, materialized next to the patched one so the two can be diffed. 'applyPatches'
+// reads the jar directly; this task only exists for reading (and for 'git diff --no-index' style comparisons).
+tasks.register('extractBase', Sync) {
+    group = 'build'
+    description = 'Extracts the unpatched Minecraft sources next to the patched tree'
+    from(forgedev.mcpBase.namedSources.map { zipTree(it) })
+    into(layout.projectDirectory.dir('minecraft'))
+}
+
+// The two trees live in the project directory, so they have to be deleted explicitly. 'clean' also takes build/ with
+// it, which is where ForgeDev keeps the decompile output - the price of starting over.
+tasks.named('clean') {
+    delete layout.projectDirectory.dir('minecraft'), layout.projectDirectory.dir('patched')
 }
 
 // Consumable view of the Minecraft libraries, so other projects can put them on their compile classpath
@@ -90,43 +114,22 @@ configurations {
 }
 
 // The patch set is maintained in MCP names (it predates this build and lives in patches/minecraft that way).
-// A SRG-named copy for distribution is produced by the userdev task instead, see 'srgPatches' below.
+// The patched tree that ships with userdev is produced from the same sources, see 'devSourcesJar' in :outlands.
 
-// region mcp rename for the patched tree ------------------------------------
-// The patch set is written in mcp names, but the mcp_config pipeline produces srg sources ('stable' mappings are
-// srg names). Renaming srg -> mcp on sources is exactly what the mavenizer does for the vanilla tree, so the same
-// code path is reused here through its small CLI instead of any heuristic.
-configurations {
-    renameTool {
-        canBeConsumed = false
-        canBeResolved = true
+// Both source trees are generated, but they exist to be read: 'patched' is a source directory of ':outlands' (that
+// is what gets compiled), so the IDE already indexes it. The base tree belongs to no compilation at all, and a
+// plain directory is not a source root - no indexing, no resolution, no navigation in the IDE.
+//
+// A source set fixes exactly that and nothing else. 'java-base' also gives it a 'compileMinecraftJava' task and
+// ':mcpbase:classes' would run it; it is switched off on purpose - the tree is compiled by ':outlands' (together
+// with the loader, which the vanilla sources do not need but the patched tree does), so compiling it a second time
+// here would only cost time. The classpath is the mcp config's own libraries, which is what those sources resolve
+// against, both in the IDE and if the task is ever re-enabled.
+sourceSets {
+    minecraft {
+        java.srcDirs = [layout.projectDirectory.dir('minecraft')]
+        compileClasspath += configurations.mcpbaseLibraries
     }
-}
-dependencies {
-    // published to maven.outlands.top; the 'cr' builds are local snapshots, only the latest one is published
-    renameTool 'top.outlands:minecraft-mavenizer:0.5.22-cr6'
 }
 
-tasks.register('renamePatchedSources', JavaExec) {
-    def patched = tasks.named('applyPatches').flatMap { it.outputDirectory }
-    def mappings = forgedev.mcpBase.mappingZip
-    inputs.files(patched, mappings)
-    def output = layout.buildDirectory.file('patched-mcp/minecraft-sources.jar')
-    outputs.file(output)
-    dependsOn 'applyPatches'
-    classpath = configurations.renameTool
-    mainClass = 'net.minecraftforge.mcmaven.impl.tasks.RenameSourcesCli'
-    def sourceDir = layout.buildDirectory.dir('patched-mcp/src')
-    doLast {
-        project.copy { from project.zipTree(output.get().asFile); into sourceDir }
-    }
-    doFirst {
-        output.get().asFile.parentFile.mkdirs()
-        // the patched tree is a directory, the cli reads a jar
-        def jar = layout.buildDirectory.file('patched-mcp/minecraft-sources-srg.jar').get().asFile
-        jar.parentFile.mkdirs()
-        project.ant.zip(destfile: jar.absolutePath, basedir: patched.get().asFile.absolutePath)
-        args = ['--mappings', mappings.get().absolutePath, '--in', jar.absolutePath, '--out', output.get().asFile.absolutePath]
-    }
-}
-// endregion
+tasks.named('compileMinecraftJava') { enabled = false }
