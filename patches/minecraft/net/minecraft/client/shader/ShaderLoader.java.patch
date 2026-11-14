@@ -1,6 +1,7 @@
 --- before/net/minecraft/client/shader/ShaderLoader.java
 +++ after/net/minecraft/client/shader/ShaderLoader.java
-@@ -72,3 +72,8 @@
+@@ -71,6 +71,12 @@
+                 ((Buffer)bytebuffer).position(0);
                  int i = OpenGlHelper.glCreateShader(type.getShaderMode());
                  OpenGlHelper.glShaderSource(i, bytebuffer);
 +                // A module shipped beside the source, if any: the resource system reports which pack each one
@@ -10,3 +11,5 @@
 +                    java.nio.charset.StandardCharsets.UTF_8.decode(bytebuffer.duplicate()).toString()
 +                );
                  OpenGlHelper.glCompileShader(i);
+ 
+                 if (OpenGlHelper.glGetShaderi(i, OpenGlHelper.GL_COMPILE_STATUS) == 0)

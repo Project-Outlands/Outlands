@@ -1,6 +1,8 @@
 package net.minecraftforge.client.render.shim;
 
 import net.minecraftforge.client.render.shader.GlShaders;
+import net.minecraftforge.client.render.state.backend.BufferObjects;
+import net.minecraftforge.client.render.state.backend.ClientArrays;
 import net.minecraftforge.client.render.state.backend.DisplayListBackend;
 import net.minecraftforge.client.render.state.backend.DisplayLists;
 import net.minecraftforge.client.render.state.backend.Capability;
@@ -72,6 +74,30 @@ public final class FrameShim implements ShimGl.Impl {
      * <p>Not {@link #state()}: recording a list needs no frame - that is the point of it, and it is how the sky and
      * cloud lists are built during startup. Only the replay needs one, and the backend says so itself.</p>
      */
+    /**
+     * The client-array state, or {@code null} when the vanilla GL path applies.
+     *
+     * <p>Vertex input is not frame state: a mod declares its arrays and draws in the same breath, and the arrays
+     * outlive no frame. It is kept apart from {@link #state()} for the same reason {@code GlStateManager} treats the
+     * declarations as a separate concern.</p>
+     */
+    private static @Nullable ClientArrays arrays() {
+        ClientArrays arrays = ClientArrays.forNonGl();
+        if (arrays != null) {
+            ROUTED.increment();
+        }
+        return arrays;
+    }
+
+    /** The buffer-object store, or {@code null} when the vanilla GL path applies. */
+    private static @Nullable BufferObjects buffers() {
+        BufferObjects buffers = BufferObjects.forNonGl();
+        if (buffers != null) {
+            ROUTED.increment();
+        }
+        return buffers;
+    }
+
     private static @Nullable DisplayListBackend lists() {
         DisplayListBackend lists = DisplayLists.forNonGl();
         if (lists != null) {
@@ -687,6 +713,134 @@ public final class FrameShim implements ShimGl.Impl {
         state.multiply(MATRIX_SCRATCH);
     }
 
+
+    @Override
+    public void glEnableClientState(int array) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glEnableClientState(array);
+            return;
+        }
+        arrays.enable(array);
+    }
+    @Override
+    public void glDisableClientState(int array) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glDisableClientState(array);
+            return;
+        }
+        arrays.disable(array);
+    }
+    @Override
+    public void glVertexPointer(int size, int type, int stride, long offset) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glVertexPointer(size, type, stride, offset);
+            return;
+        }
+        arrays.vertexPointer(size, type, stride, offset);
+    }
+    @Override
+    public void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glVertexPointer(size, stride, buffer);
+            return;
+        }
+        arrays.vertexPointer(size, stride, buffer);
+    }
+    @Override
+    public void glColorPointer(int size, int type, int stride, long offset) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glColorPointer(size, type, stride, offset);
+            return;
+        }
+        arrays.colorPointer(size, type, stride, offset);
+    }
+    @Override
+    public void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glColorPointer(size, normalized, stride, buffer);
+            return;
+        }
+        arrays.colorPointer(size, normalized, stride, buffer);
+    }
+    @Override
+    public void glTexCoordPointer(int size, int type, int stride, long offset) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glTexCoordPointer(size, type, stride, offset);
+            return;
+        }
+        arrays.texCoordPointer(size, type, stride, offset);
+    }
+    @Override
+    public void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glTexCoordPointer(size, stride, buffer);
+            return;
+        }
+        arrays.texCoordPointer(size, stride, buffer);
+    }
+    @Override
+    public void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glTexCoordPointer(size, stride, buffer);
+            return;
+        }
+        arrays.texCoordPointer(size, stride, buffer);
+    }
+    @Override
+    public void glNormalPointer(int type, int stride, long offset) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glNormalPointer(type, stride, offset);
+            return;
+        }
+        arrays.normalPointer(type, stride, offset);
+    }
+    @Override
+    public void glNormalPointer(int type, java.nio.ByteBuffer buffer) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glNormalPointer(type, buffer);
+            return;
+        }
+        // No stride in this form: GL's two-argument normal pointer reads a tightly packed array.
+        arrays.normalPointer(type, 0, buffer);
+    }
+    @Override
+    public void glDrawArrays(int mode, int first, int count) {
+        ClientArrays arrays = arrays();
+        if (arrays == null) {
+            ShimGl.REAL_GL.glDrawArrays(mode, first, count);
+            return;
+        }
+        arrays.drawArrays(mode, first, count);
+    }
+    @Override
+    public void glBindBufferARB(int target, int buffer) {
+        BufferObjects buffers = buffers();
+        if (buffers == null) {
+            ShimGl.REAL_GL.glBindBufferARB(target, buffer);
+            return;
+        }
+        buffers.bind(target, buffer);
+    }
+    @Override
+    public void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage) {
+        BufferObjects buffers = buffers();
+        if (buffers == null) {
+            ShimGl.REAL_GL.glBufferDataARB(target, data, usage);
+            return;
+        }
+        buffers.data(target, data);
+    }
     @Override
     public void glNewList(int list, int glMode) {
         DisplayListBackend lists = lists();

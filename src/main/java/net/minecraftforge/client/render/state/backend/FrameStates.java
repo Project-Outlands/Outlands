@@ -9,6 +9,7 @@ public final class FrameStates {
 
     private static final FrameStateVk VK = new FrameStateVk();
     private static final ImmediateMode IMMEDIATE = new ImmediateMode();
+    private static final ClientArrays CLIENT_ARRAYS = new ClientArrays();
 
     private FrameStates() {}
 
@@ -390,6 +391,11 @@ public final class FrameStates {
      */
     public static ImmediateMode immediate() {
         return IMMEDIATE;
+    }
+
+    /** The fixed-function client-array state, which {@code glDrawArrays} assembles from. */
+    public static ClientArrays clientArrays() {
+        return CLIENT_ARRAYS;
     }
 
     /** The Vulkan instance, for diagnostics and tests. {@code null} when the GL path is active. */

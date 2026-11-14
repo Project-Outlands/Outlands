@@ -419,15 +419,17 @@
      }
  
      public static boolean useVbo()
-@@ -834,6 +860,7 @@
+@@ -834,6 +860,9 @@
  
      public static void setClientActiveTexture(int texture)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.clientActiveTexture(texture); return; }
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -846,6 +873,12 @@
+@@ -846,6 +875,12 @@
  
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
@@ -440,7 +442,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
-@@ -854,10 +887,17 @@
+@@ -854,10 +889,17 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -458,7 +460,7 @@
          if (openGL14)
          {
              if (extBlendFuncSeparate)
-@@ -891,7 +931,9 @@
+@@ -891,7 +933,9 @@
          GlStateManager.depthMask(false);
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -469,7 +471,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
-@@ -900,7 +942,7 @@
+@@ -900,7 +944,7 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(0, 0, 0, 255).endVertex();
          tessellator.draw();
@@ -478,7 +480,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
-@@ -909,66 +951,35 @@
+@@ -909,66 +953,35 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(127, 127, 255, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(127, 127, 255, 255).endVertex();
          tessellator.draw();

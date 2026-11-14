@@ -54,6 +54,15 @@ public final class FrameShimRules implements ShimRewriteRules {
      */
     public static final String ARB_SHADER_OBJECTS = "org/lwjgl/opengl/ARBShaderObjects";
 
+    /**
+     * The buffer-object extension's class, which LWJGL 3 no longer ships.
+     *
+     * <p>Its calls are aliased to {@code GL15} by the rewrite table, but the shim runs before that table, so a call
+     * site still says {@code ARBBufferObject} when it gets here. The facade's real-GL body is where the alias
+     * happens instead.</p>
+     */
+    public static final String ARB_BUFFER_OBJECT = "org/lwjgl/opengl/ARBBufferObject";
+
     /** The facade every entry retargets to. */
     public static final String FACADE = "net/minecraftforge/client/render/shim/ShimGl";
 
@@ -138,6 +147,26 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glMultMatrix", "(Ljava/nio/FloatBuffer;)V"),
             entry("glMultMatrixf", "(Ljava/nio/FloatBuffer;)V"),
             entry("glMultMatrix", "(Ljava/nio/DoubleBuffer;)V"),
+            // Fixed-function client arrays. Immersive Intelligence's TmtTessellator points four arrays at one
+            // 40-byte-stride buffer, enables them, draws and disables them again - per chunk of 64k vertices, every
+            // frame. The descriptors are LWJGL 2's, which is why the two-int overloads appear next to the explicit
+            // ones: glVertexPointer(3, 40, floatBuffer) leaves the type to the buffer, and the facade infers it.
+            entry("glEnableClientState", "(I)V"),
+            entry("glDisableClientState", "(I)V"),
+            entry("glVertexPointer", "(IIIJ)V"),
+            entry("glVertexPointer", "(IILjava/nio/FloatBuffer;)V"),
+            entry("glColorPointer", "(IIIJ)V"),
+            entry("glColorPointer", "(IZILjava/nio/ByteBuffer;)V"),
+            entry("glTexCoordPointer", "(IIIJ)V"),
+            entry("glTexCoordPointer", "(IILjava/nio/FloatBuffer;)V"),
+            entry("glTexCoordPointer", "(IILjava/nio/ShortBuffer;)V"),
+            entry("glNormalPointer", "(IIJ)V"),
+            entry("glNormalPointer", "(ILjava/nio/ByteBuffer;)V"),
+            entry("glDrawArrays", "(III)V"),
+            // The buffer objects those offsets point into. In LWJGL 3 the ARB class is gone and these are GL15, but
+            // the mods' call sites still name ARB, so the retarget has to name it too.
+            arbBuffer("glBindBufferARB", "(II)V"),
+            arbBuffer("glBufferDataARB", "(ILjava/nio/ByteBuffer;I)V"),
             // Display lists. Immersive Intelligence's AMT model renderers compile their quads once and replay them
             // per frame; the names come from GLAllocation, which the patch already routes, so only the three calls
             // the mod makes itself need entries. glGenLists/glDeleteLists are deliberately absent: no mod in the
@@ -209,6 +238,10 @@ public final class FrameShimRules implements ShimRewriteRules {
 
     private static RetargetEntry arb(String name, String desc) {
         return new RetargetEntry(ARB_SHADER_OBJECTS, name, desc, FACADE);
+    }
+
+    private static RetargetEntry arbBuffer(String name, String desc) {
+        return new RetargetEntry(ARB_BUFFER_OBJECT, name, desc, FACADE);
     }
 
     @Override

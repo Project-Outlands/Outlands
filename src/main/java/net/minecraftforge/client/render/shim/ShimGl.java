@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.shim;
 
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL15;
 
 /**
  * The facade that {@link net.minecraftforge.lwjgl.shim.RetargetEntry} points GL call sites at.
@@ -38,6 +39,13 @@ import org.lwjgl.opengl.GL11;
  * second facade would mean a second implementation of the same object model.</p>
  */
 public final class ShimGl {
+
+    /** {@code GL_FLOAT}, {@code GL_BYTE}, {@code GL_UNSIGNED_BYTE} and {@code GL_SHORT}: what the two-int client-array
+     * overloads imply about their buffer, and what the real-GL bodies have to put back. */
+    private static final int GL_BYTE = 5120;
+    private static final int GL_UNSIGNED_BYTE = 5121;
+    private static final int GL_SHORT = 5122;
+    private static final int GL_FLOAT = 5126;
 
     /** One implementation of the facade. */
     public interface Impl {
@@ -170,6 +178,40 @@ public final class ShimGl {
          */
         void glMultMatrix(java.nio.DoubleBuffer matrix);
 
+
+        /** {@code glEnableClientState} (LWJGL 2 shape: {@code int array}). */
+        void glEnableClientState(int array);
+        /** {@code glDisableClientState} (LWJGL 2 shape: {@code int array}). */
+        void glDisableClientState(int array);
+        /** {@code glVertexPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
+        void glVertexPointer(int size, int type, int stride, long offset);
+        /** {@code glVertexPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.FloatBuffer buffer}). */
+        void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer);
+        /** {@code glColorPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
+        void glColorPointer(int size, int type, int stride, long offset);
+        /** {@code glColorPointer} (LWJGL 2 shape: {@code int size, boolean normalized, int stride, java.nio.ByteBuffer buffer}). */
+        void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer);
+        /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
+        void glTexCoordPointer(int size, int type, int stride, long offset);
+        /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.FloatBuffer buffer}). */
+        void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer);
+        /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.ShortBuffer buffer}). */
+        void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer);
+        /** {@code glNormalPointer} (LWJGL 2 shape: {@code int type, int stride, long offset}). */
+        void glNormalPointer(int type, int stride, long offset);
+        /**
+         * {@code glNormalPointer} with a client-memory buffer.
+         *
+         * <p>LWJGL 2's two-argument form has no stride - the array is tightly packed - which is why this is not an
+         * overload of the offset form above.</p>
+         */
+        void glNormalPointer(int type, java.nio.ByteBuffer buffer);
+        /** {@code glDrawArrays} (LWJGL 2 shape: {@code int mode, int first, int count}). */
+        void glDrawArrays(int mode, int first, int count);
+        /** {@code glBindBufferARB} (LWJGL 2 shape: {@code int target, int buffer}). */
+        void glBindBufferARB(int target, int buffer);
+        /** {@code glBufferDataARB} (LWJGL 2 shape: {@code int target, java.nio.ByteBuffer data, int usage}). */
+        void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage);
         /**
          * {@code glNewList}: starts recording drawing commands into a list.
          *
@@ -487,6 +529,63 @@ public final class ShimGl {
             GL11.glMultMatrixd(matrix);
         }
 
+
+        @Override
+        public void glEnableClientState(int array) {
+            GL11.glEnableClientState(array);
+        }
+        @Override
+        public void glDisableClientState(int array) {
+            GL11.glDisableClientState(array);
+        }
+        @Override
+        public void glVertexPointer(int size, int type, int stride, long offset) {
+            GL11.glVertexPointer(size, type, stride, offset);
+        }
+        @Override
+        public void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+            GL11.glVertexPointer(size, GL_FLOAT, stride, buffer);
+        }
+        @Override
+        public void glColorPointer(int size, int type, int stride, long offset) {
+            GL11.glColorPointer(size, type, stride, offset);
+        }
+        @Override
+        public void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer) {
+            GL11.glColorPointer(size, normalized ? GL_UNSIGNED_BYTE : GL_BYTE, stride, buffer);
+        }
+        @Override
+        public void glTexCoordPointer(int size, int type, int stride, long offset) {
+            GL11.glTexCoordPointer(size, type, stride, offset);
+        }
+        @Override
+        public void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+            GL11.glTexCoordPointer(size, GL_FLOAT, stride, buffer);
+        }
+        @Override
+        public void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer) {
+            GL11.glTexCoordPointer(size, GL_SHORT, stride, buffer);
+        }
+        @Override
+        public void glNormalPointer(int type, int stride, long offset) {
+            GL11.glNormalPointer(type, stride, offset);
+        }
+        @Override
+        public void glNormalPointer(int type, java.nio.ByteBuffer buffer) {
+            GL11.glNormalPointer(type, 0, buffer);
+        }
+        @Override
+        public void glDrawArrays(int mode, int first, int count) {
+            GL11.glDrawArrays(mode, first, count);
+        }
+        @Override
+        public void glBindBufferARB(int target, int buffer) {
+            GL15.glBindBuffer(target, buffer);
+        }
+        @Override
+        public void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage) {
+            GL15.glBufferData(target, data, usage);
+        }
         @Override
         public void glNewList(int list, int glMode) {
             GL11.glNewList(list, glMode);
@@ -812,6 +911,49 @@ public final class ShimGl {
         impl.glMultMatrix(matrix);
     }
 
+
+    public static void glEnableClientState(int array) {
+        impl.glEnableClientState(array);
+    }
+    public static void glDisableClientState(int array) {
+        impl.glDisableClientState(array);
+    }
+    public static void glVertexPointer(int size, int type, int stride, long offset) {
+        impl.glVertexPointer(size, type, stride, offset);
+    }
+    public static void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+        impl.glVertexPointer(size, stride, buffer);
+    }
+    public static void glColorPointer(int size, int type, int stride, long offset) {
+        impl.glColorPointer(size, type, stride, offset);
+    }
+    public static void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer) {
+        impl.glColorPointer(size, normalized, stride, buffer);
+    }
+    public static void glTexCoordPointer(int size, int type, int stride, long offset) {
+        impl.glTexCoordPointer(size, type, stride, offset);
+    }
+    public static void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer) {
+        impl.glTexCoordPointer(size, stride, buffer);
+    }
+    public static void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer) {
+        impl.glTexCoordPointer(size, stride, buffer);
+    }
+    public static void glNormalPointer(int type, int stride, long offset) {
+        impl.glNormalPointer(type, stride, offset);
+    }
+    public static void glNormalPointer(int type, java.nio.ByteBuffer buffer) {
+        impl.glNormalPointer(type, buffer);
+    }
+    public static void glDrawArrays(int mode, int first, int count) {
+        impl.glDrawArrays(mode, first, count);
+    }
+    public static void glBindBufferARB(int target, int buffer) {
+        impl.glBindBufferARB(target, buffer);
+    }
+    public static void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage) {
+        impl.glBufferDataARB(target, data, usage);
+    }
     public static void glNewList(int list, int glMode) {
         impl.glNewList(list, glMode);
     }

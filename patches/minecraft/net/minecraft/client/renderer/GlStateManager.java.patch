@@ -501,59 +501,77 @@
          GL11.glVertex3f(x, y, z);
      }
  
-@@ -744,121 +867,205 @@
+@@ -744,121 +867,223 @@
  
      public static void glNormalPointer(int type, int stride, ByteBuffer buffer)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.normalPointer(type, stride, buffer); return; }
          GL11.glNormalPointer(type, stride, buffer);
      }
  
      public static void glTexCoordPointer(int size, int type, int stride, int buffer_offset)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.texCoordPointer(size, type, stride, buffer_offset); return; }
          GL11.glTexCoordPointer(size, type, stride, buffer_offset);
      }
  
      public static void glTexCoordPointer(int size, int type, int stride, ByteBuffer buffer)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.texCoordPointer(size, type, stride, buffer); return; }
          GL11.glTexCoordPointer(size, type, stride, buffer);
      }
  
      public static void glVertexPointer(int size, int type, int stride, int buffer_offset)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.vertexPointer(size, type, stride, buffer_offset); return; }
          GL11.glVertexPointer(size, type, stride, buffer_offset);
      }
  
      public static void glVertexPointer(int size, int type, int stride, ByteBuffer buffer)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.vertexPointer(size, type, stride, buffer); return; }
          GL11.glVertexPointer(size, type, stride, buffer);
      }
  
      public static void glColorPointer(int size, int type, int stride, int buffer_offset)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.colorPointer(size, type, stride, buffer_offset); return; }
          GL11.glColorPointer(size, type, stride, buffer_offset);
      }
  
      public static void glColorPointer(int size, int type, int stride, ByteBuffer buffer)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.colorPointer(size, type, stride, buffer); return; }
          GL11.glColorPointer(size, type, stride, buffer);
      }
  
      public static void glDisableClientState(int cap)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.disable(cap); return; }
          GL11.glDisableClientState(cap);
      }
  
      public static void glEnableClientState(int cap)
      {
-+        if (net.minecraftforge.client.render.state.backend.FrameStates.ignoresVertexInputState()) { return; }
++        net.minecraftforge.client.render.state.backend.ClientArrays clientArrays =
++                net.minecraftforge.client.render.state.backend.ClientArrays.forNonGl();
++        if (clientArrays != null) { clientArrays.enable(cap); return; }
          GL11.glEnableClientState(cap);
      }
  
@@ -708,7 +726,7 @@
          return GL11.glGetInteger(parameterName);
      }
  
-@@ -956,6 +1163,12 @@
+@@ -956,6 +1181,12 @@
                  {
                      this.currentState = state;
  

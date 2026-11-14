@@ -9,7 +9,8 @@
  
      public GuiMainMenu()
      {
-@@ -121,8 +123,14 @@
+@@ -120,7 +122,13 @@
+         this.minceraftRoll = RANDOM.nextFloat();
          this.openGLWarning1 = "";
  
 -        if (!GLContext.getCapabilities().OpenGL20 && !OpenGlHelper.areShadersSupported())
@@ -23,8 +24,6 @@
          {
              this.openGLWarning1 = I18n.format("title.oldgl1");
              this.openGLWarning2 = I18n.format("title.oldgl2");
-             this.openGLWarningLink = "https://help.mojang.com/customer/portal/articles/325948?ref=game";
-         }
 @@ -130,19 +138,9 @@
  
      private boolean areRealmsNotificationsEnabled()
