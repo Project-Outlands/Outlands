@@ -56,6 +56,7 @@ public final class DrawState {
     private float fogTanX;
     private float fogTanY;
     private float pointSize = 1.0F;
+    private float lineWidth = 1.0F;
     private boolean stencilTest;
     private int stencilComparison = 519;
     private int stencilReference;
@@ -200,6 +201,7 @@ public final class DrawState {
         this.fogTanX = other.fogTanX;
         this.fogTanY = other.fogTanY;
         this.pointSize = other.pointSize;
+        this.lineWidth = other.lineWidth;
         this.stencilTest = other.stencilTest;
         this.stencilComparison = other.stencilComparison;
         this.stencilReference = other.stencilReference;
@@ -318,6 +320,7 @@ public final class DrawState {
             this.fogTanY = 0.0f;
         }
         this.pointSize = state.pointSize();
+        this.lineWidth = state.lineWidth();
         this.stencilTest = state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.STENCIL_TEST);
         if (this.stencilTest) {
             this.stencilComparison = state.stencilComparison();
@@ -443,6 +446,9 @@ public final class DrawState {
 
     /** glPointSize in effect at the draw. */
     public float pointSize() { return pointSize; }
+
+    /** glLineWidth in effect at the draw, in pixels. */
+    public float lineWidth() { return lineWidth; }
 
     /** Whether the stencil test was enabled. */
     public boolean stencilTest() { return stencilTest; }

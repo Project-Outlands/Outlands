@@ -171,6 +171,33 @@ final class VulkanContext {
      * 64 on many, 256 on others. Getting it from the device rather than assuming 256 costs one query and removes the
      * class of failure where it works on the machine it was written on.</p>
      */
+    /**
+     * A line width this device will actually rasterise.
+     *
+     * <p>GL clamps too - {@code glLineWidth} is specified to clamp into the implementation's range - so this is the
+     * same rule, not a deviation. Two things make it necessary here: the range is a device limit
+     * ({@code lineWidthRange}), and when {@code wideLines} is not enabled the only legal value is 1.0, which the spec
+     * states as a validation rule rather than clamping for us.</p>
+     */
+    float clampLineWidth(float width) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            vkGetPhysicalDeviceProperties(physicalDevice, properties);
+            VkPhysicalDeviceLimits limits = properties.limits();
+            return clampLineWidth(width, limits.lineWidthRange(0), limits.lineWidthRange(1));
+        }
+    }
+
+    /**
+     * The clamp itself, apart from the query so it can be stated without a device.
+     *
+     * <p>Without {@code wideLines} the range is 1.0 to 1.0, and that is the whole of the degraded behaviour: the same
+     * arithmetic answers both cases.</p>
+     */
+    static float clampLineWidth(float width, float min, float max) {
+        return Math.max(min, Math.min(max, width));
+    }
+
     int minUniformBufferOffsetAlignment() {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
@@ -470,10 +497,16 @@ final class VulkanContext {
 
         boolean mdi = supported10.multiDrawIndirect();
         boolean firstInstance = supported10.drawIndirectFirstInstance();
+        // GL's glLineWidth is real state with a real effect (Immersive Engineering's Tesla coil and its fractal
+        // particles draw 4- and 8-pixel lines). Vulkan only honours a width other than 1.0 when the device enables
+        // wideLines, so it is asked for rather than assumed - and when it is absent the width is clamped to 1.0
+        // instead of being passed to vkCmdSetLineWidth, which the spec forbids.
+        boolean wideLines = supported10.wideLines();
 
         VkPhysicalDeviceFeatures enable10 = VkPhysicalDeviceFeatures.calloc(stack)
                 .multiDrawIndirect(mdi)
-                .drawIndirectFirstInstance(firstInstance);
+                .drawIndirectFirstInstance(firstInstance)
+                .wideLines(wideLines);
 
         // Enable only what the device reports. Asking for an unsupported feature fails device creation, and the
         // interesting case (a non-conformant implementation such as MoltenVK) should degrade with a named reason.
@@ -501,6 +534,10 @@ final class VulkanContext {
 
         reportMissing("multiDrawIndirect", mdi);
         reportMissing("drawIndirectFirstInstance", firstInstance);
+        if (!wideLines) {
+            LOGGER.info("wideLines is not supported: glLineWidth is clamped to 1.0, which is the only width this"
+                    + " device rasterises");
+        }
         reportMissing("drawIndirectCount", supported12.drawIndirectCount());
         reportMissing("bufferDeviceAddress", supported12.bufferDeviceAddress());
         reportMissing("descriptorIndexing", supported12.descriptorIndexing());

@@ -41,6 +41,7 @@ import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT;
 import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT;
 import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
 import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_BACK_BIT;
+import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_LINE_WIDTH;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
 import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_SINT;
@@ -439,7 +440,11 @@ final class VulkanPipeline implements AutoCloseable {
 
         VkPipelineDynamicStateCreateInfo dynamicState = VkPipelineDynamicStateCreateInfo.calloc(stack)
                 .sType$Default()
-                .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR));
+                // LINE_WIDTH is dynamic because GL's glLineWidth is: it changes per draw and a pipeline per width
+                // would be a pipeline per call. The value still has to be set before the first draw with any
+                // pipeline that declares it dynamic, which VulkanStream does.
+                .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                        VK_DYNAMIC_STATE_LINE_WIDTH));
 
         VkPipelineRenderingCreateInfo rendering = VkPipelineRenderingCreateInfo.calloc(stack)
                 .sType$Default()

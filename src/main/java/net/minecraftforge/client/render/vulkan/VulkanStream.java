@@ -403,6 +403,9 @@ final class VulkanStream implements AutoCloseable {
             org.lwjgl.vulkan.VkRect2D.Buffer scissor = org.lwjgl.vulkan.VkRect2D.calloc(1, stack);
             // Sentinel that cannot match a real rectangle, so the first draw always sets one.
             int[] appliedScissor = {Integer.MIN_VALUE, 0, 0, 0};
+            // NaN matches nothing, so the first draw always sets a width. A pipeline that declares LINE_WIDTH dynamic
+            // is a validation error to draw with before it has been set, and every pipeline here declares it.
+            float[] appliedLineWidth = {Float.NaN};
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
@@ -451,6 +454,10 @@ final class VulkanStream implements AutoCloseable {
                 }
                 if (op instanceof FrameDraws.TerrainLayer terrainOp) {
                     if (terrain != null) {
+                        // The terrain pipelines declare LINE_WIDTH dynamic like every other pipeline here, so the
+                        // value has to be set before the first draw with one - a terrain layer is often the frame's
+                        // first draw. Terrain rasterises triangles, so 1.0 is the honest value.
+                        applyLineWidth(commandBuffer, appliedLineWidth, null);
                         terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer(),
                                 terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ(),
                                 terrainOp.fogMode(), terrainOp.fogStart(), terrainOp.fogEnd(),
@@ -596,6 +603,7 @@ final class VulkanStream implements AutoCloseable {
                     }
                     applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                             programFlips);
+                    applyLineWidth(commandBuffer, appliedLineWidth, ds);
                     programs.record(commandBuffer, slot, ds, topo, programWinding);
                     issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
                     boundPipeline = 0L;
@@ -606,6 +614,7 @@ final class VulkanStream implements AutoCloseable {
 
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                         targetFlipsWinding);
+                applyLineWidth(commandBuffer, appliedLineWidth, ds);
                 // Compared as one value rather than as a dozen fields: the key is a record, so a field added to it
                 // is compared without anyone remembering to extend a condition here. The version of this that listed
                 // the fields by hand would have gone on reusing a pipeline across a stencil change, silently.
@@ -756,6 +765,22 @@ final class VulkanStream implements AutoCloseable {
      * makes the main menu's {@code viewport(0, 0, 256, 256)} land in the bottom-left corner where the blur expects to
      * find it, rather than in the top-left where a straight copy of the numbers would put it.</p>
      */
+    /**
+     * Sets the line width if it changed since the last draw in this command buffer.
+     *
+     * <p>Clamped through the device, not passed through: a width outside {@code lineWidthRange} is a validation
+     * error, and without {@code wideLines} the only legal value is 1.0. GL clamps for the same reason, so a mod that
+     * asks for 8.0 on a device that tops out at 4.0 gets 4.0 in both APIs.</p>
+     */
+    private void applyLineWidth(VkCommandBuffer commandBuffer, float[] applied, DrawState state) {
+        float width = context.clampLineWidth(state != null ? state.lineWidth() : 1.0F);
+        if (applied[0] == width) {
+            return;
+        }
+        applied[0] = width;
+        org.lwjgl.vulkan.VK10.vkCmdSetLineWidth(commandBuffer, width);
+    }
+
     private static void applyViewport(VkCommandBuffer commandBuffer, org.lwjgl.vulkan.VkViewport.Buffer viewport,
                                       int[] applied, DrawState state, int frameWidth, int frameHeight,
                                       boolean flipVertically) {
