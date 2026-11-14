@@ -714,6 +714,115 @@ public final class FrameShim implements ShimGl.Impl {
     }
 
 
+
+    /** {@code GL_ALL_ATTRIB_BITS}, the mask every measured {@code glPushAttrib} passes. */
+    private static final int GL_ALL_ATTRIB_BITS = 0xFFFFF;
+
+    @Override
+    public void glPushAttrib(int mask) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glPushAttrib(mask);
+            return;
+        }
+        if (mask != GL_ALL_ATTRIB_BITS) {
+            // The backend saves the whole set and restores the whole set, which is what every caller in the pack
+            // asks for. A narrower mask would have GL restore less; restoring more is the safe direction (state ends
+            // up as the mod left it, never as a half-restored mixture), but it is not what GL would do, so it is
+            // reported rather than assumed.
+            FrameStates.reportSkippedOnce("glPushAttrib(" + mask + ")",
+                    "the attribute mask is ignored: the whole state is saved and restored, which is what"
+                            + " GL_ALL_ATTRIB_BITS asks for and what every measured caller passes");
+        }
+        state.pushAttributes();
+    }
+
+    @Override
+    public void glPopAttrib() {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glPopAttrib();
+            return;
+        }
+        state.popAttributes();
+    }
+
+    @Override
+    public void glClearStencil(int value) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glClearStencil(value);
+            return;
+        }
+        state.clearStencil(value);
+    }
+
+    @Override
+    public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glReadPixels",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
+    @Override
+    public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glReadPixels",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
+    @Override
+    public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glReadPixels",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
+    @Override
+    public void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glGetTexImage(target, level, format, type, pixels);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glGetTexImage",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
+    @Override
+    public void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glGetTexImage(target, level, format, type, pixels);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glGetTexImage",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
+    @Override
+    public void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glCopyTexImage2D",
+                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
+                        + " backend does that yet; the destination is left as it was");
+    }
     @Override
     public void glEnableClientState(int array) {
         ClientArrays arrays = arrays();

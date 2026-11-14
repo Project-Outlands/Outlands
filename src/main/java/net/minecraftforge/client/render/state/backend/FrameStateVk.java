@@ -64,6 +64,23 @@ final class FrameStateVk implements FrameState {
         void loadIdentity() {
             stack[top].identity();
         }
+
+        int top() {
+            return top;
+        }
+
+        /** Puts the stack back to a saved index, discarding anything pushed above it. */
+        void restoreTop(int index) {
+            top = index;
+        }
+
+        /** Back to one identity matrix, as a fresh context would be. */
+        void reset() {
+            top = 0;
+            for (Matrix4f matrix : stack) {
+                matrix.identity();
+            }
+        }
     }
 
     private final Set<Capability> enabled = EnumSet.noneOf(Capability.class);
@@ -91,6 +108,8 @@ final class FrameStateVk implements FrameState {
     private final int[] scissor = {0, 0, 0, 0};
     private final float[] clearColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private double clearDepth = 1.0;
+    /** {@code glClearStencil}: the value the next stencil clear writes, 0 at GL's default. */
+    private int clearStencil;
     private int clearMask;
 
     private int matrixMode = 5888;          // GL_MODELVIEW
@@ -113,7 +132,235 @@ final class FrameStateVk implements FrameState {
     private final float[] normalMatrixValues = new float[9];
     private boolean normalMatrixDirty = true;
     private final float[] textureMatrixScratch = new float[16];
-    private int attributeDepth;
+    /** Saved attribute sets, innermost first. */
+    private final java.util.ArrayDeque<SavedState> savedAttributes = new java.util.ArrayDeque<>();
+
+    /**
+     * One saved GL attribute set.
+     *
+     * <p><b>Why a field-by-field copy and not a mask walk.</b> {@code glPushAttrib} takes a mask of state groups, and
+     * the mods that use it - Astral Sorcery 66 times, Immersive Intelligence twice, TC6 twice - pass
+     * {@code GL_ALL_ATTRIB_BITS} every time. So the whole set is saved and the whole set restored, and a narrower
+     * mask is reported once instead of being silently widened. Walking GL's groups would be a table of forty
+     * fields-to-bits that nothing in the pack exercises, and a wrong bit in it would restore the wrong half.</p>
+     *
+     * <p><b>What has to be here.</b> Everything mutable in this class that a draw reads. Leaving one out does not
+     * fail loudly: the mod's state leaks past its {@code glPopAttrib} and the *next* thing drawn is wrong, which
+     * looks like a bug in whatever drew next. {@code AttributeStackTest} mutates every group and checks each one
+     * comes back.</p>
+     */
+    private static final class SavedState {
+        private int modelViewTop;
+        private int projectionTop;
+        private final int[] textureTops = new int[8];
+        private final Set<Capability> enabled = EnumSet.noneOf(Capability.class);
+        private int depthComparison;
+        private int alphaComparison;
+        private float alphaReference;
+        private int shadeModel;
+        private int cullFace;
+        private final boolean[] colorMask = new boolean[4];
+        private boolean depthMask;
+        private final float[] vertexColor = new float[4];
+        private int blendSource;
+        private int blendDestination;
+        private final int[] blendSeparate = new int[4];
+        private boolean hasBlendSeparate;
+        private int blendEquation;
+        private int logicOp;
+        private float lineWidth;
+        private int polygonModeFace;
+        private int polygonModeMode;
+        private float polygonOffsetFactor;
+        private float polygonOffsetUnits;
+        private final int[] viewport = new int[4];
+        private final int[] scissor = new int[4];
+        private final float[] clearColor = new float[4];
+        private double clearDepth;
+        private int clearStencil;
+        private int clearMask;
+        private int matrixMode;
+        private int activeTextureUnit;
+        private int fogMode;
+        private boolean radialFog;
+        private float pointSize;
+        private int stencilComparison;
+        private int stencilReference;
+        private int stencilCompareMask;
+        private int stencilWriteMask;
+        private int stencilFail;
+        private int stencilDepthFail;
+        private int stencilPass;
+        private final float[] fogColor = new float[4];
+        private float fogDensity;
+        private float fogStart;
+        private float fogEnd;
+        private final float[] lightmap = new float[2];
+        private boolean hasLightmap;
+        private int lightmapTexture;
+        private final float[] lightModelAmbient = new float[3];
+        private final float[] lightAmbient;
+        private final float[] lightDiffuse;
+        private final float[] lightDirection;
+        private int colorMaterialFace;
+        private int colorMaterialMode;
+        private final float[] overlayColor = new float[4];
+        private final float[][] texEnvColor;
+        private final int[] texEnvMode;
+        private final int[] texCombineRgb;
+        private final int[] texSource0Rgb;
+        private final int[] texSource1Rgb;
+        private final int[] texSource2Rgb;
+        private final int[] texOperand2Rgb;
+
+        SavedState() {
+            lightAmbient = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+            lightDiffuse = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+            lightDirection = new float[net.minecraftforge.client.render.vertex.LightingModel.LIGHTS * 3];
+            texEnvColor = new float[FrameStateVk.TEXTURE_UNITS][4];
+            texEnvMode = new int[FrameStateVk.TEXTURE_UNITS];
+            texCombineRgb = new int[FrameStateVk.TEXTURE_UNITS];
+            texSource0Rgb = new int[FrameStateVk.TEXTURE_UNITS];
+            texSource1Rgb = new int[FrameStateVk.TEXTURE_UNITS];
+            texSource2Rgb = new int[FrameStateVk.TEXTURE_UNITS];
+            texOperand2Rgb = new int[FrameStateVk.TEXTURE_UNITS];
+        }
+
+        void save(FrameStateVk state) {
+            modelViewTop = state.modelViewStack.top();
+            projectionTop = state.projectionStack.top();
+            for (int unit = 0; unit < textureTops.length; unit++) {
+                textureTops[unit] = state.textureStacks[unit].top();
+            }
+            enabled.clear();
+            enabled.addAll(state.enabled);
+            depthComparison = state.depthComparison;
+            alphaComparison = state.alphaComparison;
+            alphaReference = state.alphaReference;
+            shadeModel = state.shadeModel;
+            cullFace = state.cullFace;
+            System.arraycopy(state.colorMask, 0, colorMask, 0, 4);
+            depthMask = state.depthMask;
+            System.arraycopy(state.vertexColor, 0, vertexColor, 0, 4);
+            blendSource = state.blendSource;
+            blendDestination = state.blendDestination;
+            System.arraycopy(state.blendSeparate, 0, blendSeparate, 0, 4);
+            hasBlendSeparate = state.hasBlendSeparate;
+            blendEquation = state.blendEquation;
+            logicOp = state.logicOp;
+            lineWidth = state.lineWidth;
+            polygonModeFace = state.polygonModeFace;
+            polygonModeMode = state.polygonModeMode;
+            polygonOffsetFactor = state.polygonOffsetFactor;
+            polygonOffsetUnits = state.polygonOffsetUnits;
+            System.arraycopy(state.viewport, 0, viewport, 0, 4);
+            System.arraycopy(state.scissor, 0, scissor, 0, 4);
+            System.arraycopy(state.clearColor, 0, clearColor, 0, 4);
+            clearDepth = state.clearDepth;
+            clearStencil = state.clearStencil;
+            clearMask = state.clearMask;
+            matrixMode = state.matrixMode;
+            activeTextureUnit = state.activeTextureUnit;
+            fogMode = state.fogMode;
+            radialFog = state.radialFog;
+            pointSize = state.pointSize;
+            stencilComparison = state.stencilComparison;
+            stencilReference = state.stencilReference;
+            stencilCompareMask = state.stencilCompareMask;
+            stencilWriteMask = state.stencilWriteMask;
+            stencilFail = state.stencilFail;
+            stencilDepthFail = state.stencilDepthFail;
+            stencilPass = state.stencilPass;
+            System.arraycopy(state.fogColor, 0, fogColor, 0, 4);
+            fogDensity = state.fogDensity;
+            fogStart = state.fogStart;
+            fogEnd = state.fogEnd;
+            System.arraycopy(state.lightmap, 0, lightmap, 0, 2);
+            hasLightmap = state.hasLightmap;
+            lightmapTexture = state.lightmapTexture;
+            System.arraycopy(state.lightModelAmbient, 0, lightModelAmbient, 0, 3);
+            System.arraycopy(state.lightAmbient, 0, lightAmbient, 0, lightAmbient.length);
+            System.arraycopy(state.lightDiffuse, 0, lightDiffuse, 0, lightDiffuse.length);
+            System.arraycopy(state.lightDirection, 0, lightDirection, 0, lightDirection.length);
+            colorMaterialFace = state.colorMaterialFace;
+            colorMaterialMode = state.colorMaterialMode;
+            System.arraycopy(state.overlayColor, 0, overlayColor, 0, 4);
+            for (int unit = 0; unit < FrameStateVk.TEXTURE_UNITS; unit++) {
+                System.arraycopy(state.texEnvColor[unit], 0, texEnvColor[unit], 0, 4);
+            }
+            System.arraycopy(state.texEnvMode, 0, texEnvMode, 0, texEnvMode.length);
+            System.arraycopy(state.texCombineRgb, 0, texCombineRgb, 0, texCombineRgb.length);
+            System.arraycopy(state.texSource0Rgb, 0, texSource0Rgb, 0, texSource0Rgb.length);
+            System.arraycopy(state.texSource1Rgb, 0, texSource1Rgb, 0, texSource1Rgb.length);
+            System.arraycopy(state.texSource2Rgb, 0, texSource2Rgb, 0, texSource2Rgb.length);
+            System.arraycopy(state.texOperand2Rgb, 0, texOperand2Rgb, 0, texOperand2Rgb.length);
+        }
+
+        void restore(FrameStateVk state) {
+            state.enabled.clear();
+            state.enabled.addAll(enabled);
+            state.depthComparison = depthComparison;
+            state.alphaComparison = alphaComparison;
+            state.alphaReference = alphaReference;
+            state.shadeModel = shadeModel;
+            state.cullFace = cullFace;
+            System.arraycopy(colorMask, 0, state.colorMask, 0, 4);
+            state.depthMask = depthMask;
+            System.arraycopy(vertexColor, 0, state.vertexColor, 0, 4);
+            state.blendSource = blendSource;
+            state.blendDestination = blendDestination;
+            System.arraycopy(blendSeparate, 0, state.blendSeparate, 0, 4);
+            state.hasBlendSeparate = hasBlendSeparate;
+            state.blendEquation = blendEquation;
+            state.logicOp = logicOp;
+            state.lineWidth = lineWidth;
+            state.polygonModeFace = polygonModeFace;
+            state.polygonModeMode = polygonModeMode;
+            state.polygonOffsetFactor = polygonOffsetFactor;
+            state.polygonOffsetUnits = polygonOffsetUnits;
+            System.arraycopy(viewport, 0, state.viewport, 0, 4);
+            System.arraycopy(scissor, 0, state.scissor, 0, 4);
+            System.arraycopy(clearColor, 0, state.clearColor, 0, 4);
+            state.clearDepth = clearDepth;
+            state.clearStencil = clearStencil;
+            state.clearMask = clearMask;
+            state.matrixMode = matrixMode;
+            state.activeTextureUnit = activeTextureUnit;
+            state.fogMode = fogMode;
+            state.radialFog = radialFog;
+            state.pointSize = pointSize;
+            state.stencilComparison = stencilComparison;
+            state.stencilReference = stencilReference;
+            state.stencilCompareMask = stencilCompareMask;
+            state.stencilWriteMask = stencilWriteMask;
+            state.stencilFail = stencilFail;
+            state.stencilDepthFail = stencilDepthFail;
+            state.stencilPass = stencilPass;
+            System.arraycopy(fogColor, 0, state.fogColor, 0, 4);
+            state.fogDensity = fogDensity;
+            state.fogStart = fogStart;
+            state.fogEnd = fogEnd;
+            System.arraycopy(lightmap, 0, state.lightmap, 0, 2);
+            state.hasLightmap = hasLightmap;
+            state.lightmapTexture = lightmapTexture;
+            System.arraycopy(lightModelAmbient, 0, state.lightModelAmbient, 0, 3);
+            System.arraycopy(lightAmbient, 0, state.lightAmbient, 0, lightAmbient.length);
+            System.arraycopy(lightDiffuse, 0, state.lightDiffuse, 0, lightDiffuse.length);
+            System.arraycopy(lightDirection, 0, state.lightDirection, 0, lightDirection.length);
+            state.colorMaterialFace = colorMaterialFace;
+            state.colorMaterialMode = colorMaterialMode;
+            System.arraycopy(overlayColor, 0, state.overlayColor, 0, 4);
+            for (int unit = 0; unit < FrameStateVk.TEXTURE_UNITS; unit++) {
+                System.arraycopy(texEnvColor[unit], 0, state.texEnvColor[unit], 0, 4);
+            }
+            System.arraycopy(texEnvMode, 0, state.texEnvMode, 0, texEnvMode.length);
+            System.arraycopy(texCombineRgb, 0, state.texCombineRgb, 0, texCombineRgb.length);
+            System.arraycopy(texSource0Rgb, 0, state.texSource0Rgb, 0, texSource0Rgb.length);
+            System.arraycopy(texSource1Rgb, 0, state.texSource1Rgb, 0, texSource1Rgb.length);
+            System.arraycopy(texSource2Rgb, 0, state.texSource2Rgb, 0, texSource2Rgb.length);
+            System.arraycopy(texOperand2Rgb, 0, state.texOperand2Rgb, 0, texOperand2Rgb.length);
+        }
+    }
 
     /** Fog state, at the defaults GL documents: GL_EXP at density 1, no colour, the linear range 0..1. */
     private int fogMode = 2048;
@@ -837,6 +1084,28 @@ final class FrameStateVk implements FrameState {
         return lineWidth;
     }
 
+    /**
+     * Puts the state back to GL's defaults, as a context loss would.
+     *
+     * <p>Test support: the instance is a singleton, so a test that changes the matrix or leaves an attribute block
+     * open hands that state to the next test in the same JVM - and the failure appears there, not here.</p>
+     */
+    void resetForTests() {
+        savedAttributes.clear();
+        modelViewStack.reset();
+        projectionStack.reset();
+        for (MatrixStack stack : textureStacks) {
+            stack.reset();
+        }
+        // The scalar state comes from a fresh instance rather than a hand-written list of defaults: a list would be
+        // one more place to forget a field, and the constructor is already the definition of GL's initial values.
+        SavedState defaults = new SavedState();
+        defaults.save(new FrameStateVk());
+        defaults.restore(this);
+        normalMatrixDirty = true;
+        lightingDirty = true;
+    }
+
     @Override
     public int matrixStackDepth() {
         // GL counts the matrix in effect as one, so an untouched stack is depth 1 and `top` is the index of it.
@@ -904,6 +1173,11 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public void clearStencil(int value) {
+        clearStencil = value;
+    }
+
+    @Override
     public void clear(int glMask) {
         clearMask = glMask;
         net.minecraftforge.client.render.target.FrameRecording recording =
@@ -913,7 +1187,7 @@ final class FrameStateVk implements FrameState {
         }
         if (net.minecraftforge.client.render.vertex.FrameDraws.isCollecting()) {
             net.minecraftforge.client.render.vertex.FrameDraws.recordClear(
-                    glMask, clearColor.clone(), clearDepth,
+                    glMask, clearColor.clone(), clearDepth, clearStencil,
                     isEnabled(Capability.SCISSOR_TEST), scissor.clone());
         }
     }
@@ -1059,15 +1333,38 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void pushAttributes() {
-        attributeDepth++;
+        // The state is recorded first, because it holds the stack depths to restore to - recording after the push
+        // would save the post-push depth and the pop would keep whatever the block pushed.
+        SavedState saved = new SavedState();
+        saved.save(this);
+        // The matrices go on their own stacks rather than into the snapshot: a MatrixStack already knows how to save
+        // itself, and copying three stacks of 64 matrices per pushAttrib would allocate on a path a mod calls per
+        // object it renders.
+        modelViewStack.push();
+        projectionStack.push();
+        for (MatrixStack stack : textureStacks) {
+            stack.push();
+        }
+        savedAttributes.push(saved);
     }
 
     @Override
     public void popAttributes() {
-        if (attributeDepth == 0) {
+        SavedState saved = savedAttributes.poll();
+        if (saved == null) {
             throw new IllegalStateException("popAttrib without a matching pushAttrib");
         }
-        attributeDepth--;
+        // The saved index, not "one pop": a matrix pushed inside the block is part of what glPopAttrib undoes, so the
+        // stack goes back to the depth it had when the block opened. Popping once would leave the inner matrix in
+        // place - measured, before this was written that way.
+        modelViewStack.restoreTop(saved.modelViewTop);
+        projectionStack.restoreTop(saved.projectionTop);
+        for (int unit = 0; unit < textureStacks.length; unit++) {
+            textureStacks[unit].restoreTop(saved.textureTops[unit]);
+        }
+        saved.restore(this);
+        normalMatrixDirty = true;
+        lightingDirty = true;
     }
 
     /** The matrix of one mode, for a draw that needs to hand it to a push constant. */

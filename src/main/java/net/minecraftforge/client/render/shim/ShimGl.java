@@ -212,6 +212,25 @@ public final class ShimGl {
         void glBindBufferARB(int target, int buffer);
         /** {@code glBufferDataARB} (LWJGL 2 shape: {@code int target, java.nio.ByteBuffer data, int usage}). */
         void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage);
+
+        /** {@code glPushAttrib} (LWJGL 2 shape). */
+        void glPushAttrib(int mask);
+        /** {@code glPopAttrib} (LWJGL 2 shape). */
+        void glPopAttrib();
+        /** {@code glClearStencil} (LWJGL 2 shape). */
+        void glClearStencil(int value);
+        /** {@code glReadPixels} (LWJGL 2 shape). */
+        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels);
+        /** {@code glReadPixels} (LWJGL 2 shape). */
+        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels);
+        /** {@code glReadPixels} (LWJGL 2 shape). */
+        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels);
+        /** {@code glGetTexImage} (LWJGL 2 shape). */
+        void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels);
+        /** {@code glGetTexImage} (LWJGL 2 shape). */
+        void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels);
+        /** {@code glCopyTexImage2D} (LWJGL 2 shape). */
+        void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border);
         /**
          * {@code glNewList}: starts recording drawing commands into a list.
          *
@@ -530,6 +549,43 @@ public final class ShimGl {
         }
 
 
+
+        @Override
+        public void glPushAttrib(int mask) {
+            GL11.glPushAttrib(mask);
+        }
+        @Override
+        public void glPopAttrib() {
+            GL11.glPopAttrib();
+        }
+        @Override
+        public void glClearStencil(int value) {
+            GL11.glClearStencil(value);
+        }
+        @Override
+        public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels) {
+            GL11.glReadPixels(x, y, width, height, format, type, pixels);
+        }
+        @Override
+        public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels) {
+            GL11.glReadPixels(x, y, width, height, format, type, pixels);
+        }
+        @Override
+        public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels) {
+            GL11.glReadPixels(x, y, width, height, format, type, pixels);
+        }
+        @Override
+        public void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {
+            GL11.glGetTexImage(target, level, format, type, pixels);
+        }
+        @Override
+        public void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {
+            GL11.glGetTexImage(target, level, format, type, pixels);
+        }
+        @Override
+        public void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
+            GL11.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
+        }
         @Override
         public void glEnableClientState(int array) {
             GL11.glEnableClientState(array);
@@ -912,6 +968,34 @@ public final class ShimGl {
     }
 
 
+
+    public static void glPushAttrib(int mask) {
+        impl.glPushAttrib(mask);
+    }
+    public static void glPopAttrib() {
+        impl.glPopAttrib();
+    }
+    public static void glClearStencil(int value) {
+        impl.glClearStencil(value);
+    }
+    public static void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels) {
+        impl.glReadPixels(x, y, width, height, format, type, pixels);
+    }
+    public static void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels) {
+        impl.glReadPixels(x, y, width, height, format, type, pixels);
+    }
+    public static void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels) {
+        impl.glReadPixels(x, y, width, height, format, type, pixels);
+    }
+    public static void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {
+        impl.glGetTexImage(target, level, format, type, pixels);
+    }
+    public static void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {
+        impl.glGetTexImage(target, level, format, type, pixels);
+    }
+    public static void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
+        impl.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
+    }
     public static void glEnableClientState(int array) {
         impl.glEnableClientState(array);
     }

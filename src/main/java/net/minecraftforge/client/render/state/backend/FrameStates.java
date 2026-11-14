@@ -393,6 +393,12 @@ public final class FrameStates {
         return IMMEDIATE;
     }
 
+    /** Test support: puts the shared frame state back to GL's defaults. */
+    public static void resetForTests() {
+        VK.resetForTests();
+        CLIENT_ARRAYS.reset();
+    }
+
     /** The fixed-function client-array state, which {@code glDrawArrays} assembles from. */
     public static ClientArrays clientArrays() {
         return CLIENT_ARRAYS;

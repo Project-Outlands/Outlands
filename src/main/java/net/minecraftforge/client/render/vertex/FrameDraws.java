@@ -138,7 +138,12 @@ public final class FrameDraws {
     /**
      * An attachment clear requested mid-frame.
      */
-    public record Clear(int mask, float[] color, double depth, boolean scissorEnabled, int[] scissorBox)
+    /**
+     * An attachment clear.
+     *
+     * @param stencil the value {@code glClearStencil} set, which the stencil aspect is cleared to
+     */
+    public record Clear(int mask, float[] color, double depth, int stencil, boolean scissorEnabled, int[] scissorBox)
             implements Operation {
         public Clear {
             if (color == null || color.length != 4) {
@@ -290,13 +295,13 @@ public final class FrameDraws {
      *
      * @return {@code false} when nothing is collecting, which means there is no frame to clear inside
      */
-    public static boolean recordClear(int mask, float[] color, double depth, boolean scissorEnabled,
+    public static boolean recordClear(int mask, float[] color, double depth, int stencil, boolean scissorEnabled,
                                       int[] scissorBox) {
         if (!collecting) {
             return false;
         }
         synchronized (LOCK) {
-            ACTIVE_DRAWS.add(new Clear(mask, color, depth, scissorEnabled, scissorBox));
+            ACTIVE_DRAWS.add(new Clear(mask, color, depth, stencil, scissorEnabled, scissorBox));
         }
         return true;
     }

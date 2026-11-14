@@ -507,10 +507,11 @@ final class VulkanStream implements AutoCloseable {
                             clearAttachments.get(atIdx).aspectMask(
                                     org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_DEPTH_BIT
                                             | org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_STENCIL_BIT);
-                            // GL's clear value for stencil is glClearStencil's, which defaults to 0 and which nothing
-                            // in the game or the surveyed mods changes. The depth value is passed through as before.
+                            // GL's clear value for stencil is glClearStencil's. It defaults to 0, which is what this
+                            // used to hard-code - and three mods in the pack do change it (modularui, LibrarianLib,
+                            // CoFH Core), so the recorded value is passed through now.
                             clearAttachments.get(atIdx).clearValue().depthStencil()
-                                    .depth((float) clearOp.depth()).stencil(0);
+                                    .depth((float) clearOp.depth()).stencil(clearOp.stencil());
                             atIdx++;
                         }
                         // The rectangle is in the coordinates of whatever target is bound *now*, which after a

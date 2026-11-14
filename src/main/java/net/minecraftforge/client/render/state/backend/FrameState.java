@@ -445,6 +445,14 @@ public interface FrameState {
 
     void clearDepth(double depth);
 
+    /**
+     * {@code glClearStencil}: the value the next {@code glClear(GL_STENCIL_BUFFER_BIT)} writes.
+     *
+     * <p>Three mods in the pack set it (modularui, LibrarianLib, CoFH Core), and the draw stream used to hard-code
+     * zero with a comment saying nothing changed it.</p>
+     */
+    void clearStencil(int value);
+
     /** Clears the buffers named by a GL clear mask. */
     void clear(int glMask);
 

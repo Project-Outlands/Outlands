@@ -167,6 +167,22 @@ public final class FrameShimRules implements ShimRewriteRules {
             // the mods' call sites still name ARB, so the retarget has to name it too.
             arbBuffer("glBindBufferARB", "(II)V"),
             arbBuffer("glBufferDataARB", "(ILjava/nio/ByteBuffer;I)V"),
+            // The attribute stack. Astral Sorcery calls this 66 times and TC6 33+33; in this pack it is 11+11
+            // (uniquecrops, base, Immersive Intelligence). Until now the backend only counted the depth, so a mod
+            // that wrapped a block in push/pop got no restore at all and its state leaked into the next draw.
+            entry("glPushAttrib", "(I)V"),
+            entry("glPopAttrib", "()V"),
+            // The stencil clear value. Three mods set it, and the draw stream used to hard-code zero for it.
+            entry("glClearStencil", "(I)V"),
+            // Reading pixels back. Retargeted so the calls stop reaching a GL context that does not exist, and
+            // reported once: a faithful implementation needs a staged copy out of the image plus a fence, which is a
+            // feature rather than a leftover. Fifteen call sites in the pack, all of them mod-side exports.
+            entry("glReadPixels", "(IIIIIILjava/nio/ByteBuffer;)V"),
+            entry("glReadPixels", "(IIIIIILjava/nio/FloatBuffer;)V"),
+            entry("glReadPixels", "(IIIIIILjava/nio/IntBuffer;)V"),
+            entry("glGetTexImage", "(IIIILjava/nio/ByteBuffer;)V"),
+            entry("glGetTexImage", "(IIIILjava/nio/IntBuffer;)V"),
+            entry("glCopyTexImage2D", "(IIIIIIII)V"),
             // Display lists. Immersive Intelligence's AMT model renderers compile their quads once and replay them
             // per frame; the names come from GLAllocation, which the patch already routes, so only the three calls
             // the mod makes itself need entries. glGenLists/glDeleteLists are deliberately absent: no mod in the

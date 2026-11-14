@@ -35,6 +35,9 @@ public final class NonGlTestBackend {
         RenderBackends.register(backend);
         RenderBackendSelection.register(new RenderBackendSelection.Candidate(backend, () -> true, 10));
         RenderBackendSelection.select();
+        // The frame state is a singleton: without this, a test that pushes an attribute block or leaves a matrix
+        // pushed hands that state to the next test, which then fails somewhere else.
+        net.minecraftforge.client.render.state.backend.FrameStates.resetForTests();
         ShimGl.setImpl(new FrameShim());
     }
 
