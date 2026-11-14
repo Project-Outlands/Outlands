@@ -49,7 +49,17 @@ final class FrameDump {
                 break;
             }
             float[] rect = rect(draw);
-            if (rect != null && rect[1] - rect[0] > 0.25F && rect[2] > 0.05F && rect[3] - rect[2] < 0.6F) {
+            if (rect == null) {
+                continue;
+            }
+            // A wide flat thing above the horizon: the floating black box, which is a model part.
+            if (rect[1] - rect[0] > 0.25F && rect[2] > 0.05F && rect[3] - rect[2] < 0.6F) {
+                interesting = true;
+                break;
+            }
+            // A small thing near the top left of the screen: the icon that sits at the same place in every screenshot,
+            // which means it is drawn in screen space and something is placing it there.
+            if (rect[0] > -0.45F && rect[1] < -0.15F && rect[2] > 0.7F && rect[3] < 1.0F) {
                 interesting = true;
                 break;
             }
