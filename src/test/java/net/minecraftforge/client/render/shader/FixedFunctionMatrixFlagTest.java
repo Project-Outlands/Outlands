@@ -56,9 +56,10 @@ class FixedFunctionMatrixFlagTest {
     }
 
     @Test
-    void aFragmentOnlyProgramIsNot() {
-        // It gets the fixed-function vertex stage, which writes the matrix - but the flag is about what the mod's own
-        // source asked for, and this one asked for nothing. Its draws keep the program path's convention.
+    void aFragmentOnlyProgramIs() {
+        // Its vertex stage *is* the fixed-function one, so its draws read the push-constant matrix even though the
+        // mod's own source never mentions it. This flag decides the clip convention a draw is recorded with, and
+        // answering false here is what drew a magazine above the gun it belongs to.
         GlShaders.reset();
         int program = GlShaders.createProgram();
         int fragment = GlShaders.createShader(GlShaders.FRAGMENT_SHADER);
@@ -73,7 +74,7 @@ class FixedFunctionMatrixFlagTest {
         GlShaders.linkProgram(program);
         assertEquals(1, GlShaders.programStatus(program, GlShaders.LINK_STATUS),
                 GlShaders.programLog(program));
-        assertFalse(GlShaders.program(program).usesFixedFunctionMatrix());
+        assertTrue(GlShaders.program(program).usesFixedFunctionMatrix());
     }
 
     private static GlShaders.Program link(String vertexSource) {

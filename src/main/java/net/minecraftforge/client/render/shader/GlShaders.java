@@ -188,6 +188,13 @@ public final class GlShaders {
          * comes out mirrored across the middle of the screen.</p>
          */
         public boolean usesFixedFunctionMatrix() {
+            if (syntheticVertex != null) {
+                // A fragment-only program's vertex stage *is* the fixed-function one, so its draws read the push
+                // constant whether the mod's own source mentions the matrix or not. Leaving this false is what put a
+                // magazine under the gun above it: the shader applied the already-negated matrix and the draw was then
+                // flipped a second time.
+                return true;
+            }
             for (int stageId : stages) {
                 Shader candidate = SHADERS.get(stageId);
                 if (candidate != null && candidate.fixedFunctionMatrix()) {
