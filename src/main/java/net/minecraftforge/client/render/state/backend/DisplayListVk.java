@@ -35,6 +35,8 @@ final class DisplayListVk implements DisplayListBackend {
     private final Int2ObjectMap<List<Draw>> inProgress = new Int2ObjectOpenHashMap<>();
     private final DrawState cachedCallState = new DrawState();
     private Integer recording;
+    /** Whether the list being recorded also draws its commands, i.e. {@code GL_COMPILE_AND_EXECUTE}. */
+    private boolean compileAndExecute;
     private int nextName = 1;
 
     @Override
@@ -63,14 +65,12 @@ final class DisplayListVk implements DisplayListBackend {
             throw new IllegalStateException("recording into ungenerated display list " + id);
         }
         recording = id;
+        // GL_COMPILE_AND_EXECUTE also runs the commands while it records them. That is how Immersive Intelligence's
+        // AMTQuads builds a model on the frame it first appears: glNewList(4865), draw, glEndList, and every later
+        // frame glCallList. Treating it as GL_COMPILE would make the model invisible for one frame; refusing it, as
+        // this did, made it a crash in the creative inventory.
+        compileAndExecute = glMode == 4865;
         inProgress.put(id, new ArrayList<>());
-        if (glMode == 4865) {
-            // GL_COMPILE_AND_EXECUTE also runs the commands as it records them. Vanilla does not use it; saying so
-            // beats pretending the distinction does not exist.
-            throw new UnsupportedOperationException(
-                    "GL_COMPILE_AND_EXECUTE is not supported: executing while recording needs a frame, which is the"
-                            + " same reason call() is unimplemented");
-        }
     }
 
     @Override
@@ -82,6 +82,7 @@ final class DisplayListVk implements DisplayListBackend {
         List<Draw> raw = inProgress.remove(id);
         lists.put(id, consolidate(raw));
         recording = null;
+        compileAndExecute = false;
     }
 
     private static List<Draw> consolidate(List<Draw> raw) {
@@ -185,6 +186,12 @@ final class DisplayListVk implements DisplayListBackend {
         view.position(0);
         view.get(copy, 0, Math.min(bytes, view.remaining()));
         inProgress.get(id).add(new Draw(layout, mode, vertexCount, copy));
+        if (compileAndExecute) {
+            // The execute half. Recording the draw into the frame is what "execute" means here - and a frame that is
+            // not collecting drops it, which is the same thing GL does when there is nothing to draw into. That is
+            // the case a model built during startup hits.
+            FrameDraws.record(layout, mode, vertexCount, data, DrawState.current());
+        }
         return true;
     }
 }

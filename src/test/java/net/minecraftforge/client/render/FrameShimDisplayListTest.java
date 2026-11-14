@@ -103,6 +103,47 @@ class FrameShimDisplayListTest {
     }
 
     @Test
+    void compileAndExecuteDrawsWhileItRecords() {
+        // Immersive Intelligence's AMTQuads: glNewList(4865), draw the quads, glEndList on the frame the model first
+        // appears, then glCallList from then on. Refusing 4865 crashed the creative inventory; treating it as
+        // GL_COMPILE would make the model invisible for one frame instead.
+        DisplayListBackend lists = DisplayLists.instance();
+        int id = lists.generate(1);
+
+        FrameDraws.beginCollecting();
+        ShimGl.glNewList(id, 4865);
+        ShimGl.glBegin(GL_QUADS);
+        ShimGl.glVertex3f(0.0F, 0.0F, 0.0F);
+        ShimGl.glVertex3f(1.0F, 0.0F, 0.0F);
+        ShimGl.glVertex3f(1.0F, 1.0F, 0.0F);
+        ShimGl.glVertex3f(0.0F, 1.0F, 0.0F);
+        ShimGl.glEnd();
+        ShimGl.glEndList();
+        var recorded = FrameDraws.drain();
+
+        assertEquals(1, lists.drawCount(id), "the quad is in the list");
+        assertEquals(1, recorded.size(), "and it was drawn on the same frame");
+    }
+
+    @Test
+    void compileAndExecuteWithoutAFrameStillBuildsTheList() {
+        // A model built during startup has no frame to draw into. The list is the point; the draw has nowhere to go.
+        DisplayListBackend lists = DisplayLists.instance();
+        int id = lists.generate(1);
+
+        ShimGl.glNewList(id, 4865);
+        ShimGl.glBegin(GL_QUADS);
+        ShimGl.glVertex3f(0.0F, 0.0F, 0.0F);
+        ShimGl.glVertex3f(1.0F, 0.0F, 0.0F);
+        ShimGl.glVertex3f(1.0F, 1.0F, 0.0F);
+        ShimGl.glVertex3f(0.0F, 1.0F, 0.0F);
+        ShimGl.glEnd();
+        ShimGl.glEndList();
+
+        assertEquals(1, lists.drawCount(id), "the list is built even with nothing collecting");
+    }
+
+    @Test
     void theBackendIsTheOneThePatchWouldUse() {
         // Not a tautology: vanilla's GlStateManager and the shim have to end up at the same recorder, or a mod's
         // list and the game's list would live in two name spaces that happen to use the same numbers.
