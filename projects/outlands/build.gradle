@@ -380,6 +380,86 @@ tasks.configureEach {
 }
 
 
+// Compiles the game's own shader programs to SPIR-V, ahead of time.
+//
+// The runtime compiler in the backend exists for source that arrives while the game runs - a mod, a shader pack. The
+// game's programs are fixed assets, so they are compiled once here and shipped as modules: the vanilla path then never
+// compiles anything and cannot be affected by a change to the rewrite rules.
+//
+// It reads them out of the assets jar rather than out of processResources' output, so there is no ordering cycle: the
+// generator feeds processResources, not the other way round.
+configurations {
+    shaderCompilerTools {
+        transitive = false
+    }
+}
+dependencies {
+    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version"
+    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version:$lwjglArch"
+    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version"
+    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version:$lwjglArch"
+}
+// Hand-written replacements for the game's own shaders, in Vulkan GLSL. They live outside the resource roots on
+// purpose: a #version 450 source on the classpath at assets/minecraft/shaders/program/ would be handed to a GL
+// context as if it were the game's 1.20 shader. Only the modules they produce ship.
+def vanillaShaderSources = rootProject.layout.projectDirectory.dir('src/main/shaders/vanilla')
+def programShaderOutput = layout.buildDirectory.dir('generated/programShaders')
+tasks.register('compileProgramShaders', JavaExec) {
+    group = 'build'
+    description = "Compiles the game's shaders/program/*.{vsh,fsh} to SPIR-V for the Vulkan backend"
+    dependsOn 'compileJava'
+    classpath = files(sourceSets.main.output.classesDirs) + configurations.shaderCompilerTools
+    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ProgramShaderCompiler'
+    inputs.files(mcpBase.extra)
+    inputs.dir(vanillaShaderSources).optional()
+    outputs.dir(programShaderOutput)
+    doFirst {
+        args = [mcpBase.extra.get().toString(), programShaderOutput.get().asFile.absolutePath,
+                vanillaShaderSources.asFile.absolutePath]
+    }
+}
+// The generated modules are *not* routed through processResources: compileJava already depends on it in this build,
+// and processResources depending on a task that needs compileJava is a cycle. They travel as their own artifact
+// instead - one jar holding assets/minecraft/shaders/program/*.spv - which puts them on the run and test classpaths
+// through the ordinary dependency mechanism, so both see exactly what a released jar would contain.
+def programShaderJarTask = tasks.register('programShaderJar', Jar) {
+    dependsOn 'compileProgramShaders'
+    archiveClassifier = 'program-shaders'
+    from programShaderOutput
+}
+dependencies {
+    runtimeOnly files(programShaderJarTask)
+}
+// sourceSets.test.runtimeClasspath is built from main's at configuration time (see the sourceSets block above), which
+// is before this task exists, so the artifact is appended to both explicitly rather than relying on that copy.
+sourceSets.main.runtimeClasspath += files(programShaderJarTask)
+sourceSets.test.runtimeClasspath += files(programShaderJarTask)
+tasks.configureEach {
+    if (name == 'runOutlandsClient' || name == 'runOutlandsServer') {
+        dependsOn 'compileProgramShaders'
+    }
+}
+
+// Regenerates the .spv files that ship next to their GLSL sources. The results are committed, so this only has
+// to run when a shader changes; a build without it works.
+tasks.register('compileShaders', JavaExec) {
+    group = 'build'
+    description = 'Compiles assets/outlands/shaders/*.{vert,frag} to SPIR-V'
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ShaderCompiler'
+    args = [rootDir.absolutePath]
+}
+
+// The one place this project puts files under 'assets/minecraft': the compiled modules for the game's own shader
+// programs, written by 'compileProgramShaders' from src/main/shaders/vanilla plus the assets jar. They are ours, and
+// the game only finds them at that path (SpirvResources looks for '<source>.spv' beside the source), so the rule that
+// keeps vanilla's assets out of a shipped jar needs exactly this exception. Stated once and used by both the jar that
+// includes them and the guard that checks what it ended up with.
+def isOwnShaderModule = { String path ->
+    path.startsWith('assets/minecraft/shaders/program/') && (path.endsWith('.spv') || path.endsWith('.spv.sha1'))
+}
+
 // region Reobf + binary patches --------------------------------------------
 // Legacy FML needs a 'reobfuscated' (MCP -> SRG) jar to diff against vanilla when generating binary patches. The
 // whole tree (patched Minecraft + loader) is renamed in one go; the two class sets are split again afterwards,
@@ -517,9 +597,20 @@ def universalJar = tasks.register('universalJar', Jar) {
     from { zipTree(reobf.get().output.get().asFile) }
     // loader classes only, every Minecraft class comes from the patches at runtime
     exclude { entry -> entry.path.endsWith('.class') && !isClassOf(loaderNames, entry.path) }
-    from(sourceSets.main.output.resourcesDir)
-    // see jarForReobf: the vanilla resource tree is a dev-run convenience, the loader's own assets stay
-    exclude 'assets/minecraft/**'
+    // see jarForReobf: the vanilla resource tree is a dev-run convenience, the loader's own assets stay. The
+    // exclusion is stated on this source rather than on the whole task, because the task also carries the game's
+    // compiled shader modules - which have to live under 'assets/minecraft' and are ours. Per-source keeps the two
+    // from having to share one pattern.
+    from(sourceSets.main.output.resourcesDir) {
+        exclude 'assets/minecraft/**'
+    }
+    // The compiled modules for the game's shaders. They are generated, so they are not in processResources' output,
+    // and a launcher install gets them from this jar or not at all - measured: with the separate 'program-shaders'
+    // artifact alone, a released jar fell back to compiling vanilla's GLSL at runtime and the hand-written rewrites
+    // never reached a player.
+    // The generator's output directory, which is also the dependency: the task that writes it is declared above.
+    dependsOn 'compileProgramShaders'
+    from(programShaderOutput)
     // the excluded Minecraft classes would otherwise leave their (empty) package directories behind
     includeEmptyDirs = false
     from(binpatchesPack) {
@@ -808,77 +899,6 @@ checks.patches { it.patchDir.set(rootProject.layout.projectDirectory.dir('patche
 checks.execs {}
 // endregion
 
-// Compiles the game's own shader programs to SPIR-V, ahead of time.
-//
-// The runtime compiler in the backend exists for source that arrives while the game runs - a mod, a shader pack. The
-// game's programs are fixed assets, so they are compiled once here and shipped as modules: the vanilla path then never
-// compiles anything and cannot be affected by a change to the rewrite rules.
-//
-// It reads them out of the assets jar rather than out of processResources' output, so there is no ordering cycle: the
-// generator feeds processResources, not the other way round.
-configurations {
-    shaderCompilerTools {
-        transitive = false
-    }
-}
-dependencies {
-    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version"
-    shaderCompilerTools "org.lwjgl:lwjgl:$props.lwjgl_version:$lwjglArch"
-    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version"
-    shaderCompilerTools "org.lwjgl:lwjgl-shaderc:$props.lwjgl_version:$lwjglArch"
-}
-// Hand-written replacements for the game's own shaders, in Vulkan GLSL. They live outside the resource roots on
-// purpose: a #version 450 source on the classpath at assets/minecraft/shaders/program/ would be handed to a GL
-// context as if it were the game's 1.20 shader. Only the modules they produce ship.
-def vanillaShaderSources = rootProject.layout.projectDirectory.dir('src/main/shaders/vanilla')
-def programShaderOutput = layout.buildDirectory.dir('generated/programShaders')
-tasks.register('compileProgramShaders', JavaExec) {
-    group = 'build'
-    description = "Compiles the game's shaders/program/*.{vsh,fsh} to SPIR-V for the Vulkan backend"
-    dependsOn 'compileJava'
-    classpath = files(sourceSets.main.output.classesDirs) + configurations.shaderCompilerTools
-    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ProgramShaderCompiler'
-    inputs.files(mcpBase.extra)
-    inputs.dir(vanillaShaderSources).optional()
-    outputs.dir(programShaderOutput)
-    doFirst {
-        args = [mcpBase.extra.get().toString(), programShaderOutput.get().asFile.absolutePath,
-                vanillaShaderSources.asFile.absolutePath]
-    }
-}
-// The generated modules are *not* routed through processResources: compileJava already depends on it in this build,
-// and processResources depending on a task that needs compileJava is a cycle. They travel as their own artifact
-// instead - one jar holding assets/minecraft/shaders/program/*.spv - which puts them on the run and test classpaths
-// through the ordinary dependency mechanism, so both see exactly what a released jar would contain.
-def programShaderJarTask = tasks.register('programShaderJar', Jar) {
-    dependsOn 'compileProgramShaders'
-    archiveClassifier = 'program-shaders'
-    from programShaderOutput
-}
-dependencies {
-    runtimeOnly files(programShaderJarTask)
-}
-// sourceSets.test.runtimeClasspath is built from main's at configuration time (see the sourceSets block above), which
-// is before this task exists, so the artifact is appended to both explicitly rather than relying on that copy.
-sourceSets.main.runtimeClasspath += files(programShaderJarTask)
-sourceSets.test.runtimeClasspath += files(programShaderJarTask)
-tasks.configureEach {
-    if (name == 'runOutlandsClient' || name == 'runOutlandsServer') {
-        dependsOn 'compileProgramShaders'
-    }
-}
-
-// Regenerates the .spv files that ship next to their GLSL sources. The results are committed, so this only has
-// to run when a shader changes; a build without it works.
-tasks.register('compileShaders', JavaExec) {
-    group = 'build'
-    description = 'Compiles assets/outlands/shaders/*.{vert,frag} to SPIR-V'
-    dependsOn 'testClasses'
-    classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'net.minecraftforge.client.render.vulkan.shader.ShaderCompiler'
-    args = [rootDir.absolutePath]
-}
-
 // region shipped artifact guard ---------------------------------------------
 // A shipped artifact must not carry Mojang's classes, sources or resources: a launcher installs the vanilla client
 // jar next to the loader, the loader only patches it at runtime, and redistributing the game is not ours to do. The
@@ -894,17 +914,21 @@ tasks.register('verifyArtifacts') {
         def forbidden = [
                 ~/^net\/minecraft\/.*\.class$/,
                 ~/^net\/minecraft\/.*\.java$/,
-                ~/^assets\/minecraft\/.*/,
                 ~/^assets\/\.mcassetsroot$/
         ]
+        // 'assets/minecraft' is forbidden too, with one exception: the compiled modules for the game's own shader
+        // programs. They have to live at that path - SpirvResources looks for '<source>.spv' beside the source - and
+        // they are this project's output, not Mojang's. Everything else under the namespace still fails the build.
+        def isForbidden = { String name ->
+            forbidden.any { it.matcher(name).matches() }
+                    || (name.startsWith('assets/minecraft/') && !isOwnShaderModule(name))
+        }
         def found = [:]
         shipped.each { task ->
             def file = task.get().archiveFile.get().asFile
             if (!file.isFile()) return
             def hits = new java.util.zip.ZipFile(file).withCloseable { zip ->
-                zip.entries().findAll { entry ->
-                    !entry.directory && forbidden.any { it.matcher(entry.name).matches() }
-                }*.name
+                zip.entries().findAll { entry -> !entry.directory && isForbidden(entry.name) }*.name
             }
             if (!hits.isEmpty()) found[file.name] = hits
         }
@@ -915,7 +939,14 @@ tasks.register('verifyArtifacts') {
 
         // The other half of the same mistake: an exclude that is too broad removes the loader's own resources
         // (banner, icon, forge/fml translations) and nobody notices until the mod list shows a blank tile.
-        def required = ['assets/outlands/banner.png', 'assets/outlands/icon.png', 'assets/forge/lang/en_us.lang']
+        //
+        // The shader modules are on this list for the same reason: they live under the namespace the rule above
+        // forbids, so they are the first thing a future narrowing of that rule drops - and the symptom is a release
+        // that compiles vanilla's GLSL at startup instead of using the hand-written rewrites, which no test sees.
+        def required = ['assets/outlands/banner.png', 'assets/outlands/icon.png', 'assets/forge/lang/en_us.lang',
+                        'assets/minecraft/shaders/program/blit.vsh.spv',
+                        'assets/minecraft/shaders/program/blit.vsh.spv.sha1',
+                        'assets/minecraft/shaders/program/entity_sobel.fsh.spv']
         def universal = universalJar.get().archiveFile.get().asFile
         def missing = new java.util.zip.ZipFile(universal).withCloseable { zip ->
             required.findAll { name -> zip.getEntry(name) == null }
