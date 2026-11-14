@@ -23,6 +23,8 @@ public final class DrawState {
     private boolean scissorEnabled;
     private final int[] scissor = new int[4];
     private final float[] color = new float[4];
+    /** {@code glBlendColor}: the constant the GL_CONSTANT_* factors read, per draw. */
+    private final float[] blendColor = new float[4];
     private boolean texture2d;
     private boolean alphaTest;
     private float alphaReference;
@@ -248,6 +250,7 @@ public final class DrawState {
         this.scissorEnabled = state.isEnabled(net.minecraftforge.client.render.state.backend.Capability.SCISSOR_TEST);
         System.arraycopy(state.scissorBox(), 0, this.scissor, 0, 4);
         System.arraycopy(state.currentColor(), 0, this.color, 0, 4);
+        System.arraycopy(state.blendColor(), 0, this.blendColor, 0, 4);
         this.texture2d = texture2dEnabled(state);
         this.alphaTest = state.alphaTestEnabled();
         this.alphaReference = state.alphaReference();
@@ -418,6 +421,8 @@ public final class DrawState {
     public boolean scissorEnabled() { return scissorEnabled; }
     public int[] scissor() { return scissor; }
     public float[] color() { return color; }
+
+    public float[] blendColor() { return blendColor; }
     public boolean texture2d() { return texture2d; }
     public boolean alphaTest() { return alphaTest; }
     public float alphaReference() { return alphaReference; }

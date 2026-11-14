@@ -399,6 +399,18 @@ public interface FrameState {
 
     void blendFuncSeparate(int glSourceRgb, int glDestinationRgb, int glSourceAlpha, int glDestinationAlpha);
 
+    /**
+     * {@code glBlendColor}: the constant colour the {@code GL_CONSTANT_*} blend factors read.
+     *
+     * <p>Separate from the factors because GL keeps them separately: the factors are pipeline state, the constant is
+     * a four-float value the shader-fixed blending reads at draw time. Vulkan makes it dynamic state for the same
+     * reason - one value per draw, not one pipeline per colour.</p>
+     */
+    void blendColor(float red, float green, float blue, float alpha);
+
+    /** The four components {@link #blendColor(float, float, float, float)} last set. */
+    float[] blendColor();
+
     void blendEquation(int glMode);
 
     void logicOp(int glOpcode);

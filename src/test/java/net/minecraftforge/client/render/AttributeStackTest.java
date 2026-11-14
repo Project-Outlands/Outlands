@@ -198,6 +198,27 @@ class AttributeStackTest {
     }
 
     @Test
+    void theConstantBlendFactorsAreAccepted() {
+        // Immersive Intelligence's particle stages blend with GL_ONE_MINUS_CONSTANT_ALPHA (32772) and
+        // GL_CONSTANT_ALPHA (32771). The table rejected them, which crashed the creative inventory the first time a
+        // gun with a particle effect was drawn - so this is a crash guard, not a nicety.
+        FrameState state = state();
+
+        ShimGl.glBlendFunc(32771, 32772);
+        assertEquals(32771, state.blendSource());
+        assertEquals(32772, state.blendDestination());
+
+        // And the colour those factors read, which Vulkan takes as dynamic state rather than in the pipeline.
+        ShimGl.glBlendColor(0.25F, 0.5F, 0.75F, 1.0F);
+        assertArrayEquals(new float[] {0.25F, 0.5F, 0.75F, 1.0F}, state.blendColor());
+
+        DrawState captured = new DrawState();
+        captured.captureFrom(state);
+        assertArrayEquals(new float[] {0.25F, 0.5F, 0.75F, 1.0F}, captured.blendColor(),
+                "the constant travels with the draw, like every other piece of blend state");
+    }
+
+    @Test
     void aReadbackIsAcceptedAndLeavesTheBufferAlone() {
         // It cannot be answered yet, but it must not reach real GL: a Vulkan window has no GL context, and the call
         // would fail inside the driver rather than in a log line naming what is missing.

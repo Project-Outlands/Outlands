@@ -23,6 +23,10 @@ import org.lwjgl.vulkan.VkVertexInputBindingDescription;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_CONSTANT_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_CONSTANT_COLOR;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_DST_ALPHA;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_DST_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE;
@@ -41,6 +45,7 @@ import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT;
 import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT;
 import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
 import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_BACK_BIT;
+import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_BLEND_CONSTANTS;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_LINE_WIDTH;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
 import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
@@ -444,7 +449,7 @@ final class VulkanPipeline implements AutoCloseable {
                 // would be a pipeline per call. The value still has to be set before the first draw with any
                 // pipeline that declares it dynamic, which VulkanStream does.
                 .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
-                        VK_DYNAMIC_STATE_LINE_WIDTH));
+                        VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_BLEND_CONSTANTS));
 
         VkPipelineRenderingCreateInfo rendering = VkPipelineRenderingCreateInfo.calloc(stack)
                 .sType$Default()
@@ -532,6 +537,12 @@ final class VulkanPipeline implements AutoCloseable {
             case 774 -> VK_BLEND_FACTOR_DST_COLOR;                       // GL_DST_COLOR
             case 775 -> VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;             // GL_ONE_MINUS_DST_COLOR
             case 776 -> VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;              // GL_SRC_ALPHA_SATURATE
+            // The constant factors read glBlendColor. Vulkan names them the same way; the colour itself is dynamic
+            // state (vkCmdSetBlendConstants), so it does not appear in the pipeline key.
+            case 32769 -> VK_BLEND_FACTOR_CONSTANT_COLOR;                // GL_CONSTANT_COLOR
+            case 32770 -> VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;      // GL_ONE_MINUS_CONSTANT_COLOR
+            case 32771 -> VK_BLEND_FACTOR_CONSTANT_ALPHA;                // GL_CONSTANT_ALPHA
+            case 32772 -> VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;      // GL_ONE_MINUS_CONSTANT_ALPHA
             default -> throw new IllegalArgumentException("blend factor " + glFactor + " is not translated");
         };
     }

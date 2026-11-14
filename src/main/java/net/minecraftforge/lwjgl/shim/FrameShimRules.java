@@ -63,6 +63,9 @@ public final class FrameShimRules implements ShimRewriteRules {
      */
     public static final String ARB_BUFFER_OBJECT = "org/lwjgl/opengl/ARBBufferObject";
 
+    /** GL 1.2's class, where {@code glBlendColor} lives in the LWJGL 2 the mods were compiled against. */
+    public static final String GL14 = "org/lwjgl/opengl/GL14";
+
     /** The facade every entry retargets to. */
     public static final String FACADE = "net/minecraftforge/client/render/shim/ShimGl";
 
@@ -167,6 +170,9 @@ public final class FrameShimRules implements ShimRewriteRules {
             // the mods' call sites still name ARB, so the retarget has to name it too.
             arbBuffer("glBindBufferARB", "(II)V"),
             arbBuffer("glBufferDataARB", "(ILjava/nio/ByteBuffer;I)V"),
+            // The blend colour, which the GL_CONSTANT_* factors read. GL14's class, because that is where the
+            // call sites name it - including vanilla's own GlStateManager.blendColor.
+            gl14("glBlendColor", "(FFFF)V"),
             // The attribute stack. Astral Sorcery calls this 66 times and TC6 33+33; in this pack it is 11+11
             // (uniquecrops, base, Immersive Intelligence). Until now the backend only counted the depth, so a mod
             // that wrapped a block in push/pop got no restore at all and its state leaked into the next draw.
@@ -258,6 +264,10 @@ public final class FrameShimRules implements ShimRewriteRules {
 
     private static RetargetEntry arbBuffer(String name, String desc) {
         return new RetargetEntry(ARB_BUFFER_OBJECT, name, desc, FACADE);
+    }
+
+    private static RetargetEntry gl14(String name, String desc) {
+        return new RetargetEntry(GL14, name, desc, FACADE);
     }
 
     @Override

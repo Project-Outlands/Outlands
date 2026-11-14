@@ -97,6 +97,8 @@ final class FrameStateVk implements FrameState {
     private int blendDestination = 0;       // GL_ZERO
     private final int[] blendSeparate = new int[4];
     private boolean hasBlendSeparate;
+    /** {@code glBlendColor}: the constant the GL_CONSTANT_* blend factors read. */
+    private final float[] blendColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private int blendEquation = 32774;      // GL_FUNC_ADD
     private int logicOp = 5379;             // GL_COPY
     private float lineWidth = 1.0F;
@@ -164,6 +166,7 @@ final class FrameStateVk implements FrameState {
         private final float[] vertexColor = new float[4];
         private int blendSource;
         private int blendDestination;
+        private final float[] blendColor = new float[4];
         private final int[] blendSeparate = new int[4];
         private boolean hasBlendSeparate;
         private int blendEquation;
@@ -244,6 +247,7 @@ final class FrameStateVk implements FrameState {
             System.arraycopy(state.vertexColor, 0, vertexColor, 0, 4);
             blendSource = state.blendSource;
             blendDestination = state.blendDestination;
+            System.arraycopy(state.blendColor, 0, blendColor, 0, 4);
             System.arraycopy(state.blendSeparate, 0, blendSeparate, 0, 4);
             hasBlendSeparate = state.hasBlendSeparate;
             blendEquation = state.blendEquation;
@@ -309,6 +313,7 @@ final class FrameStateVk implements FrameState {
             System.arraycopy(vertexColor, 0, state.vertexColor, 0, 4);
             state.blendSource = blendSource;
             state.blendDestination = blendDestination;
+            System.arraycopy(blendColor, 0, state.blendColor, 0, 4);
             System.arraycopy(blendSeparate, 0, state.blendSeparate, 0, 4);
             state.hasBlendSeparate = hasBlendSeparate;
             state.blendEquation = blendEquation;
@@ -1034,6 +1039,19 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public void blendColor(float red, float green, float blue, float alpha) {
+        blendColor[0] = red;
+        blendColor[1] = green;
+        blendColor[2] = blue;
+        blendColor[3] = alpha;
+    }
+
+    @Override
+    public float[] blendColor() {
+        return blendColor;
+    }
+
+    @Override
     public void blendFuncSeparate(int glSourceRgb, int glDestinationRgb, int glSourceAlpha, int glDestinationAlpha) {
         blendSeparate[0] = blendFactor(glSourceRgb);
         blendSeparate[1] = blendFactor(glDestinationRgb);
@@ -1388,7 +1406,11 @@ final class FrameStateVk implements FrameState {
 
     private static int blendFactor(int glFactor) {
         return switch (glFactor) {
-            case 0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777 -> glFactor;
+            // 32769..32772 are GL_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_COLOR, GL_CONSTANT_ALPHA and
+            // GL_ONE_MINUS_CONSTANT_ALPHA - the factors that read glBlendColor. Immersive Intelligence's particle
+            // stages use the alpha ones, and this table used to reject them, which crashed the creative inventory
+            // the first time a gun with a particle effect was drawn.
+            case 0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 32769, 32770, 32771, 32772 -> glFactor;
             default -> throw new IllegalArgumentException("not a GL blend factor: " + glFactor);
         };
     }

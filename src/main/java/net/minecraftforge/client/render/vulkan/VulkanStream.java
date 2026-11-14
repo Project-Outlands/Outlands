@@ -406,6 +406,9 @@ final class VulkanStream implements AutoCloseable {
             // NaN matches nothing, so the first draw always sets a width. A pipeline that declares LINE_WIDTH dynamic
             // is a validation error to draw with before it has been set, and every pipeline here declares it.
             float[] appliedLineWidth = {Float.NaN};
+            // The blend constants every pipeline declares dynamic, so an unset one is a validation error. NaN-free
+            // sentinel: a colour can legitimately be all zeros, so "not set yet" has to be its own value.
+            float[][] appliedBlendConstants = {{Float.NaN, 0.0F, 0.0F, 0.0F}};
 
             int indexOfOp = -1;
             lastPushedLayout = 0L;
@@ -458,6 +461,7 @@ final class VulkanStream implements AutoCloseable {
                         // value has to be set before the first draw with one - a terrain layer is often the frame's
                         // first draw. Terrain rasterises triangles, so 1.0 is the honest value.
                         applyLineWidth(commandBuffer, appliedLineWidth, null);
+                        applyBlendConstants(commandBuffer, appliedBlendConstants, null);
                         terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer(),
                                 terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ(),
                                 terrainOp.fogMode(), terrainOp.fogStart(), terrainOp.fogEnd(),
@@ -605,6 +609,8 @@ final class VulkanStream implements AutoCloseable {
                     applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                             programFlips);
                     applyLineWidth(commandBuffer, appliedLineWidth, ds);
+                applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
+                    applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
                     programs.record(commandBuffer, slot, ds, topo, programWinding);
                     issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
                     boundPipeline = 0L;
@@ -616,6 +622,7 @@ final class VulkanStream implements AutoCloseable {
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                         targetFlipsWinding);
                 applyLineWidth(commandBuffer, appliedLineWidth, ds);
+                applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
                 // Compared as one value rather than as a dozen fields: the key is a record, so a field added to it
                 // is compared without anyone remembering to extend a condition here. The version of this that listed
                 // the fields by hand would have gone on reusing a pipeline across a stencil change, silently.
@@ -773,6 +780,25 @@ final class VulkanStream implements AutoCloseable {
      * error, and without {@code wideLines} the only legal value is 1.0. GL clamps for the same reason, so a mod that
      * asks for 8.0 on a device that tops out at 4.0 gets 4.0 in both APIs.</p>
      */
+    /**
+     * Sets the blend constants, which every pipeline declares dynamic.
+     *
+     * <p>Same shape as the line width, and for the same reason: the value is per draw, so baking it into the pipeline
+     * would mean one pipeline per blend colour. A draw with no state gets GL's default of all zeros - and that has
+     * to be sent explicitly, because a dynamic state that was never set is a validation error.</p>
+     */
+    private void applyBlendConstants(VkCommandBuffer commandBuffer, float[][] applied, DrawState state) {
+        float[] want = state != null ? state.blendColor() : ZERO_BLEND_CONSTANTS;
+        if (applied[0][0] == want[0] && applied[0][1] == want[1] && applied[0][2] == want[2]
+                && applied[0][3] == want[3]) {
+            return;
+        }
+        System.arraycopy(want, 0, applied[0], 0, 4);
+        org.lwjgl.vulkan.VK10.vkCmdSetBlendConstants(commandBuffer, applied[0]);
+    }
+
+    private static final float[] ZERO_BLEND_CONSTANTS = {0.0F, 0.0F, 0.0F, 0.0F};
+
     private void applyLineWidth(VkCommandBuffer commandBuffer, float[] applied, DrawState state) {
         float width = context.clampLineWidth(state != null ? state.lineWidth() : 1.0F);
         if (applied[0] == width) {

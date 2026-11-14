@@ -715,6 +715,16 @@ public final class FrameShim implements ShimGl.Impl {
 
 
 
+    @Override
+    public void glBlendColor(float red, float green, float blue, float alpha) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glBlendColor(red, green, blue, alpha);
+            return;
+        }
+        state.blendColor(red, green, blue, alpha);
+    }
+
     /** {@code GL_ALL_ATTRIB_BITS}, the mask every measured {@code glPushAttrib} passes. */
     private static final int GL_ALL_ATTRIB_BITS = 0xFFFFF;
 

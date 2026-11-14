@@ -232,6 +232,14 @@ public final class ShimGl {
         /** {@code glCopyTexImage2D} (LWJGL 2 shape). */
         void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border);
         /**
+         * {@code glBlendColor}: the constant colour the {@code GL_CONSTANT_*} blend factors read.
+         *
+         * <p>In GL 1.2's extension it was {@code GL14.glBlendColor}, and that is the class the call sites name - it
+         * is also what vanilla's {@code GlStateManager.blendColor} calls, so one entry covers both.</p>
+         */
+        void glBlendColor(float red, float green, float blue, float alpha);
+
+        /**
          * {@code glNewList}: starts recording drawing commands into a list.
          *
          * @param glMode {@code GL_COMPILE} (4864); {@code GL_COMPILE_AND_EXECUTE} is not supported
@@ -549,6 +557,11 @@ public final class ShimGl {
         }
 
 
+
+        @Override
+        public void glBlendColor(float red, float green, float blue, float alpha) {
+            org.lwjgl.opengl.GL14.glBlendColor(red, green, blue, alpha);
+        }
 
         @Override
         public void glPushAttrib(int mask) {
@@ -968,6 +981,10 @@ public final class ShimGl {
     }
 
 
+
+    public static void glBlendColor(float red, float green, float blue, float alpha) {
+        impl.glBlendColor(red, green, blue, alpha);
+    }
 
     public static void glPushAttrib(int mask) {
         impl.glPushAttrib(mask);
