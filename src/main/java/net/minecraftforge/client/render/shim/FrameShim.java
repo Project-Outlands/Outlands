@@ -409,15 +409,14 @@ public final class FrameShim implements ShimGl.Impl {
 
     @Override
     public void glPointSize(float size) {
-        if (state() == null) {
+        FrameState state = state();
+        if (state == null) {
             ShimGl.REAL_GL.glPointSize(size);
             return;
         }
-        // A pipeline has no point size: the vertex shader has to write gl_PointSize, which this backend's stream
-        // shader does not do yet. Points are therefore drawn one pixel wide - reported rather than silently.
-        FrameStates.reportSkippedOnce("glPointSize(" + size + ")",
-                "a pipeline's point size comes from the vertex shader, which does not write gl_PointSize yet, so"
-                        + " point primitives are drawn one pixel wide");
+        // Vulkan has no point size state: the vertex shader writes gl_PointSize, so the value travels with the draw
+        // and the stream shader reads it from the push constant.
+        state.pointSize(size);
     }
 
     @Override

@@ -33,8 +33,8 @@ layout(push_constant) uniform PushConstants {
     vec4 fogColor;
     ChunkDataBuffer chunkData;
     float alphaReference;
-    float alphaTest;
-    float flipU;
+    /** Bit 0 alpha test, bits 1-2 flip mode (0 none, 1 mirror u, 2 transpose), bit 3 radial fog. */
+    int flags;
     int fogMode;
     float fogStart;
     float fogEnd;
@@ -67,11 +67,12 @@ void main() {
     // u = 0 at the right edge of the screen, so storing the copy unmirrored puts the background's left on the screen's
     // right. Measured against the GL renderer, whose background has its water on the left and whose Vulkan
     // counterpart had it on the right.
-    // flipU: 0 = as given, 1 = mirror u, 2 = swap u and v (transposed sampling).
+    // The flip mode: 0 = as given, 1 = mirror u, 2 = swap u and v (transposed sampling).
     vec2 uv;
-    if (pc.flipU > 1.5) {
+    int flip = (pc.flags >> 1) & 3;
+    if (flip == 2) {
         uv = inUv.yx;
-    } else if (pc.flipU > 0.5) {
+    } else if (flip == 1) {
         uv = vec2(1.0 - inUv.x, inUv.y);
     } else {
         uv = inUv;
@@ -80,7 +81,7 @@ void main() {
 
     // GL_GREATER is the only comparison vanilla sets, and the backend rejects the others rather than guessing.
     // In addition, discard fully transparent texels so they never write depth or trigger redundant work.
-    if ((pc.alphaTest > 0.5 && !(sample4.a > pc.alphaReference)) || sample4.a == 0.0) {
+    if (((pc.flags & 1) != 0 && !(sample4.a > pc.alphaReference)) || sample4.a == 0.0) {
         discard;
     }
 

@@ -51,8 +51,15 @@ public final class FrameStates {
             state.fogMode(param);
             return true;
         }
+        if (glPname == 34138) {  // GL_FOG_DISTANCE_MODE_NV
+            // Mods reach this through GlStateManager.glFogi, and it used to throw: a mod asking for radial fog
+            // would have crashed the frame instead of getting fog that measures the wrong distance. Immersive
+            // Engineering asks exactly here while its "flashed" effect is on.
+            state.fogDistanceMode(param);
+            return true;
+        }
         throw unimplemented("fog (glFogi " + glPname + ")",
-                "GL_FOG_MODE, the only integer fog value vanilla sets");
+                "GL_FOG_MODE or GL_FOG_DISTANCE_MODE_NV, the integer fog values the game and its mods set");
     }
 
     /**
@@ -184,7 +191,9 @@ public final class FrameStates {
         float[] values = new float[16];
         SCRATCH_MVP.get(values);
         boolean fogEnabled = state.isEnabled(Capability.FOG);
-        int fogMode = fogEnabled ? state.fogMode() : 0;
+        // The radial bit rides in the fog mode's high 16 bits: the terrain operation carries five fog values and a
+        // sixth field would have changed a record that the whole layer path shares, for one bit.
+        int fogMode = fogEnabled ? state.fogMode() | (state.radialFog() ? 0x10000 : 0) : 0;
         float[] fogColor = state.fogColor();
         return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(
                 layer, values, viewX, viewY, viewZ,

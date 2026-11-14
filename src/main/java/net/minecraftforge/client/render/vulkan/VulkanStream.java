@@ -163,6 +163,9 @@ final class VulkanStream implements AutoCloseable {
     private final float[] lastPushedOverlayColor = new float[4];
     /** The overlay mode last pushed, as 0.0 or 1.0, so a change of mode re-pushes. */
     private float lastPushedOverlayMode = -1.0F;
+    private float lastPushedFogTanX = Float.NaN;
+    private float lastPushedFogTanY = Float.NaN;
+    private float lastPushedPointSize = Float.NaN;
     private long lastPushedLayout = 0L;
 
     static final int STATIC_QUAD_CAPACITY = 65_536;
@@ -657,6 +660,9 @@ final class VulkanStream implements AutoCloseable {
                 // texture), and collapsing it to "is it outline mode" sent the second case down the normal path - a
                 // silhouette in the entity's own texture colour, which is exactly what it was meant to avoid.
                 float curOverlayMode = (float) ds.overlayMode();
+                float curFogTanX = ds.fogTanX();
+                float curFogTanY = ds.fogTanY();
+                float curPointSize = ds.pointSize();
 
                 boolean needPush = curLayout != lastPushedLayout
                         || curAlphaRef != lastPushedAlphaRef
@@ -677,28 +683,33 @@ final class VulkanStream implements AutoCloseable {
                                 && (curOverlayColor[0] != lastPushedOverlayColor[0]
                                         || curOverlayColor[1] != lastPushedOverlayColor[1]
                                         || curOverlayColor[2] != lastPushedOverlayColor[2]))
+                        || curFogTanX != lastPushedFogTanX
+                        || curFogTanY != lastPushedFogTanY
+                        || curPointSize != lastPushedPointSize
                         || !java.util.Arrays.equals(curMvp, lastPushedMvp);
                 if (needPush) {
                     push.position(0);
                     writeMvp(push, curMvp);
-                    push.put(16, curFogColor[0]);
-                    push.put(17, curFogColor[1]);
-                    push.put(18, curFogColor[2]);
-                    push.put(19, curFogColor[3]);
-                    push.put(20, curOverlayColor[0]);
-                    push.put(21, curOverlayColor[1]);
-                    push.put(22, curOverlayColor[2]);
-                    push.put(23, curOverlayColor[3]);
-                    push.put(24, curAlphaRef);
-                    push.put(25, curAlphaTest);
-                    push.put(26, 0.0F); // flipU
-                    constants.putInt(108, curFogMode);
-                    push.put(28, curFogStart);
-                    push.put(29, curFogEnd);
-                    push.put(30, curFogDensity);
-                    // The one spare float carries the overlay mode: 1 when a light unit was replaced, 2 when the
-                    // texture was, 0 for the hurt-flash mix.
-                    push.put(31, curOverlayMode);
+                    constants.putFloat(64, curFogColor[0]);
+                    constants.putFloat(68, curFogColor[1]);
+                    constants.putFloat(72, curFogColor[2]);
+                    constants.putFloat(76, curFogColor[3]);
+                    // Packed RGBA8: the block was full, and a colour is the cheapest thing in it to compress.
+                    constants.putInt(80, packColor(curOverlayColor));
+                    constants.putFloat(84, curAlphaRef);
+                    // Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode (1 a light was replaced, 2 the
+                    // texture, 0 the hurt-flash mix), bit 5 radial fog. The stream path has no flip mode of its own,
+                    // so that field stays 0 here; the radial case needs no bit because a zero tangent already means
+                    // GL's planar distance.
+                    constants.putInt(88, (curAlphaTest != 0.0F ? 1 : 0)
+                            | (((int) curOverlayMode & 3) << 3));
+                    constants.putInt(92, curFogMode);
+                    constants.putFloat(96, curFogStart);
+                    constants.putFloat(100, curFogEnd);
+                    constants.putFloat(104, curFogDensity);
+                    constants.putFloat(108, curFogTanX);
+                    constants.putFloat(112, curFogTanY);
+                    constants.putFloat(116, curPointSize);
                     constants.position(0);
                     constants.limit(128);
                     vkCmdPushConstants(commandBuffer, curLayout,
@@ -715,6 +726,9 @@ final class VulkanStream implements AutoCloseable {
                     System.arraycopy(curFogColor, 0, lastPushedFogColor, 0, 4);
                     System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
                     lastPushedOverlayMode = curOverlayMode;
+                    lastPushedFogTanX = curFogTanX;
+                    lastPushedFogTanY = curFogTanY;
+                    lastPushedPointSize = curPointSize;
                     lastPushedLayout = curLayout;
                 }
                 if (textureSets[indexOfOp] != boundSet || streamSetsStale) {
@@ -841,6 +855,15 @@ final class VulkanStream implements AutoCloseable {
      * the world's perspective are both GL-style and both need it. Negating row 1 in place is that premultiply, and
      * it costs four multiplies instead of a matrix multiply per draw.</p>
      */
+    /** A colour as RGBA8, which is how the push constant carries it: four floats were 12 bytes it did not have. */
+    private static int packColor(float[] colour) {
+        int r = Math.round(Math.max(0.0F, Math.min(1.0F, colour[0])) * 255.0F);
+        int g = Math.round(Math.max(0.0F, Math.min(1.0F, colour[1])) * 255.0F);
+        int b = Math.round(Math.max(0.0F, Math.min(1.0F, colour[2])) * 255.0F);
+        int a = Math.round(Math.max(0.0F, Math.min(1.0F, colour[3])) * 255.0F);
+        return r | (g << 8) | (b << 16) | (a << 24);
+    }
+
     private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {
         target.position(0);
         target.put(mvp);

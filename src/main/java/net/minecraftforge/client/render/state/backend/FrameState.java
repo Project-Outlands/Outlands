@@ -155,6 +155,40 @@ public interface FrameState {
      */
     void fog(int glPname, java.nio.FloatBuffer param);
 
+    /**
+     * {@code glFogi(GL_FOG_DISTANCE_MODE_NV)}: how the fog coordinate is measured.
+     *
+     * <p>GL's default ({@code GL_EYE_PLANE}) is the absolute eye-space z, which is what {@code gl_Position.w} holds
+     * on the backend's shaders. {@code GL_EYE_RADIAL_NV} is the eye-to-fragment distance instead, which is what
+     * {@code GL_NV_fog_distance} adds and what Immersive Engineering asks for while its "flashed" effect is on.</p>
+     *
+     * @return {@code true} for radial, {@code false} for the default planar distance
+     */
+    default boolean radialFog() {
+        return false;
+    }
+
+    /** {@code glFogi(GL_FOG_DISTANCE_MODE_NV, mode)}: 34139 is radial, 34140 and 9472 are planar. */
+    default void fogDistanceMode(int glMode) {
+        throw new UnsupportedOperationException("fog distance mode is not implemented by this backend");
+    }
+
+    /**
+     * {@code glPointSize}: the rasterised diameter of a point primitive.
+     *
+     * <p>Vulkan has no point size state - the vertex shader writes {@code gl_PointSize} - so this travels with the
+     * draw and the stream shader reads it from the push constant. Without it, points are drawn at whatever the
+     * driver picks, which is unspecified.</p>
+     */
+    default void pointSize(float size) {
+        throw new UnsupportedOperationException("point size is not implemented by this backend");
+    }
+
+    /** The point size in effect, 1.0 when nothing has set one. */
+    default float pointSize() {
+        return 1.0F;
+    }
+
     int fogMode();
     float[] fogColor();
     float fogDensity();

@@ -62,6 +62,8 @@ public final class SpirvReflection {
     private static final int STORAGE_INPUT = 1;
     private static final int STORAGE_UNIFORM = 2;
     private static final int STORAGE_OUTPUT = 3;
+    /** {@code PushConstant}: the block that is not a descriptor, so it has no set or binding. */
+    private static final int STORAGE_PUSH_CONSTANT = 9;
 
     /** Execution models, from the SPIR-V specification: the stage a module is written for. */
     public static final int EXECUTION_VERTEX = 0;
@@ -97,7 +99,7 @@ public final class SpirvReflection {
     }
 
     /** What a module declares. */
-    public record Module(List<Sampler> samplers, List<Block> blocks) {
+    public record Module(List<Sampler> samplers, List<Block> blocks, List<Block> pushConstants) {
         public Sampler sampler(String samplerName) {
             for (Sampler sampler : samplers) {
                 if (sampler.name().equals(samplerName)) {
@@ -296,6 +298,7 @@ public final class SpirvReflection {
 
         List<Sampler> samplers = new ArrayList<>();
         List<Block> blocks = new ArrayList<>();
+        List<Block> pushConstants = new ArrayList<>();
         for (int[] variable : variables) {
             int pointerType = variable[0];
             int id = variable[1];
@@ -313,7 +316,8 @@ public final class SpirvReflection {
 
             if (storage == STORAGE_UNIFORM_CONSTANT) {
                 samplers.add(new Sampler(nameOf(names, id, "sampler" + binding), set, binding));
-            } else if (storage == STORAGE_UNIFORM && resolved != null && resolved.kind == TypeKind.STRUCT) {
+            } else if ((storage == STORAGE_UNIFORM || storage == STORAGE_PUSH_CONSTANT)
+                    && resolved != null && resolved.kind == TypeKind.STRUCT) {
                 boolean isBlock = hasDecoration(decor, DECORATION_BLOCK);
                 List<Member> members = new ArrayList<>();
                 int blockSize = 0;
@@ -328,11 +332,14 @@ public final class SpirvReflection {
                     blockSize = Math.max(blockSize, offset + size);
                 }
                 if (isBlock || !members.isEmpty()) {
-                    blocks.add(new Block(nameOf(names, id, "uniforms"), set, binding, members, blockSize));
+                    Block block = new Block(nameOf(names, id, "uniforms"), set, binding, members, blockSize);
+                    // Kept apart from the descriptor blocks: a push constant has no set to bind, and a caller
+                    // asking "what does this block cost" means the size Vulkan's 128-byte limit is spent on.
+                    (storage == STORAGE_PUSH_CONSTANT ? pushConstants : blocks).add(block);
                 }
             }
         }
-        return new Module(List.copyOf(samplers), List.copyOf(blocks));
+        return new Module(List.copyOf(samplers), List.copyOf(blocks), List.copyOf(pushConstants));
     }
 
     private static boolean hasDecoration(int[] decorations, int decoration) {

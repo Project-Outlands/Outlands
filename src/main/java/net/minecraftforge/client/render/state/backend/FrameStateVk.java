@@ -117,6 +117,10 @@ final class FrameStateVk implements FrameState {
 
     /** Fog state, at the defaults GL documents: GL_EXP at density 1, no colour, the linear range 0..1. */
     private int fogMode = 2048;
+    /** GL_FOG_DISTANCE_MODE_NV: false is GL's default planar distance, true is GL_EYE_RADIAL_NV. */
+    private boolean radialFog;
+    /** glPointSize: 1.0 until something asks for another size, which is GL's initial value. */
+    private float pointSize = 1.0F;
     private final float[] fogColor = {0.0F, 0.0F, 0.0F, 0.0F};
     private float fogDensity = 1.0F;
     private float fogStart = 0.0F;
@@ -440,6 +444,32 @@ final class FrameStateVk implements FrameState {
             case 2048, 2049, 9729 -> glMode;   // GL_EXP, GL_EXP2, GL_LINEAR
             default -> throw unsupported("fog mode", glMode);
         };
+    }
+
+    @Override
+    public void fogDistanceMode(int glMode) {
+        // 34139 GL_EYE_RADIAL_NV, 34140 GL_EYE_PLANE_ABSOLUTE_NV, 9472 GL_EYE_PLANE.
+        switch (glMode) {
+            case 34139 -> radialFog = true;
+            case 34140, 9472 -> radialFog = false;
+            default -> throw FrameStates.unimplemented("fog (glFogi 34138 -> " + glMode + ")",
+                    "GL_EYE_RADIAL_NV, GL_EYE_PLANE_ABSOLUTE_NV or GL_EYE_PLANE");
+        }
+    }
+
+    @Override
+    public boolean radialFog() {
+        return radialFog;
+    }
+
+    @Override
+    public void pointSize(float size) {
+        pointSize = size;
+    }
+
+    @Override
+    public float pointSize() {
+        return pointSize;
     }
 
     @Override

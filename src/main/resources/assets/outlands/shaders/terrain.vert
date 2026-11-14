@@ -19,15 +19,18 @@ layout(location = 1) in vec2 inUv;
 layout(location = 2) in vec4 inColor;
 
 // Push constants: mat4 MVP (64 bytes), vec4 fogColor (16 bytes), chunkData 64-bit BDA pointer (8 bytes),
-// alphaReference (4), alphaTest (4), flipU (4), fogMode (4), fogStart (4), fogEnd (4), fogDensity (4),
-// cameraX/Y/Z (12 bytes). Total: 128 bytes, exact limit guaranteed by Vulkan specifications.
+// alphaReference (4), flags (4), fogMode (4), fogStart (4), fogEnd (4), fogDensity (4),
+// cameraX/Y/Z (12 bytes), spare (4). Total: 128 bytes, the limit Vulkan guarantees.
+//
+// alphaTest, flipU and the fog distance mode used to be three separate floats. They are one int of bits now,
+// because the distance mode had nowhere else to go and four bytes were cheaper than growing the block past 128.
 layout(push_constant) uniform PushConstants {
     mat4 modelViewProjection;
     vec4 fogColor;
     ChunkDataBuffer chunkData;
     float alphaReference;
-    float alphaTest;
-    float flipU;
+    /** Bit 0 alpha test, bits 1-2 flip mode (0 none, 1 mirror u, 2 transpose), bit 3 radial fog. */
+    int flags;
     int fogMode;
     float fogStart;
     float fogEnd;
@@ -35,7 +38,10 @@ layout(push_constant) uniform PushConstants {
     float cameraX;
     float cameraY;
     float cameraZ;
+    float spare;
 } pc;
+
+const int FLAG_RADIAL_FOG = 8;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec2 outUv;
@@ -50,6 +56,9 @@ void main() {
     outUv = inUv;
     int lightData = inPosAndLight.w;
     outLightmap = vec2(float(lightData & 0xFF), float((lightData >> 8) & 0xFF));
+    // GL's fog coordinate: absolute eye-space z by default, eye-to-fragment distance with
+    // GL_NV_fog_distance's GL_EYE_RADIAL_NV (what Immersive Engineering asks for). Both are computed here because
+    // this is the only stage that has the vertex.
     vec3 camPos = vec3(pc.cameraX, pc.cameraY, pc.cameraZ);
-    outEyeDist = length(worldPos - camPos);
+    outEyeDist = (pc.flags & FLAG_RADIAL_FOG) != 0 ? length(worldPos - camPos) : gl_Position.w;
 }

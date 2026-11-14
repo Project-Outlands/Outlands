@@ -899,15 +899,19 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         constants.putFloat(76, fogColor != null ? fogColor[3] : 1.0f);
         constants.putLong(80, chunkDataAddress);
         constants.putFloat(88, 0.1F);
-        constants.putFloat(92, alphaTest ? 1.0F : 0.0F);
-        constants.putFloat(96, 0.0F);
-        constants.putInt(100, fogMode);
-        constants.putFloat(104, fogStart);
-        constants.putFloat(108, fogEnd);
-        constants.putFloat(112, fogDensity);
-        constants.putFloat(116, (float) viewX);
-        constants.putFloat(120, (float) viewY);
-        constants.putFloat(124, (float) viewZ);
+        // One int of bits instead of three floats: alpha test (bit 0), flip mode (bits 1-2, always 0 here) and the
+        // fog distance mode (bit 3), which arrived by way of GL_NV_fog_distance and had nowhere else to go.
+        // The radial bit rides in on fogMode's high bit from FrameDraws.TerrainLayer, which is where the frame state
+        // is turned into an operation, so this writer does not need a fifth parameter.
+        int radial = (fogMode & 0x10000) != 0 ? 8 : 0;
+        constants.putInt(92, (alphaTest ? 1 : 0) | radial);
+        constants.putInt(96, fogMode & 0xFFFF);
+        constants.putFloat(100, fogStart);
+        constants.putFloat(104, fogEnd);
+        constants.putFloat(108, fogDensity);
+        constants.putFloat(112, (float) viewX);
+        constants.putFloat(116, (float) viewY);
+        constants.putFloat(120, (float) viewZ);
         constants.position(0);
         constants.limit(128);
     }

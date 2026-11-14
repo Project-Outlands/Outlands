@@ -52,6 +52,10 @@ public final class DrawState {
     private float fogEnd;
     private float fogDensity;
     private final float[] fogColor = new float[4];
+    /** tan(halfFovX), tan(halfFovY): 0,0 for GL's default planar fog distance, the projection's tangents for radial. */
+    private float fogTanX;
+    private float fogTanY;
+    private float pointSize = 1.0F;
     private final float[] overlayColor = new float[4];
     /** 1 when {@link #overlayColor} is outline mode (replace the light, alpha from the lightmap), 0 for a mix. */
     private int overlayMode;
@@ -185,6 +189,9 @@ public final class DrawState {
         this.fogEnd = other.fogEnd;
         this.fogDensity = other.fogDensity;
         System.arraycopy(other.fogColor, 0, this.fogColor, 0, 4);
+        this.fogTanX = other.fogTanX;
+        this.fogTanY = other.fogTanY;
+        this.pointSize = other.pointSize;
         System.arraycopy(other.overlayColor, 0, this.overlayColor, 0, 4);
         this.overlayMode = other.overlayMode;
         this.program = other.program;
@@ -272,12 +279,29 @@ public final class DrawState {
             if (fc != null && fc.length >= 4) {
                 System.arraycopy(fc, 0, this.fogColor, 0, 4);
             }
+            // The radial distance is the length of the eye-space position, and the only way the shader can
+            // reconstruct that from the clip-space position it has is through the projection's tangents:
+            // viewPos = (clip.x * tanX, clip.y * tanY, -clip.w). Taken from the projection in effect at the draw,
+            // and left at zero - which makes the shader compute exactly |clip.w|, GL's planar distance - whenever
+            // the projection is not a perspective one, where the tangents mean nothing.
+            this.fogTanX = 0.0f;
+            this.fogTanY = 0.0f;
+            if (state.radialFog()) {
+                org.joml.Matrix4fc projection = state.projection();
+                if (projection.m23() == -1.0f) {
+                    this.fogTanX = projection.m00() != 0.0f ? 1.0f / projection.m00() : 0.0f;
+                    this.fogTanY = projection.m11() != 0.0f ? 1.0f / projection.m11() : 0.0f;
+                }
+            }
         } else {
             this.fogMode = 0;
             this.fogStart = 0.0f;
             this.fogEnd = 1.0f;
             this.fogDensity = 1.0f;
+            this.fogTanX = 0.0f;
+            this.fogTanY = 0.0f;
         }
+        this.pointSize = state.pointSize();
 
         captureProgram();
 
@@ -384,6 +408,15 @@ public final class DrawState {
     public float fogEnd() { return fogEnd; }
     public float fogDensity() { return fogDensity; }
     public float[] fogColor() { return fogColor; }
+
+    /** tan(halfFovX) for the radial fog distance, or 0 for GL's default planar one. */
+    public float fogTanX() { return fogTanX; }
+
+    /** tan(halfFovY) for the radial fog distance, or 0 for GL's default planar one. */
+    public float fogTanY() { return fogTanY; }
+
+    /** glPointSize in effect at the draw. */
+    public float pointSize() { return pointSize; }
 
     public boolean hasViewport() {
         return viewport[2] > 0 && viewport[3] > 0;

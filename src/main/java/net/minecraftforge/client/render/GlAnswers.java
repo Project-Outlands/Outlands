@@ -104,6 +104,9 @@ public final class GlAnswers {
         caps.GL_EXT_blend_func_separate = true;
         // Extensions vanilla's own init asks about when the core version is older; they are implied by 1.3+ but
         // answering them keeps the ARB fallback branches from being taken.
+        // GL_NV_fog_distance: implemented as the eye-to-fragment distance, which is the whole of what the extension
+        // changes. Immersive Engineering branches on it for its "flashed" effect's fog.
+        caps.GL_NV_fog_distance = true;
         caps.GL_ARB_multitexture = true;
         caps.GL_ARB_texture_env_combine = true;
         caps.GL_ARB_vertex_buffer_object = true;
