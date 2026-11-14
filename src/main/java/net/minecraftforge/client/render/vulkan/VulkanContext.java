@@ -98,10 +98,11 @@ final class VulkanContext {
     private final String deviceName;
     private final boolean multiDrawIndirect;
     private final boolean drawIndirectFirstInstance;
+    private final boolean fillModeNonSolid;
 
     private VulkanContext(VkInstance instance, long debugMessenger, long surface, VkPhysicalDevice physicalDevice,
                           VkDevice device, VkQueue graphicsQueue, int graphicsFamily, String deviceName,
-                          boolean multiDrawIndirect, boolean drawIndirectFirstInstance) {
+                          boolean multiDrawIndirect, boolean drawIndirectFirstInstance, boolean fillModeNonSolid) {
         this.instance = instance;
         this.debugMessenger = debugMessenger;
         this.surface = surface;
@@ -112,6 +113,17 @@ final class VulkanContext {
         this.deviceName = deviceName;
         this.multiDrawIndirect = multiDrawIndirect;
         this.drawIndirectFirstInstance = drawIndirectFirstInstance;
+        this.fillModeNonSolid = fillModeNonSolid;
+    }
+
+    /**
+     * Whether a pipeline may rasterise as lines or points, which {@code glPolygonMode} asks for.
+     *
+     * <p>Without it Vulkan rejects a pipeline that is not {@code FILL}, so the mode is clamped rather than passed on -
+     * the same shape as the line width and its {@code wideLines} feature.</p>
+     */
+    boolean supportsNonSolidFill() {
+        return fillModeNonSolid;
     }
 
     boolean supportsIndirect() {
@@ -330,10 +342,12 @@ final class VulkanContext {
 
                     LOGGER.info("Vulkan device: {} ({}) [MDI: {}, firstInstance: {}]", properties.deviceNameString(),
                             VulkanProbe.version(properties.apiVersion()),
-                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance());
+                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance(),
+                            deviceResult.fillModeNonSolid());
                     return new VulkanContext(instance, debugMessenger, surface, physicalDevice, device, queue,
                             graphicsFamily, properties.deviceNameString(),
-                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance());
+                            deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance(),
+                            deviceResult.fillModeNonSolid());
                 } catch (RuntimeException e) {
                     vkDestroySurfaceKHR(instance, surface, null);
                     throw e;
@@ -451,7 +465,8 @@ final class VulkanContext {
         }
     }
 
-    private record DeviceResult(VkDevice device, boolean multiDrawIndirect, boolean drawIndirectFirstInstance) {}
+    private record DeviceResult(VkDevice device, boolean multiDrawIndirect, boolean drawIndirectFirstInstance,
+                                boolean fillModeNonSolid) {}
 
     private static DeviceResult createDevice(VkPhysicalDevice physicalDevice, int family, int deviceApiVersion,
                                              MemoryStack stack) {
@@ -502,11 +517,16 @@ final class VulkanContext {
         // wideLines, so it is asked for rather than assumed - and when it is absent the width is clamped to 1.0
         // instead of being passed to vkCmdSetLineWidth, which the spec forbids.
         boolean wideLines = supported10.wideLines();
+        // glPolygonMode(GL_LINE) is how Actinium draws wireframe. Vulkan only honours a polygon mode other than FILL
+        // with fillModeNonSolid, and without it a pipeline that asks for LINE fails validation rather than degrading -
+        // so the feature is asked for and the answer is kept.
+        boolean fillModeNonSolid = supported10.fillModeNonSolid();
 
         VkPhysicalDeviceFeatures enable10 = VkPhysicalDeviceFeatures.calloc(stack)
                 .multiDrawIndirect(mdi)
                 .drawIndirectFirstInstance(firstInstance)
-                .wideLines(wideLines);
+                .wideLines(wideLines)
+                .fillModeNonSolid(fillModeNonSolid);
 
         // Enable only what the device reports. Asking for an unsupported feature fails device creation, and the
         // interesting case (a non-conformant implementation such as MoltenVK) should degrade with a named reason.
@@ -532,11 +552,16 @@ final class VulkanContext {
             enable14.pNext(enable13.address());
         }
 
+        VulkanPipeline.setNonSolidFill(fillModeNonSolid);
         reportMissing("multiDrawIndirect", mdi);
         reportMissing("drawIndirectFirstInstance", firstInstance);
         if (!wideLines) {
             LOGGER.info("wideLines is not supported: glLineWidth is clamped to 1.0, which is the only width this"
                     + " device rasterises");
+        }
+        if (!fillModeNonSolid) {
+            LOGGER.info("fillModeNonSolid is not supported: glPolygonMode is clamped to GL_FILL, which is the only"
+                    + " polygon mode this device rasterises");
         }
         reportMissing("drawIndirectCount", supported12.drawIndirectCount());
         reportMissing("bufferDeviceAddress", supported12.bufferDeviceAddress());
@@ -561,7 +586,8 @@ final class VulkanContext {
 
         PointerBuffer deviceOut = stack.mallocPointer(1);
         VkCheck.check(vkCreateDevice(physicalDevice, createInfo, null, deviceOut), "vkCreateDevice");
-        return new DeviceResult(new VkDevice(deviceOut.get(0), physicalDevice, createInfo), mdi, firstInstance);
+        return new DeviceResult(new VkDevice(deviceOut.get(0), physicalDevice, createInfo), mdi, firstInstance,
+                fillModeNonSolid);
     }
 
     private static void reportMissing(String feature, boolean supported) {

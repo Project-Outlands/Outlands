@@ -113,11 +113,60 @@ final class VulkanPipeline implements AutoCloseable {
      * @param srcAlpha   the GL source blend factor for alpha
      * @param dstAlpha   the GL destination blend factor for alpha
      */
+    /**
+     * Whether the device can rasterise polygons as lines or points.
+     *
+     * <p>Set once, when the device is created: it is a device capability, not a pipeline one, and every overload of
+     * {@code create} would otherwise have to carry it. {@code VulkanPipeline} is a static utility, so this is the same
+     * kind of state as the line-width clamp in {@code VulkanContext}.</p>
+     */
+    private static volatile boolean nonSolidFill;
+
+    static void setNonSolidFill(boolean supported) {
+        nonSolidFill = supported;
+    }
+
+    /**
+     * Maps {@code glPolygonMode}'s mode, clamping to FILL when the device cannot rasterise anything else.
+     *
+     * <p>A pipeline that asks for {@code VK_POLYGON_MODE_LINE} without {@code fillModeNonSolid} fails validation, so
+     * clamping is the only option - the same shape as the line width and {@code wideLines}.</p>
+     */
+    static int polygonMode(int glMode) {
+        if (!nonSolidFill) {
+            return org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL;
+        }
+        return switch (glMode) {
+            case 6912 -> org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_POINT;   // GL_POINT
+            case 6913 -> org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_LINE;    // GL_LINE
+            case 6914 -> org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL;    // GL_FILL
+            default -> throw new IllegalArgumentException("not a GL polygon mode: " + glMode);
+        };
+    }
+
+    /** Maps {@code glBlendEquation} to a Vulkan blend operation. */
+    static int blendOp(int glMode) {
+        return switch (glMode) {
+            case 32774 -> org.lwjgl.vulkan.VK10.VK_BLEND_OP_ADD;                 // GL_FUNC_ADD
+            case 32775 -> org.lwjgl.vulkan.VK10.VK_BLEND_OP_MIN;                 // GL_MIN
+            case 32776 -> org.lwjgl.vulkan.VK10.VK_BLEND_OP_MAX;                 // GL_MAX
+            case 32778 -> org.lwjgl.vulkan.VK10.VK_BLEND_OP_SUBTRACT;            // GL_FUNC_SUBTRACT
+            case 32779 -> org.lwjgl.vulkan.VK10.VK_BLEND_OP_REVERSE_SUBTRACT;    // GL_FUNC_REVERSE_SUBTRACT
+            default -> throw new IllegalArgumentException("not a GL blend equation: " + glMode);
+        };
+    }
+
+    /** {@code GL_COPY}, the default logic operation and the only one this backend can apply. */
+    private static final int GL_COPY = 5379;
+    private static final int GL_FUNC_ADD = 32774;
+    private static final int GL_FRONT_AND_BACK = 1032;
+    private static final int GL_FILL = 6914;
+
     record PipelineState(VK10Topology topology, boolean depthTest, boolean depthWrite, int depthFunc, boolean blend,
                          boolean cull, int srcColor, int dstColor, int srcAlpha, int dstAlpha, int colorWriteMask,
                          boolean flippedWinding, boolean stencilTest, int stencilFunc, int stencilReference,
                          int stencilCompareMask, int stencilWriteMask, int stencilFail, int stencilDepthFail,
-                         int stencilPass) {
+                         int stencilPass, int blendEquation, int logicOp, int polygonModeFace, int polygonModeMode) {
         /** Every colour channel, which is what a pipeline built without a mask writes. */
         static final int ALL_CHANNELS = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                 | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -126,7 +175,8 @@ final class VulkanPipeline implements AutoCloseable {
         static PipelineState terrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, true, 515, false, true,
                     GL_ONE, GL_ZERO, GL_ONE, GL_ZERO, ALL_CHANNELS, false,
-                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680);
+                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680,
+                    GL_FUNC_ADD, GL_COPY, GL_FRONT_AND_BACK, GL_FILL);
         }
 
         /**
@@ -150,14 +200,16 @@ final class VulkanPipeline implements AutoCloseable {
                     state.blendSourceAlpha(), state.blendDestinationAlpha(), channels, flipped,
                     state.stencilTest(), state.stencilComparison(), state.stencilReference(),
                     state.stencilCompareMask(), state.stencilWriteMask(), state.stencilFail(),
-                    state.stencilDepthFail(), state.stencilPass());
+                    state.stencilDepthFail(), state.stencilPass(), state.blendEquation(), state.logicOp(),
+                    state.polygonModeFace(), state.polygonModeMode());
         }
 
         /** The state for translucent terrain (water, stained glass): blending enabled, depth write disabled. */
         static PipelineState translucentTerrain() {
             return new PipelineState(VK10Topology.TRIANGLE_LIST, true, false, 515, true, true,
                     770, 771, 1, 0, ALL_CHANNELS, false,
-                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680);
+                    false, 519, 0, 0xFFFFFFFF, 0xFFFFFFFF, 7680, 7680, 7680,
+                    GL_FUNC_ADD, GL_COPY, GL_FRONT_AND_BACK, GL_FILL);
         }
     }
 
@@ -392,7 +444,9 @@ final class VulkanPipeline implements AutoCloseable {
 
         VkPipelineRasterizationStateCreateInfo rasterization = VkPipelineRasterizationStateCreateInfo.calloc(stack)
                 .sType$Default()
-                .polygonMode(org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL)
+                // Clamped, not passed on, when the device has no fillModeNonSolid: a pipeline that asks for LINE
+                // without the feature fails validation, which is the same shape as the line width and wideLines.
+                .polygonMode(polygonMode(state.polygonModeMode()))
                 .cullMode(state.cull() ? VK_CULL_MODE_BACK_BIT : org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE)
                 // An offscreen target is drawn with an inverted viewport so that its image ends up in GL's bottom-up
                 // order, and inverting y inverts which side of a triangle is counter-clockwise: a quad that was front
@@ -433,12 +487,21 @@ final class VulkanPipeline implements AutoCloseable {
                 .blendEnable(state.blend())
                 .srcColorBlendFactor(blendFactor(state.srcColor()))
                 .dstColorBlendFactor(blendFactor(state.dstColor()))
-                .colorBlendOp(VK_BLEND_OP_ADD)
+                .colorBlendOp(blendOp(state.blendEquation()))
                 .srcAlphaBlendFactor(blendFactor(state.srcAlpha()))
                 .dstAlphaBlendFactor(blendFactor(state.dstAlpha()))
-                .alphaBlendOp(VK_BLEND_OP_ADD)
+                .alphaBlendOp(blendOp(state.blendEquation()))
                 .colorWriteMask(state.colorWriteMask());
 
+        // Logical operations are core Vulkan, but the spec applies them only to integer colour attachments. Every
+        // target here is 8-bit UNORM, so a mod that sets one (GL_COPY is the default and means "do nothing") gets the
+        // copy it would have got anyway - reported once rather than silently pretending the op ran.
+        boolean logicOpApplies = state.logicOp() != GL_COPY;
+        if (logicOpApplies) {
+            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce("glLogicOp(" + state.logicOp() + ")",
+                    "Vulkan applies logical operations only to integer colour attachments, and this target is"
+                            + " 8-bit UNORM, so the destination is written unchanged");
+        }
         VkPipelineColorBlendStateCreateInfo colorBlend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
                 .sType$Default()
                 .pAttachments(blendAttachment);

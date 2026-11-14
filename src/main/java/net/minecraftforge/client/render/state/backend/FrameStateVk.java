@@ -748,9 +748,19 @@ final class FrameStateVk implements FrameState {
 
     @Override
     public void stencilOp(int fail, int depthFail, int depthPass) {
-        stencilFail = fail;
-        stencilDepthFail = depthFail;
-        stencilPass = depthPass;
+        // Validated here rather than at pipeline creation: an unknown op used to reach VulkanPipeline.stencilOp and
+        // throw from inside a frame, with the stack pointing at the pipeline cache rather than at the mod that set it.
+        stencilFail = stencilOperation(fail);
+        stencilDepthFail = stencilOperation(depthFail);
+        stencilPass = stencilOperation(depthPass);
+    }
+
+    /** The eight stencil operations GL defines. */
+    private static int stencilOperation(int glOp) {
+        return switch (glOp) {
+            case 0, 7680, 7681, 7682, 7683, 5386, 34055, 34056 -> glOp;
+            default -> throw new IllegalArgumentException("not a GL stencil operation: " + glOp);
+        };
     }
 
     @Override
@@ -1066,6 +1076,26 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public int blendEquation() {
+        return blendEquation;
+    }
+
+    @Override
+    public int logicOp() {
+        return logicOp;
+    }
+
+    @Override
+    public int polygonModeFace() {
+        return polygonModeFace;
+    }
+
+    @Override
+    public int polygonModeMode() {
+        return polygonModeMode;
+    }
+
+    @Override
     public int blendDestination() {
         return blendDestination;
     }
@@ -1078,7 +1108,9 @@ final class FrameStateVk implements FrameState {
     @Override
     public void blendEquation(int glMode) {
         blendEquation = switch (glMode) {
-            case 32774, 32775, 32776, 32777, 32778, 32779 -> glMode;   // ADD, MIN, MAX, SUBTRACT, REVERSE_SUBTRACT
+            // GL_FUNC_ADD, GL_MIN, GL_MAX, GL_FUNC_SUBTRACT, GL_FUNC_REVERSE_SUBTRACT - the whole set. 32777 is not
+            // one of them and used to be listed here.
+            case 32774, 32775, 32776, 32778, 32779 -> glMode;
             default -> throw unsupported("blend equation", glMode);
         };
     }

@@ -25,6 +25,13 @@ public final class DrawState {
     private final float[] color = new float[4];
     /** {@code glBlendColor}: the constant the GL_CONSTANT_* factors read, per draw. */
     private final float[] blendColor = new float[4];
+    /** {@code glBlendEquation}: how the factors combine. Recorded because the pipeline was hard-coding ADD. */
+    private int blendEquation = 32774;
+    /** {@code glLogicOp}: the bitwise operation, which Vulkan applies only to integer attachments. */
+    private int logicOp = 5379;
+    /** {@code glPolygonMode}: point, line or fill, per face. */
+    private int polygonModeFace = 1032;
+    private int polygonModeMode = 6914;
     private boolean texture2d;
     private boolean alphaTest;
     private float alphaReference;
@@ -251,6 +258,10 @@ public final class DrawState {
         System.arraycopy(state.scissorBox(), 0, this.scissor, 0, 4);
         System.arraycopy(state.currentColor(), 0, this.color, 0, 4);
         System.arraycopy(state.blendColor(), 0, this.blendColor, 0, 4);
+        this.blendEquation = state.blendEquation();
+        this.logicOp = state.logicOp();
+        this.polygonModeFace = state.polygonModeFace();
+        this.polygonModeMode = state.polygonModeMode();
         this.texture2d = texture2dEnabled(state);
         this.alphaTest = state.alphaTestEnabled();
         this.alphaReference = state.alphaReference();
@@ -423,6 +434,14 @@ public final class DrawState {
     public float[] color() { return color; }
 
     public float[] blendColor() { return blendColor; }
+
+    public int blendEquation() { return blendEquation; }
+
+    public int logicOp() { return logicOp; }
+
+    public int polygonModeFace() { return polygonModeFace; }
+
+    public int polygonModeMode() { return polygonModeMode; }
     public boolean texture2d() { return texture2d; }
     public boolean alphaTest() { return alphaTest; }
     public float alphaReference() { return alphaReference; }

@@ -408,6 +408,18 @@ public interface FrameState {
      */
     void blendColor(float red, float green, float blue, float alpha);
 
+    /** {@code glBlendEquation}: how source and destination are combined. */
+    int blendEquation();
+
+    /** {@code glLogicOp}: the bitwise operation applied to the destination. */
+    int logicOp();
+
+    /** {@code glPolygonMode}'s face, {@code GL_FRONT}/{@code GL_BACK}/{@code GL_FRONT_AND_BACK}. */
+    int polygonModeFace();
+
+    /** {@code glPolygonMode}'s mode, {@code GL_POINT}/{@code GL_LINE}/{@code GL_FILL}. */
+    int polygonModeMode();
+
     /** The four components {@link #blendColor(float, float, float, float)} last set. */
     float[] blendColor();
 
