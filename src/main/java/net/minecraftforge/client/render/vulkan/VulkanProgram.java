@@ -7,6 +7,7 @@ import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
+import org.lwjgl.vulkan.VkPushConstantRange;
 
 import java.nio.LongBuffer;
 import java.util.ArrayList;
@@ -14,6 +15,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
+import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
 import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
@@ -116,9 +119,21 @@ final class VulkanProgram implements AutoCloseable {
             for (int set = 0; set < sets.size(); set++) {
                 setLayouts[set] = createSetLayout(device, sets.get(set), stack);
             }
+            // The push block has to be declared here even though a program's own uniforms live in a descriptor
+            // block: the preprocessor translates gl_ModelViewProjectionMatrix to outlandsMvp, which is a push
+            // constant, and a shader that reads a push constant the layout does not declare is an invalid pipeline -
+            // VUID-VkGraphicsPipelineCreateInfo-layout-07988. Without it the matrix read as nothing and every
+            // shader-drawn part of a model landed at the identity transform: a magazine strip against the right edge
+            // of the window, a black quad near the top. Same range as the stream's, for the same reason.
+            VkPushConstantRange.Buffer pushConstants = VkPushConstantRange.calloc(1, stack);
+            pushConstants.get(0)
+                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+                    .offset(0)
+                    .size(VulkanPipeline.PUSH_CONSTANT_BYTES);
             VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                     .sType$Default()
-                    .pSetLayouts(stack.longs(setLayouts));
+                    .pSetLayouts(stack.longs(setLayouts))
+                    .pPushConstantRanges(pushConstants);
             LongBuffer layoutOut = stack.mallocLong(1);
             VkCheck.check(vkCreatePipelineLayout(device, layoutInfo, null, layoutOut),
                     "vkCreatePipelineLayout(program " + source.id() + ")");

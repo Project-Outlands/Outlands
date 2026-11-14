@@ -609,9 +609,13 @@ final class VulkanStream implements AutoCloseable {
                     applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                             programFlips);
                     applyLineWidth(commandBuffer, appliedLineWidth, ds);
-                applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
                     applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
-                    programs.record(commandBuffer, slot, ds, topo, programWinding);
+                    // The program reads the same push block the stream shader does - gl_ModelViewProjectionMatrix is
+                    // translated to outlandsMvp - so it has to be pushed before the draw. It was not: the program
+                    // path bound its pipeline, its descriptors and its buffers and then drew with whatever matrix
+                    // the last streamed draw had left behind, which placed every shader-drawn part of a model at the
+                    // previous part's transform.
+                    programs.record(commandBuffer, slot, ds, topo, programWinding, constants);
                     issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
                     boundPipeline = 0L;
                     boundSet = 0L;
@@ -686,34 +690,7 @@ final class VulkanStream implements AutoCloseable {
                         || curPointSize != lastPushedPointSize
                         || !java.util.Arrays.equals(curMvp, lastPushedMvp);
                 if (needPush) {
-                    push.position(0);
-                    writeMvp(push, curMvp);
-                    constants.putFloat(64, curFogColor[0]);
-                    constants.putFloat(68, curFogColor[1]);
-                    constants.putFloat(72, curFogColor[2]);
-                    constants.putFloat(76, curFogColor[3]);
-                    // Packed RGBA8: the block was full, and a colour is the cheapest thing in it to compress.
-                    constants.putInt(80, packColor(curOverlayColor));
-                    constants.putFloat(84, curAlphaRef);
-                    // Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode (1 a light was replaced, 2 the
-                    // texture, 0 the hurt-flash mix), bit 5 radial fog. The stream path has no flip mode of its own,
-                    // so that field stays 0 here; the radial case needs no bit because a zero tangent already means
-                    // GL's planar distance.
-                    constants.putInt(88, (curAlphaTest != 0.0F ? 1 : 0)
-                            | (((int) curOverlayMode & 3) << 3));
-                    constants.putInt(92, curFogMode);
-                    constants.putFloat(96, curFogStart);
-                    constants.putFloat(100, curFogEnd);
-                    constants.putFloat(104, curFogDensity);
-                    constants.putFloat(108, curFogTanX);
-                    constants.putFloat(112, curFogTanY);
-                    constants.putFloat(116, curPointSize);
-                    constants.position(0);
-                    constants.limit(128);
-                    vkCmdPushConstants(commandBuffer, curLayout,
-                            org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
-                                    | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
-                            0, constants);
+                    pushConstants(commandBuffer, curLayout, constants, ds);
                     System.arraycopy(curMvp, 0, lastPushedMvp, 0, 16);
                     lastPushedAlphaRef = curAlphaRef;
                     lastPushedAlphaTest = curAlphaTest;
@@ -895,6 +872,51 @@ final class VulkanStream implements AutoCloseable {
         int b = Math.round(Math.max(0.0F, Math.min(1.0F, colour[2])) * 255.0F);
         int a = Math.round(Math.max(0.0F, Math.min(1.0F, colour[3])) * 255.0F);
         return r | (g << 8) | (b << 16) | (a << 24);
+    }
+
+    /**
+     * Fills the 128-byte push block for one draw and pushes it.
+     *
+     * <p>One packing path for both kinds of draw, because they read the same block: the stream shader takes the
+     * matrix and the fixed-function state from it, and a mod's program reads the matrix out of it because
+     * {@link net.minecraftforge.client.render.vulkan.shader.GlslPreprocessor} translates
+     * {@code gl_ModelViewProjectionMatrix} to {@code outlandsMvp}.</p>
+     */
+    static void pushConstants(VkCommandBuffer commandBuffer, long layout, ByteBuffer constants,
+                                      DrawState state) {
+        java.nio.FloatBuffer push = constants.asFloatBuffer();
+        packConstants(constants, push, state);
+        constants.position(0);
+        constants.limit(VulkanPipeline.PUSH_CONSTANT_BYTES);
+        vkCmdPushConstants(commandBuffer, layout,
+                org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
+                        | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
+                0, constants);
+    }
+
+    /** The block itself: the matrix, then the fixed-function state the stream shader reads. */
+    private static void packConstants(ByteBuffer constants, java.nio.FloatBuffer push, DrawState state) {
+        writeMvp(push, state.mvp());
+        float[] fogColor = state.fogColor();
+        float[] overlayColor = state.overlayColor();
+        constants.putFloat(64, fogColor[0]);
+        constants.putFloat(68, fogColor[1]);
+        constants.putFloat(72, fogColor[2]);
+        constants.putFloat(76, fogColor[3]);
+        // Packed RGBA8: the block was full, and a colour is the cheapest thing in it to compress.
+        constants.putInt(80, packColor(overlayColor));
+        constants.putFloat(84, state.alphaReference());
+        // Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode (1 a light was replaced, 2 the texture, 0 the
+        // hurt-flash mix), bit 5 radial fog. The stream path has no flip mode of its own, so that field stays 0 here;
+        // the radial case needs no bit because a zero tangent already means GL's planar distance.
+        constants.putInt(88, (state.alphaTest() ? 1 : 0) | ((state.overlayMode() & 3) << 3));
+        constants.putInt(92, state.fogMode());
+        constants.putFloat(96, state.fogStart());
+        constants.putFloat(100, state.fogEnd());
+        constants.putFloat(104, state.fogDensity());
+        constants.putFloat(108, state.fogTanX());
+        constants.putFloat(112, state.fogTanY());
+        constants.putFloat(116, state.pointSize());
     }
 
     private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {

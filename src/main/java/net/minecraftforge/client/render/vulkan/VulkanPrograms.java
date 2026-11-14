@@ -132,7 +132,7 @@ final class VulkanPrograms implements AutoCloseable {
      * path and the stream already owns the offsets.</p>
      */
     void record(VkCommandBuffer commandBuffer, int slot, DrawState state,
-                VulkanPipeline.VK10Topology topology, boolean flippedWinding) {
+                VulkanPipeline.VK10Topology topology, boolean flippedWinding, ByteBuffer constants) {
         GlShaders.Program source = state.program();
         if (source == null) {
             throw new IllegalStateException("a draw without a program reached the program path");
@@ -141,6 +141,8 @@ final class VulkanPrograms implements AutoCloseable {
         VulkanPipeline pipeline = program.pipeline(VulkanPipeline.PipelineState.of(topology, state, flippedWinding),
                 colorFormat, depthFormat);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+        // After the bind, so the layout the constants are pushed with is this pipeline's own.
+        VulkanStream.pushConstants(commandBuffer, pipeline.layout(), constants, state);
 
         long[] setLayouts = program.setLayouts();
         if (setLayouts.length == 0) {
