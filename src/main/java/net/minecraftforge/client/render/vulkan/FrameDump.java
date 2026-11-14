@@ -16,14 +16,18 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Temporary diagnostic: writes what a frame's draws are, where they land, and which program drew them.
+ * Diagnostic: writes what a frame's draws are, where they land, and which program drew them.
  *
  * <p>It exists because "the magazine is against the right edge of the window" cannot be chased by reading code: the
- * picture says where a draw landed, and this says what the draw was. Bounded on purpose - a handful of frames, then
- * it stops - so a normal session leaves a small file and no cost.</p>
+ * picture says where a draw landed, and this says what the draw was. It found three faults in a row that way - a
+ * missing push constant, a black lightmap coordinate, a doubled flip.</p>
+ *
+ * <p><b>Off unless asked for</b> ({@code -Doutlands.debug.frameDump=true}), because a picture that is wrong is rare and
+ * a dump every hundred frames is not free. Bounded when it is on: a handful of frames, then it stops.</p>
  */
 final class FrameDump {
 
+    private static final boolean ENABLED = Boolean.getBoolean("outlands.debug.frameDump");
     private static final int EVERY_FRAMES = 120;
     private static final int MAX_DUMPS = 12;
 
@@ -33,6 +37,9 @@ final class FrameDump {
     private FrameDump() {}
 
     static void maybeDump(List<FrameDraws.Operation> ops) {
+        if (!ENABLED) {
+            return;
+        }
         frames++;
         if (dumps >= MAX_DUMPS || frames % EVERY_FRAMES != 0) {
             return;
