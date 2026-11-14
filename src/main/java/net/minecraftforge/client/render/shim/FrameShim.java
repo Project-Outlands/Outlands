@@ -1,5 +1,6 @@
 package net.minecraftforge.client.render.shim;
 
+import net.minecraftforge.client.render.shader.GlShaders;
 import net.minecraftforge.client.render.state.backend.Capability;
 import net.minecraftforge.client.render.state.backend.FrameState;
 import net.minecraftforge.client.render.state.backend.FrameStates;
@@ -27,6 +28,17 @@ import org.lwjgl.opengl.GL11;
  * <p><b>Cost.</b> One null check and one interface call per GL call, which is what the vanilla patch pays too.</p>
  */
 public final class FrameShim implements ShimGl.Impl {
+
+    /** {@code GL_CULL_FACE_MODE}: which face culling removes. */
+    private static final int GL_CULL_FACE_MODE = 2885;
+    /** {@code GL_TEXTURE_BINDING_2D}: the texture bound to the active unit. */
+    private static final int GL_TEXTURE_BINDING_2D = 32873;
+    /** {@code GL_DEPTH_WRITEMASK}: whether depth writes are on, which glIsEnabled does not answer. */
+    private static final int GL_DEPTH_WRITEMASK = 2930;
+    /** {@code GL_MODELVIEW_MATRIX}, and the other two readback targets. */
+    private static final int GL_MODELVIEW_MATRIX = 2982;
+    private static final int GL_PROJECTION_MATRIX = 2983;
+    private static final int GL_TEXTURE_MATRIX = 2984;
 
     /**
      * Calls that reached the frame state instead of real GL.
@@ -344,6 +356,26 @@ public final class FrameShim implements ShimGl.Impl {
     }
 
     @Override
+    public boolean glGetBoolean(int parameterName) {
+        FrameState state = state();
+        if (state == null) {
+            return GL11.glGetBoolean(parameterName);
+        }
+        Capability capability = Capability.tryOf(parameterName);
+        if (capability != null) {
+            return state.isEnabled(capability);
+        }
+        if (parameterName == GL_DEPTH_WRITEMASK) {
+            // Not a capability: glEnable cannot set it, and glIsEnabled does not answer for it. Immersive
+            // Intelligence's clip-plane helper reads it before switching depth writes off and back on.
+            return state.depthWriteEnabled();
+        }
+        FrameStates.reportSkippedOnce("glGetBoolean(" + parameterName + ")",
+                "that piece of state is not kept in a form this backend can report");
+        return false;
+    }
+
+    @Override
     public int glGetInteger(int parameterName) {
         FrameState state = state();
         if (state == null) {
@@ -351,6 +383,15 @@ public final class FrameShim implements ShimGl.Impl {
         }
         return switch (parameterName) {
             case 2979 -> state.matrixStackDepth();     // GL_MODELVIEW_STACK_DEPTH
+            case GL_CULL_FACE_MODE -> state.cullFace();
+            case GL_TEXTURE_BINDING_2D -> {
+                // Answered from the texture backend rather than from the frame state, which is where the binding
+                // actually lives: it is the same store the draw reads its sampler from, so the answer cannot
+                // disagree with what would be sampled.
+                net.minecraftforge.client.render.texture.TextureBackend textures =
+                        net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+                yield textures == null ? 0 : textures.boundTexture(state.activeTextureUnit());
+            }
             default -> {
                 FrameStates.reportSkippedOnce("glGetInteger(" + parameterName + ")",
                         "that piece of state is not kept in a form this backend can report");
@@ -380,6 +421,14 @@ public final class FrameShim implements ShimGl.Impl {
         FrameState state = state();
         if (state == null) {
             ShimGl.REAL_GL.glGetFloat(parameterName, out);
+            return;
+        }
+        if (parameterName == GL_MODELVIEW_MATRIX || parameterName == GL_PROJECTION_MATRIX
+                || parameterName == GL_TEXTURE_MATRIX) {
+            // Immersive Intelligence's setClipPlane reads the modelview matrix back to transform the plane, so this
+            // is not a diagnostic: answering nothing leaves the clip plane in the wrong space. The frame state
+            // already keeps all three matrices for exactly this readback.
+            state.readMatrix(parameterName, out);
             return;
         }
         if (parameterName != 2816) {                   // GL_CURRENT_COLOR
@@ -448,6 +497,178 @@ public final class FrameShim implements ShimGl.Impl {
         }
         state.stencilOp(fail, depthFail, depthPass);
     }
+
+    // region ARB_shader_objects
+    // Routed to GlShaders rather than to the frame state, because that is the object model the backend already
+    // owns: the patched OpenGlHelper writes to the same maps, so a program a mod creates with the ARB names can be
+    // the program vanilla draws with, and glUseProgramObjectARB moves the same current-program pointer the draw
+    // stream reads. A separate implementation would put the two in different namespaces and every draw would be
+    // recorded against the wrong program.
+
+    /**
+     * Whether these calls are answered by the backend's shader objects instead of real GL.
+     *
+     * <p>Deliberately not {@link #state()}: shader objects outlive a frame and are created during mod
+     * construction, long before the first frame state exists - the same reason the OpenGlHelper patch asks
+     * {@code GlShaders.active()} rather than looking for a frame.</p>
+     */
+    private static boolean shaders() {
+        if (!GlShaders.active()) {
+            return false;
+        }
+        ROUTED.increment();
+        return true;
+    }
+
+    @Override
+    public int glCreateProgramObjectARB() {
+        return shaders() ? GlShaders.createProgram() : ShimGl.REAL_GL.glCreateProgramObjectARB();
+    }
+
+    @Override
+    public int glCreateShaderObjectARB(int type) {
+        return shaders() ? GlShaders.createShader(type) : ShimGl.REAL_GL.glCreateShaderObjectARB(type);
+    }
+
+    @Override
+    public void glShaderSourceARB(int shader, CharSequence source) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glShaderSourceARB(shader, source);
+            return;
+        }
+        GlShaders.shaderSource(shader, source == null ? "" : source.toString());
+    }
+
+    @Override
+    public void glCompileShaderARB(int shader) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glCompileShaderARB(shader);
+            return;
+        }
+        GlShaders.compileShader(shader);
+    }
+
+    @Override
+    public void glAttachObjectARB(int program, int shader) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glAttachObjectARB(program, shader);
+            return;
+        }
+        GlShaders.attachShader(program, shader);
+    }
+
+    @Override
+    public void glLinkProgramARB(int program) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glLinkProgramARB(program);
+            return;
+        }
+        GlShaders.linkProgram(program);
+    }
+
+    @Override
+    public void glValidateProgramARB(int program) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glValidateProgramARB(program);
+            return;
+        }
+        // Validation asks whether a program would run in the current GL state. There is no such state to ask
+        // about: the pipeline is built from the recorded draw state, so a program that linked is a program that
+        // runs. Reported once rather than silently ignored, because a mod that branches on the answer would be
+        // branching on nothing.
+        FrameStates.reportSkippedOnce("glValidateProgramARB",
+                "validation describes GL state, and this backend builds its pipeline from the draw instead");
+    }
+
+    @Override
+    public void glUseProgramObjectARB(int program) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUseProgramObjectARB(program);
+            return;
+        }
+        GlShaders.useProgram(program);
+    }
+
+    @Override
+    public void glDeleteObjectARB(int object) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glDeleteObjectARB(object);
+            return;
+        }
+        // One name space, so the name decides what is being released. GlShaders hands shaders and programs out of
+        // one counter for this reason; with two, a program and a shader could both be 1.
+        if (GlShaders.program(object) != null) {
+            GlShaders.deleteProgram(object);
+        } else {
+            GlShaders.deleteShader(object);
+        }
+    }
+
+    @Override
+    public int glGetObjectParameteriARB(int object, int parameterName) {
+        if (!shaders()) {
+            return ShimGl.REAL_GL.glGetObjectParameteriARB(object, parameterName);
+        }
+        return switch (parameterName) {
+            // The ARB constants are the core ones under another name: GL_OBJECT_COMPILE_STATUS_ARB is 35713 and
+            // GL_OBJECT_LINK_STATUS_ARB is 35714, the same values OpenGlHelper's patch passes through.
+            case GlShaders.COMPILE_STATUS -> GlShaders.shaderStatus(object, parameterName);
+            case GlShaders.LINK_STATUS -> GlShaders.programStatus(object, parameterName);
+            default -> {
+                FrameStates.reportSkippedOnce("glGetObjectParameteriARB(" + parameterName + ")",
+                        "that question about a shader object has no answer here; the status queries do");
+                yield 0;
+            }
+        };
+    }
+
+    @Override
+    public String glGetInfoLogARB(int object, int maxLength) {
+        if (!shaders()) {
+            return ShimGl.REAL_GL.glGetInfoLogARB(object, maxLength);
+        }
+        String log = GlShaders.program(object) != null ? GlShaders.programLog(object)
+                : GlShaders.shaderLog(object);
+        // glGetInfoLogARB's contract: at most maxLength characters, the whole log when maxLength is 0 or larger
+        // than the log. Truncating here rather than in the caller keeps a broken shader from logging a megabyte.
+        return maxLength > 0 && log.length() > maxLength ? log.substring(0, maxLength) : log;
+    }
+
+    @Override
+    public int glGetUniformLocationARB(int program, CharSequence name) {
+        if (!shaders()) {
+            return ShimGl.REAL_GL.glGetUniformLocationARB(program, name);
+        }
+        return GlShaders.uniformLocation(program, name);
+    }
+
+    @Override
+    public void glUniform1iARB(int location, int value) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform1iARB(location, value);
+            return;
+        }
+        GlShaders.uniform1i(location, value);
+    }
+
+    @Override
+    public void glUniform1fARB(int location, float value) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform1fARB(location, value);
+            return;
+        }
+        GlShaders.uniform1f(location, value);
+    }
+
+    @Override
+    public void glUniform3fARB(int location, float x, float y, float z) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform3fARB(location, x, y, z);
+            return;
+        }
+        GlShaders.uniform3f(location, x, y, z);
+    }
+    // endregion
 
     @Override
     public void glFinish() {

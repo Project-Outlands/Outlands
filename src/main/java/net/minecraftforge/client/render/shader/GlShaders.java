@@ -206,8 +206,17 @@ public final class GlShaders {
      */
     private static final Int2ObjectMap<Shader> SHADERS = new Int2ObjectLinkedOpenHashMap<>();
     private static final Int2ObjectMap<Program> PROGRAMS = new Int2ObjectLinkedOpenHashMap<>();
-    private static int nextShaderId = 1;
-    private static int nextProgramId = 1;
+    /**
+     * One counter for both maps, because GL has one namespace for both.
+     *
+     * <p>Two counters looked harmless while only vanilla used this class: it creates a program, then its two
+     * stages, and never mixes the names up. The ARB entry points the mods use cannot make that distinction -
+     * {@code glDeleteObjectARB} and {@code glAttachObjectARB} take a bare name and ask the driver what it is - so
+     * with two counters the first shader and the first program are both 1, and a mod's
+     * {@code glAttachObjectARB(program, shader)} becomes an object attached to itself. Measured: Immersive
+     * Intelligence's {@code TmtTessellator} does exactly that sequence.</p>
+     */
+    private static int nextObjectId = 1;
     private static int currentProgram;
 
     private GlShaders() {}
@@ -235,7 +244,7 @@ public final class GlShaders {
             LOGGER.warn("createShader: unsupported shader type {} (only vertex and fragment are implemented)", glType);
             return 0;
         }
-        int id = nextShaderId++;
+        int id = nextObjectId++;
         SHADERS.put(id, new Shader(id, glType, "", null, ""));
         return id;
     }
@@ -331,7 +340,7 @@ public final class GlShaders {
     }
 
     public static int createProgram() {
-        int id = nextProgramId++;
+        int id = nextObjectId++;
         PROGRAMS.put(id, new Program(id));
         return id;
     }

@@ -26,9 +26,16 @@ import org.lwjgl.opengl.GL11;
  * <p><b>The set is measured, not guessed.</b> Eighteen of these methods are the entire raw-GL surface of
  * IC2Classic 1.12-1.5.8. Six more came from the rest of the pack: JEI's ghost-ingredient drag draws its line with
  * {@code glBegin}/{@code glVertex3f}/{@code glEnd} plus {@code glLineWidth} and {@code glHint}, and Baubles tints
- * its slot with {@code glColor3ub}. The next mod that needs another one adds it here, in
+ * its slot with {@code glColor3ub}. Immersive Engineering added its five queries, four raster/stencil entries and
+ * one light parameter. The next mod that needs another one adds it here, in
  * {@code net.minecraftforge.lwjgl.shim.FrameShimRules}, and in {@link FrameShim}. {@code FrameShimRulesTest}
  * fails if those three disagree.</p>
+ *
+ * <p><b>Why ARB_shader_objects is here too.</b> A retarget is per call site, not per class: the entries carry the
+ * owner they rewrite away from, so the same facade serves {@code GL11} and
+ * {@code org.lwjgl.opengl.ARBShaderObjects}. That is what makes the shader block work at all - the mods that need
+ * it (Immersive Engineering, immersivepetroleum, Immersive Intelligence) use the ARB names exclusively, and a
+ * second facade would mean a second implementation of the same object model.</p>
  */
 public final class ShimGl {
 
@@ -88,6 +95,15 @@ public final class ShimGl {
         /** {@code glIsEnabled}: whether a capability is currently on. */
         boolean glIsEnabled(int cap);
 
+        /**
+         * {@code glGetBoolean}: one boolean of state, by GL enum.
+         *
+         * <p>Separate from {@link #glIsEnabled} because the enums are not all capabilities: {@code GL_CULL_FACE}
+         * is one, but the same call is also used for things like {@code GL_DEPTH_WRITEMASK}, which no
+         * {@code glEnable} sets.</p>
+         */
+        boolean glGetBoolean(int parameterName);
+
         /** {@code glGetInteger}: one integer of state, by GL enum. */
         int glGetInteger(int parameterName);
 
@@ -113,6 +129,58 @@ public final class ShimGl {
         void glStencilOp(int fail, int depthFail, int depthPass);
 
         void glFinish();
+
+        // region ARB_shader_objects
+        // The same object model as the core entry points OpenGlHelper uses, under the names the ARB extension gave
+        // it. A mod that was written against GL 2.0 calls these and nothing else, so without them its shaders never
+        // reach the backend at all - which is what Immersive Engineering, immersivepetroleum and Immersive
+        // Intelligence all do, in the same order, measured from their constant pools.
+
+        /** {@code glCreateProgramObjectARB}: a new program name. */
+        int glCreateProgramObjectARB();
+
+        /** {@code glCreateShaderObjectARB}: a new stage, {@code GL_VERTEX_SHADER_ARB} or {@code GL_FRAGMENT_SHADER_ARB}. */
+        int glCreateShaderObjectARB(int type);
+
+        /** {@code glShaderSourceARB}: replaces a stage's source. */
+        void glShaderSourceARB(int shader, CharSequence source);
+
+        /** {@code glCompileShaderARB}: compiles a stage, recording the outcome rather than throwing. */
+        void glCompileShaderARB(int shader);
+
+        /** {@code glAttachObjectARB}: adds a compiled stage to a program. */
+        void glAttachObjectARB(int program, int shader);
+
+        /** {@code glLinkProgramARB}: links a program, recording the outcome. */
+        void glLinkProgramARB(int program);
+
+        /** {@code glValidateProgramARB}: asks whether the program would run in the current state. */
+        void glValidateProgramARB(int program);
+
+        /** {@code glUseProgramObjectARB}: makes a program current, or none for 0. */
+        void glUseProgramObjectARB(int program);
+
+        /** {@code glDeleteObjectARB}: releases a stage or a program, whichever the name belongs to. */
+        void glDeleteObjectARB(int object);
+
+        /** {@code glGetObjectParameteriARB}: one integer about a stage or a program, by GL enum. */
+        int glGetObjectParameteriARB(int object, int parameterName);
+
+        /** {@code glGetInfoLogARB}: the compile or link log, or the empty string. */
+        String glGetInfoLogARB(int object, int maxLength);
+
+        /** {@code glGetUniformLocationARB}: the location a uniform name resolves to, or -1. */
+        int glGetUniformLocationARB(int program, CharSequence name);
+
+        /** {@code glUniform1iARB}. */
+        void glUniform1iARB(int location, int value);
+
+        /** {@code glUniform1fARB}. */
+        void glUniform1fARB(int location, float value);
+
+        /** {@code glUniform3fARB}. */
+        void glUniform3fARB(int location, float x, float y, float z);
+        // endregion
     }
 
     /** Passes straight through to real OpenGL. Always available. */
@@ -288,6 +356,86 @@ public final class ShimGl {
         }
 
         @Override
+        public boolean glGetBoolean(int parameterName) {
+            return GL11.glGetBoolean(parameterName);
+        }
+
+        @Override
+        public int glCreateProgramObjectARB() {
+            return org.lwjgl.opengl.ARBShaderObjects.glCreateProgramObjectARB();
+        }
+
+        @Override
+        public int glCreateShaderObjectARB(int type) {
+            return org.lwjgl.opengl.ARBShaderObjects.glCreateShaderObjectARB(type);
+        }
+
+        @Override
+        public void glShaderSourceARB(int shader, CharSequence source) {
+            org.lwjgl.opengl.ARBShaderObjects.glShaderSourceARB(shader, source);
+        }
+
+        @Override
+        public void glCompileShaderARB(int shader) {
+            org.lwjgl.opengl.ARBShaderObjects.glCompileShaderARB(shader);
+        }
+
+        @Override
+        public void glAttachObjectARB(int program, int shader) {
+            org.lwjgl.opengl.ARBShaderObjects.glAttachObjectARB(program, shader);
+        }
+
+        @Override
+        public void glLinkProgramARB(int program) {
+            org.lwjgl.opengl.ARBShaderObjects.glLinkProgramARB(program);
+        }
+
+        @Override
+        public void glValidateProgramARB(int program) {
+            org.lwjgl.opengl.ARBShaderObjects.glValidateProgramARB(program);
+        }
+
+        @Override
+        public void glUseProgramObjectARB(int program) {
+            org.lwjgl.opengl.ARBShaderObjects.glUseProgramObjectARB(program);
+        }
+
+        @Override
+        public void glDeleteObjectARB(int object) {
+            org.lwjgl.opengl.ARBShaderObjects.glDeleteObjectARB(object);
+        }
+
+        @Override
+        public int glGetObjectParameteriARB(int object, int parameterName) {
+            return org.lwjgl.opengl.ARBShaderObjects.glGetObjectParameteriARB(object, parameterName);
+        }
+
+        @Override
+        public String glGetInfoLogARB(int object, int maxLength) {
+            return org.lwjgl.opengl.ARBShaderObjects.glGetInfoLogARB(object, maxLength);
+        }
+
+        @Override
+        public int glGetUniformLocationARB(int program, CharSequence name) {
+            return org.lwjgl.opengl.ARBShaderObjects.glGetUniformLocationARB(program, name);
+        }
+
+        @Override
+        public void glUniform1iARB(int location, int value) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform1iARB(location, value);
+        }
+
+        @Override
+        public void glUniform1fARB(int location, float value) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform1fARB(location, value);
+        }
+
+        @Override
+        public void glUniform3fARB(int location, float x, float y, float z) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform3fARB(location, x, y, z);
+        }
+
+        @Override
         public void glFinish() {
             GL11.glFinish();
         }
@@ -457,5 +605,69 @@ public final class ShimGl {
 
     public static void glFinish() {
         impl.glFinish();
+    }
+
+    public static boolean glGetBoolean(int parameterName) {
+        return impl.glGetBoolean(parameterName);
+    }
+
+    public static int glCreateProgramObjectARB() {
+        return impl.glCreateProgramObjectARB();
+    }
+
+    public static int glCreateShaderObjectARB(int type) {
+        return impl.glCreateShaderObjectARB(type);
+    }
+
+    public static void glShaderSourceARB(int shader, CharSequence source) {
+        impl.glShaderSourceARB(shader, source);
+    }
+
+    public static void glCompileShaderARB(int shader) {
+        impl.glCompileShaderARB(shader);
+    }
+
+    public static void glAttachObjectARB(int program, int shader) {
+        impl.glAttachObjectARB(program, shader);
+    }
+
+    public static void glLinkProgramARB(int program) {
+        impl.glLinkProgramARB(program);
+    }
+
+    public static void glValidateProgramARB(int program) {
+        impl.glValidateProgramARB(program);
+    }
+
+    public static void glUseProgramObjectARB(int program) {
+        impl.glUseProgramObjectARB(program);
+    }
+
+    public static void glDeleteObjectARB(int object) {
+        impl.glDeleteObjectARB(object);
+    }
+
+    public static int glGetObjectParameteriARB(int object, int parameterName) {
+        return impl.glGetObjectParameteriARB(object, parameterName);
+    }
+
+    public static String glGetInfoLogARB(int object, int maxLength) {
+        return impl.glGetInfoLogARB(object, maxLength);
+    }
+
+    public static int glGetUniformLocationARB(int program, CharSequence name) {
+        return impl.glGetUniformLocationARB(program, name);
+    }
+
+    public static void glUniform1iARB(int location, int value) {
+        impl.glUniform1iARB(location, value);
+    }
+
+    public static void glUniform1fARB(int location, float value) {
+        impl.glUniform1fARB(location, value);
+    }
+
+    public static void glUniform3fARB(int location, float x, float y, float z) {
+        impl.glUniform3fARB(location, x, y, z);
     }
 }

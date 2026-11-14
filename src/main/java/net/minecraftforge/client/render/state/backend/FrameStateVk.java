@@ -606,6 +606,11 @@ final class FrameStateVk implements FrameState {
     }
 
     @Override
+    public int cullFace() {
+        return cullFace;
+    }
+
+    @Override
     public void colorMask(boolean red, boolean green, boolean blue, boolean alpha) {
         colorMask[0] = red;
         colorMask[1] = green;

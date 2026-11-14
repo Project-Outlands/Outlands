@@ -318,6 +318,14 @@ public interface FrameState {
 
     void cullFace(int glFace);
 
+    /**
+     * Which face culling removes, as the GL enum that was set ({@code GL_BACK} until something changes it).
+     *
+     * <p>Needed for {@code glGetInteger(GL_CULL_FACE_MODE)}, which Immersive Intelligence's manual pages ask before
+     * changing it - a mod that saves and restores the mode reads it back first.</p>
+     */
+    int cullFace();
+
     void colorMask(boolean red, boolean green, boolean blue, boolean alpha);
 
     default void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {}

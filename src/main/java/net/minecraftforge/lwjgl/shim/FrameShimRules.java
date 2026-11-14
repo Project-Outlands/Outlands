@@ -13,12 +13,13 @@ import java.util.Set;
  * named by string and the compiler cannot check the pairing — which is what
  * {@code FrameShimRulesTest} exists for.</p>
  *
- * <p><b>Why these eighteen and nothing else.</b> They are the whole raw-GL surface of IC2Classic 1.12-1.5.8,
- * measured by scanning its constant pools: forty-five matrix-stack call sites, eight state bits, four
- * current-colour/current-normal sites and six calls that only appear on its fatal-error screen. Adding an entry
- * is cheap, but an entry whose facade method does not exist fails as a {@code NoSuchMethodError} on first
- * execution rather than at load time, so the set is kept to what has been measured and the bijection test keeps
- * it honest.</p>
+ * <p><b>Why exactly these and nothing else.</b> Every entry was measured by scanning a mod's constant pool for
+ * the call sites it actually has: IC2Classic 1.12-1.5.8 gave the matrix stack and the state bits, JEI the
+ * immediate-mode path, Baubles one colour form, Immersive Engineering its queries and the raster/stencil family,
+ * and the ARB block the shader objects of Immersive Engineering, immersivepetroleum and Immersive Intelligence.
+ * Adding an entry is cheap, but an entry whose facade method does not exist fails as a
+ * {@code NoSuchMethodError} on first execution rather than at load time, so the set is kept to what has been
+ * measured and the bijection test keeps it honest.</p>
  *
  * <p><b>Why these are RETARGETs and not table entries.</b> LWJGL3 still ships all of these as natives in its own
  * {@code org.lwjgl.opengl.GL11}, so they are not missing members and nothing about them is broken at link time:
@@ -41,8 +42,17 @@ public final class FrameShimRules implements ShimRewriteRules {
      */
     public static final String VULKAN_ID = "vulkan";
 
-    /** The class every entry retargets away from. */
+    /** The class the plain entries retarget away from. */
     public static final String GL11 = "org/lwjgl/opengl/GL11";
+
+    /**
+     * The other class this ruleset retargets away from: the ARB extension's shader object calls.
+     *
+     * <p>A mod written against GL 2.0 uses these and not the core names, so the same facade has to be reachable
+     * from both owners. Three mods in the pack (Immersive Engineering, immersivepetroleum, Immersive Intelligence)
+     * call this class and nothing else for shaders, with the same sequence of fifteen methods.</p>
+     */
+    public static final String ARB_SHADER_OBJECTS = "org/lwjgl/opengl/ARBShaderObjects";
 
     /** The facade every entry retargets to. */
     public static final String FACADE = "net/minecraftforge/client/render/shim/ShimGl";
@@ -104,7 +114,30 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glStencilMask", "(I)V"),
             entry("glStencilOp", "(III)V"),
             // Only ever called on IC2C's error path, before the process exits.
-            entry("glFinish", "()V"));
+            entry("glFinish", "()V"),
+            // Immersive Intelligence asks whether culling is on before it changes the mode. The single-value form
+            // exists in LWJGL 3 as well, so this is a retarget and not a table entry.
+            entry("glGetBoolean", "(I)Z"),
+
+            // ARB_shader_objects: the whole shader surface of the three mods that use shaders at all. The
+            // sequence is the same in each of them - create, source, compile, attach, link, ask the status, look up
+            // a uniform, write it, use the program - so one set of entries covers all three. The two extra
+            // uniform forms and the validate call are Immersive Intelligence's.
+            arb("glCreateProgramObjectARB", "()I"),
+            arb("glCreateShaderObjectARB", "(I)I"),
+            arb("glShaderSourceARB", "(ILjava/lang/CharSequence;)V"),
+            arb("glCompileShaderARB", "(I)V"),
+            arb("glAttachObjectARB", "(II)V"),
+            arb("glLinkProgramARB", "(I)V"),
+            arb("glValidateProgramARB", "(I)V"),
+            arb("glUseProgramObjectARB", "(I)V"),
+            arb("glDeleteObjectARB", "(I)V"),
+            arb("glGetObjectParameteriARB", "(II)I"),
+            arb("glGetInfoLogARB", "(II)Ljava/lang/String;"),
+            arb("glGetUniformLocationARB", "(ILjava/lang/CharSequence;)I"),
+            arb("glUniform1iARB", "(II)V"),
+            arb("glUniform1fARB", "(IF)V"),
+            arb("glUniform3fARB", "(IFFF)V"));
 
     /**
      * Packages whose classes keep real GL.
@@ -139,6 +172,10 @@ public final class FrameShimRules implements ShimRewriteRules {
 
     private static RetargetEntry entry(String name, String desc) {
         return new RetargetEntry(GL11, name, desc, FACADE);
+    }
+
+    private static RetargetEntry arb(String name, String desc) {
+        return new RetargetEntry(ARB_SHADER_OBJECTS, name, desc, FACADE);
     }
 
     @Override
