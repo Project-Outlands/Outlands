@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -141,6 +142,19 @@ class FrameShimDisplayListTest {
         ShimGl.glEndList();
 
         assertEquals(1, lists.drawCount(id), "the list is built even with nothing collecting");
+    }
+
+    @Test
+    void theClosedFacadeIgnoresCallsInsteadOfReachingRealGl() {
+        // A SIGSEGV inside glUseProgramObjectARB, on the frame that drew a gun after a program failed to link: the
+        // backend closes after a failed frame, and closing used to restore the real-GL implementation - which in a
+        // Vulkan window is a call into a context that does not exist.
+        ShimGl.setImpl(null);
+
+        assertSame(ShimGl.CLOSED, ShimGl.impl(), "closing installs the do-nothing implementation");
+        assertDoesNotThrow(() -> ShimGl.glUseProgramObjectARB(4));
+        assertDoesNotThrow(() -> ShimGl.glEnable(3042));
+        assertDoesNotThrow(() -> ShimGl.glGetInteger(2979));
     }
 
     @Test

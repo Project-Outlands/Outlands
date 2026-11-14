@@ -78,6 +78,8 @@ public final class GlShaders {
         private final List<Uniform> uniforms = new ArrayList<>();
         private final Map<String, Uniform> uniformsByName = new LinkedHashMap<>();
         private byte[] blockBytes = new byte[0];
+        /** The fixed-function vertex stage, for a program that only has a fragment stage. */
+        private byte[] syntheticVertex;
         private int blockBinding;
         private int blockSet;
         /** The samplers, ordered by set and binding: the order a descriptor set's bindings are written in. */
@@ -182,7 +184,9 @@ public final class GlShaders {
                     return candidate.spirv();
                 }
             }
-            return null;
+            // A fragment-only program is legal in GL - the fixed-function pipeline did the vertex processing - so
+            // the fixed-function vertex stage stands in for the one the mod never wrote. See FIXED_FUNCTION_VERTEX.
+            return glType == VERTEX_SHADER ? syntheticVertex : null;
         }
 
         /** The texture unit a sampler reads, or -1 when the game never set one. */
@@ -383,6 +387,17 @@ public final class GlShaders {
                 continue;
             }
             modules.add(SpirvReflection.reflect(shader.spirv()));
+        }
+        if (!modules.isEmpty() && existing.stageModule(VERTEX_SHADER) == null) {
+            // GL allows a program with only a fragment stage: the fixed-function pipeline supplied the vertex
+            // processing, and a shader written for that pipeline reads gl_TexCoord/gl_Color, which is exactly what
+            // this stage writes. Measured: all seven of Immersive Intelligence's post-processing stages are
+            // fragment-only, and without this the frame that drew the gun died with "program N is missing a stage".
+            byte[] vertex = fixedFunctionVertex();
+            if (vertex != null) {
+                existing.syntheticVertex = vertex;
+                modules.add(SpirvReflection.reflect(vertex));
+            }
         }
         existing.log = problems.toString();
         if (!problems.isEmpty() || modules.isEmpty()) {
@@ -803,6 +818,55 @@ public final class GlShaders {
             }
         }
         return -1;
+    }
+
+    /**
+     * The vertex stage GL's fixed-function pipeline would have run, for a program that has none.
+     *
+     * <p>It declares the four canonical attributes, the same push-constant matrix the stream shader uses, and writes
+     * the varyings a GL-era fragment stage reads - {@code gl_TexCoord[0..1]} and {@code gl_Color}, under the names
+     * {@link net.minecraftforge.client.render.vulkan.shader.GlslPreprocessor} gives them. A fragment stage that
+     * declares its own varyings instead would not link against this, which is correct: such a program needs its own
+     * vertex stage, and on GL it would have needed one too.</p>
+     */
+    private static final String FIXED_FUNCTION_VERTEX = """
+            #version 450
+            layout(location = 0) in vec4 outlandsVertex;
+            layout(location = 1) in vec4 outlandsVertexColor;
+            layout(location = 2) in vec2 outlandsUv;
+            layout(location = 3) in vec2 outlandsLightmap;
+            layout(push_constant) uniform OutlandsFfpMatrices { mat4 outlandsMvp; };
+            out vec4 outlandsTexCoord[2];
+            out vec4 outlandsFfpColor;
+            void main() {
+                gl_Position = outlandsMvp * outlandsVertex;
+                outlandsTexCoord[0] = vec4(outlandsUv, 0.0, 1.0);
+                outlandsTexCoord[1] = vec4(outlandsLightmap, 0.0, 1.0);
+                outlandsFfpColor = outlandsVertexColor;
+            }
+            """;
+
+    private static volatile byte[] fixedFunctionVertexModule;
+    private static volatile boolean fixedFunctionVertexFailed;
+
+    /** The fixed-function vertex module, compiled once, or {@code null} when it cannot be built here. */
+    private static byte[] fixedFunctionVertex() {
+        byte[] module = fixedFunctionVertexModule;
+        if (module != null || fixedFunctionVertexFailed) {
+            return module;
+        }
+        try {
+            module = net.minecraftforge.client.render.vulkan.shader.GlslCompiler.compile(
+                    FIXED_FUNCTION_VERTEX, net.minecraftforge.client.render.vulkan.shader.GlslCompiler.Stage.VERTEX,
+                    "fixed-function vertex stage");
+            fixedFunctionVertexModule = module;
+            return module;
+        } catch (RuntimeException e) {
+            fixedFunctionVertexFailed = true;
+            LOGGER.warn("the fixed-function vertex stage did not compile; a fragment-only program cannot be linked",
+                    e);
+            return null;
+        }
     }
 
     /** Test and backend support: drops everything, as a context loss would. */

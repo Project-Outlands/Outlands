@@ -40,6 +40,8 @@ import org.lwjgl.opengl.GL15;
  */
 public final class ShimGl {
 
+    private static final org.apache.logging.log4j.Logger LOGGER = org.apache.logging.log4j.LogManager.getLogger("Outlands|shim");
+
     /** {@code GL_FLOAT}, {@code GL_BYTE}, {@code GL_UNSIGNED_BYTE} and {@code GL_SHORT}: what the two-int client-array
      * overloads imply about their buffer, and what the real-GL bodies have to put back. */
     private static final int GL_BYTE = 5120;
@@ -47,61 +49,67 @@ public final class ShimGl {
     private static final int GL_SHORT = 5122;
     private static final int GL_FLOAT = 5126;
 
-    /** One implementation of the facade. */
+    /**
+     * One implementation of the facade.
+     *
+     * <p>Every method has a do-nothing default, so an implementation only states what it actually answers. The two
+     * real ones - {@link #REAL_GL} and {@code FrameShim} - override all of them, and {@link #CLOSED} overrides none,
+     * which is exactly what "the renderer has closed" means.</p>
+     */
     public interface Impl {
-        void glEnable(int cap);
+        default void glEnable(int cap) {}
 
-        void glDisable(int cap);
+        default void glDisable(int cap) {}
 
-        void glPushMatrix();
+        default void glPushMatrix() {}
 
-        void glPopMatrix();
+        default void glPopMatrix() {}
 
-        void glTranslatef(float x, float y, float z);
+        default void glTranslatef(float x, float y, float z) {}
 
-        void glTranslated(double x, double y, double z);
+        default void glTranslated(double x, double y, double z) {}
 
-        void glScalef(float x, float y, float z);
+        default void glScalef(float x, float y, float z) {}
 
-        void glRotatef(float angle, float x, float y, float z);
+        default void glRotatef(float angle, float x, float y, float z) {}
 
-        void glMatrixMode(int mode);
+        default void glMatrixMode(int mode) {}
 
-        void glLoadIdentity();
+        default void glLoadIdentity() {}
 
-        void glOrtho(double left, double right, double bottom, double top, double zNear, double zFar);
+        default void glOrtho(double left, double right, double bottom, double top, double zNear, double zFar) {}
 
-        void glAlphaFunc(int comparison, float reference);
+        default void glAlphaFunc(int comparison, float reference) {}
 
-        void glDepthFunc(int comparison);
+        default void glDepthFunc(int comparison) {}
 
-        void glViewport(int x, int y, int width, int height);
+        default void glViewport(int x, int y, int width, int height) {}
 
-        void glClear(int mask);
+        default void glClear(int mask) {}
 
-        void glColor4f(float red, float green, float blue, float alpha);
+        default void glColor4f(float red, float green, float blue, float alpha) {}
 
         /** {@code glColor3ub}: the byte form of the current colour, with an implied opaque alpha. */
-        void glColor3ub(byte red, byte green, byte blue);
+        default void glColor3ub(byte red, byte green, byte blue) {}
 
-        void glNormal3f(float x, float y, float z);
+        default void glNormal3f(float x, float y, float z) {}
 
         /** {@code glBegin}: opens the immediate-mode accumulator. */
-        void glBegin(int mode);
+        default void glBegin(int mode) {}
 
         /** {@code glEnd}: submits whatever the accumulator collected as one draw. */
-        void glEnd();
+        default void glEnd() {}
 
         /** {@code glVertex3f}: one vertex of the open immediate-mode primitive. */
-        void glVertex3f(float x, float y, float z);
+        default void glVertex3f(float x, float y, float z) {}
 
-        void glLineWidth(float width);
+        default void glLineWidth(float width) {}
 
         /** {@code glHint}: a rasterisation hint, which no pipeline has. */
-        void glHint(int target, int mode);
+        default void glHint(int target, int mode) {}
 
         /** {@code glIsEnabled}: whether a capability is currently on. */
-        boolean glIsEnabled(int cap);
+        default boolean glIsEnabled(int cap) { return false; }
 
         /**
          * {@code glGetBoolean}: one boolean of state, by GL enum.
@@ -110,147 +118,147 @@ public final class ShimGl {
          * is one, but the same call is also used for things like {@code GL_DEPTH_WRITEMASK}, which no
          * {@code glEnable} sets.</p>
          */
-        boolean glGetBoolean(int parameterName);
+        default boolean glGetBoolean(int parameterName) { return false; }
 
         /** {@code glGetInteger}: one integer of state, by GL enum. */
-        int glGetInteger(int parameterName);
+        default int glGetInteger(int parameterName) { return 0; }
 
         /** {@code glGetFloat}: one float of state, by GL enum. */
-        float glGetFloat(int parameterName);
+        default float glGetFloat(int parameterName) { return 0.0F; }
 
         /** {@code glGetFloatv}: a float vector of state, written at the buffer's position without consuming it. */
-        void glGetFloat(int parameterName, java.nio.FloatBuffer out);
+        default void glGetFloat(int parameterName, java.nio.FloatBuffer out) {}
 
         /** {@code glLight}: one parameter of one fixed-function light. */
-        void glLight(int light, int parameterName, java.nio.FloatBuffer params);
+        default void glLight(int light, int parameterName, java.nio.FloatBuffer params) {}
 
         /** {@code glPointSize}: the rasterised diameter of a point primitive. */
-        void glPointSize(float size);
+        default void glPointSize(float size) {}
 
         /** {@code glStencilFunc}: the test a stencil comparison makes. */
-        void glStencilFunc(int comparison, int reference, int mask);
+        default void glStencilFunc(int comparison, int reference, int mask) {}
 
         /** {@code glStencilMask}: which stencil bits a write may change. */
-        void glStencilMask(int mask);
+        default void glStencilMask(int mask) {}
 
         /** {@code glStencilOp}: what a stencil test does on fail, on depth fail and on pass. */
-        void glStencilOp(int fail, int depthFail, int depthPass);
+        default void glStencilOp(int fail, int depthFail, int depthPass) {}
 
-        void glFinish();
+        default void glFinish() {}
 
         /** {@code glBlendFunc}. */
-        void glBlendFunc(int glSourceFactor, int glDestinationFactor);
+        default void glBlendFunc(int glSourceFactor, int glDestinationFactor) {}
         /** {@code glScissor}. */
-        void glScissor(int x, int y, int width, int height);
+        default void glScissor(int x, int y, int width, int height) {}
         /** {@code glDepthMask}. */
-        void glDepthMask(boolean enabled);
+        default void glDepthMask(boolean enabled) {}
         /** {@code glShadeModel}. */
-        void glShadeModel(int glModel);
+        default void glShadeModel(int glModel) {}
         /** {@code glClearColor}. */
-        void glClearColor(float red, float green, float blue, float alpha);
+        default void glClearColor(float red, float green, float blue, float alpha) {}
         /** {@code glColorMask}. */
-        void glColorMask(boolean red, boolean green, boolean blue, boolean alpha);
+        default void glColorMask(boolean red, boolean green, boolean blue, boolean alpha) {}
         /** {@code glPolygonMode}. */
-        void glPolygonMode(int glFace, int glMode);
+        default void glPolygonMode(int glFace, int glMode) {}
         /** {@code glClearDepth}. */
-        void glClearDepth(double depth);
+        default void glClearDepth(double depth) {}
         /** {@code glLogicOp}. */
-        void glLogicOp(int glOpcode);
+        default void glLogicOp(int glOpcode) {}
         /** {@code glTexEnvi}. */
-        void glTexEnvi(int target, int parameterName, int parameter);
+        default void glTexEnvi(int target, int parameterName, int parameter) {}
         /** {@code glTexEnvf}. */
-        void glTexEnvf(int target, int parameterName, float parameter);
+        default void glTexEnvf(int target, int parameterName, float parameter) {}
         /** {@code glTexEnv}. */
-        void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters);
+        default void glTexEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {}
         /** {@code glLoadMatrix}. */
-        void glLoadMatrix(java.nio.FloatBuffer matrix);
+        default void glLoadMatrix(java.nio.FloatBuffer matrix) {}
         /** {@code glLoadMatrixf}. */
-        void glLoadMatrixf(java.nio.FloatBuffer matrix);
+        default void glLoadMatrixf(java.nio.FloatBuffer matrix) {}
         /** {@code glMultMatrix}. */
-        void glMultMatrix(java.nio.FloatBuffer matrix);
+        default void glMultMatrix(java.nio.FloatBuffer matrix) {}
         /** {@code glMultMatrixf}. */
-        void glMultMatrixf(java.nio.FloatBuffer matrix);
+        default void glMultMatrixf(java.nio.FloatBuffer matrix) {}
         /**
          * {@code glMultMatrix} with a double buffer.
          *
          * <p>Its own entry point rather than an overload of the float form, because a retarget may not change a
          * descriptor: the call site passes a {@code DoubleBuffer} and the facade has to accept one.</p>
          */
-        void glMultMatrix(java.nio.DoubleBuffer matrix);
+        default void glMultMatrix(java.nio.DoubleBuffer matrix) {}
 
 
         /** {@code glEnableClientState} (LWJGL 2 shape: {@code int array}). */
-        void glEnableClientState(int array);
+        default void glEnableClientState(int array) {}
         /** {@code glDisableClientState} (LWJGL 2 shape: {@code int array}). */
-        void glDisableClientState(int array);
+        default void glDisableClientState(int array) {}
         /** {@code glVertexPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
-        void glVertexPointer(int size, int type, int stride, long offset);
+        default void glVertexPointer(int size, int type, int stride, long offset) {}
         /** {@code glVertexPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.FloatBuffer buffer}). */
-        void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer);
+        default void glVertexPointer(int size, int stride, java.nio.FloatBuffer buffer) {}
         /** {@code glColorPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
-        void glColorPointer(int size, int type, int stride, long offset);
+        default void glColorPointer(int size, int type, int stride, long offset) {}
         /** {@code glColorPointer} (LWJGL 2 shape: {@code int size, boolean normalized, int stride, java.nio.ByteBuffer buffer}). */
-        void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer);
+        default void glColorPointer(int size, boolean normalized, int stride, java.nio.ByteBuffer buffer) {}
         /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int type, int stride, long offset}). */
-        void glTexCoordPointer(int size, int type, int stride, long offset);
+        default void glTexCoordPointer(int size, int type, int stride, long offset) {}
         /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.FloatBuffer buffer}). */
-        void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer);
+        default void glTexCoordPointer(int size, int stride, java.nio.FloatBuffer buffer) {}
         /** {@code glTexCoordPointer} (LWJGL 2 shape: {@code int size, int stride, java.nio.ShortBuffer buffer}). */
-        void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer);
+        default void glTexCoordPointer(int size, int stride, java.nio.ShortBuffer buffer) {}
         /** {@code glNormalPointer} (LWJGL 2 shape: {@code int type, int stride, long offset}). */
-        void glNormalPointer(int type, int stride, long offset);
+        default void glNormalPointer(int type, int stride, long offset) {}
         /**
          * {@code glNormalPointer} with a client-memory buffer.
          *
          * <p>LWJGL 2's two-argument form has no stride - the array is tightly packed - which is why this is not an
          * overload of the offset form above.</p>
          */
-        void glNormalPointer(int type, java.nio.ByteBuffer buffer);
+        default void glNormalPointer(int type, java.nio.ByteBuffer buffer) {}
         /** {@code glDrawArrays} (LWJGL 2 shape: {@code int mode, int first, int count}). */
-        void glDrawArrays(int mode, int first, int count);
+        default void glDrawArrays(int mode, int first, int count) {}
         /** {@code glBindBufferARB} (LWJGL 2 shape: {@code int target, int buffer}). */
-        void glBindBufferARB(int target, int buffer);
+        default void glBindBufferARB(int target, int buffer) {}
         /** {@code glBufferDataARB} (LWJGL 2 shape: {@code int target, java.nio.ByteBuffer data, int usage}). */
-        void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage);
+        default void glBufferDataARB(int target, java.nio.ByteBuffer data, int usage) {}
 
         /** {@code glPushAttrib} (LWJGL 2 shape). */
-        void glPushAttrib(int mask);
+        default void glPushAttrib(int mask) {}
         /** {@code glPopAttrib} (LWJGL 2 shape). */
-        void glPopAttrib();
+        default void glPopAttrib() {}
         /** {@code glClearStencil} (LWJGL 2 shape). */
-        void glClearStencil(int value);
+        default void glClearStencil(int value) {}
         /** {@code glReadPixels} (LWJGL 2 shape). */
-        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels);
+        default void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels) {}
         /** {@code glReadPixels} (LWJGL 2 shape). */
-        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels);
+        default void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels) {}
         /** {@code glReadPixels} (LWJGL 2 shape). */
-        void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels);
+        default void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels) {}
         /** {@code glGetTexImage} (LWJGL 2 shape). */
-        void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels);
+        default void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {}
         /** {@code glGetTexImage} (LWJGL 2 shape). */
-        void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels);
+        default void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {}
         /** {@code glCopyTexImage2D} (LWJGL 2 shape). */
-        void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border);
+        default void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {}
         /**
          * {@code glBlendColor}: the constant colour the {@code GL_CONSTANT_*} blend factors read.
          *
          * <p>In GL 1.2's extension it was {@code GL14.glBlendColor}, and that is the class the call sites name - it
          * is also what vanilla's {@code GlStateManager.blendColor} calls, so one entry covers both.</p>
          */
-        void glBlendColor(float red, float green, float blue, float alpha);
+        default void glBlendColor(float red, float green, float blue, float alpha) {}
 
         /**
          * {@code glNewList}: starts recording drawing commands into a list.
          *
          * @param glMode {@code GL_COMPILE} (4864); {@code GL_COMPILE_AND_EXECUTE} is not supported
          */
-        void glNewList(int list, int glMode);
+        default void glNewList(int list, int glMode) {}
 
         /** {@code glEndList}: stops recording. */
-        void glEndList();
+        default void glEndList() {}
 
         /** {@code glCallList}: replays a recorded list. */
-        void glCallList(int list);
+        default void glCallList(int list) {}
 
         /**
          * {@code glLineStipple}: a fixed-function dash pattern for lines.
@@ -259,7 +267,7 @@ public final class ShimGl {
          * rasteriser to line primitives, and lines here are expanded into triangles before anything could stipple
          * them. Reported once rather than silently reaching a GL context that does not exist.</p>
          */
-        void glLineStipple(int factor, short pattern);
+        default void glLineStipple(int factor, short pattern) {}
 
         // region ARB_shader_objects
         // The same object model as the core entry points OpenGlHelper uses, under the names the ARB extension gave
@@ -268,49 +276,49 @@ public final class ShimGl {
         // Intelligence all do, in the same order, measured from their constant pools.
 
         /** {@code glCreateProgramObjectARB}: a new program name. */
-        int glCreateProgramObjectARB();
+        default int glCreateProgramObjectARB() { return 0; }
 
         /** {@code glCreateShaderObjectARB}: a new stage, {@code GL_VERTEX_SHADER_ARB} or {@code GL_FRAGMENT_SHADER_ARB}. */
-        int glCreateShaderObjectARB(int type);
+        default int glCreateShaderObjectARB(int type) { return 0; }
 
         /** {@code glShaderSourceARB}: replaces a stage's source. */
-        void glShaderSourceARB(int shader, CharSequence source);
+        default void glShaderSourceARB(int shader, CharSequence source) {}
 
         /** {@code glCompileShaderARB}: compiles a stage, recording the outcome rather than throwing. */
-        void glCompileShaderARB(int shader);
+        default void glCompileShaderARB(int shader) {}
 
         /** {@code glAttachObjectARB}: adds a compiled stage to a program. */
-        void glAttachObjectARB(int program, int shader);
+        default void glAttachObjectARB(int program, int shader) {}
 
         /** {@code glLinkProgramARB}: links a program, recording the outcome. */
-        void glLinkProgramARB(int program);
+        default void glLinkProgramARB(int program) {}
 
         /** {@code glValidateProgramARB}: asks whether the program would run in the current state. */
-        void glValidateProgramARB(int program);
+        default void glValidateProgramARB(int program) {}
 
         /** {@code glUseProgramObjectARB}: makes a program current, or none for 0. */
-        void glUseProgramObjectARB(int program);
+        default void glUseProgramObjectARB(int program) {}
 
         /** {@code glDeleteObjectARB}: releases a stage or a program, whichever the name belongs to. */
-        void glDeleteObjectARB(int object);
+        default void glDeleteObjectARB(int object) {}
 
         /** {@code glGetObjectParameteriARB}: one integer about a stage or a program, by GL enum. */
-        int glGetObjectParameteriARB(int object, int parameterName);
+        default int glGetObjectParameteriARB(int object, int parameterName) { return 0; }
 
         /** {@code glGetInfoLogARB}: the compile or link log, or the empty string. */
-        String glGetInfoLogARB(int object, int maxLength);
+        default String glGetInfoLogARB(int object, int maxLength) { return ""; }
 
         /** {@code glGetUniformLocationARB}: the location a uniform name resolves to, or -1. */
-        int glGetUniformLocationARB(int program, CharSequence name);
+        default int glGetUniformLocationARB(int program, CharSequence name) { return 0; }
 
         /** {@code glUniform1iARB}. */
-        void glUniform1iARB(int location, int value);
+        default void glUniform1iARB(int location, int value) {}
 
         /** {@code glUniform1fARB}. */
-        void glUniform1fARB(int location, float value);
+        default void glUniform1fARB(int location, float value) {}
 
         /** {@code glUniform3fARB}. */
-        void glUniform3fARB(int location, float x, float y, float z);
+        default void glUniform3fARB(int location, float x, float y, float z) {}
         // endregion
     }
 
@@ -775,11 +783,36 @@ public final class ShimGl {
     /**
      * Installs an implementation.
      *
-     * @param next the implementation; {@code null} restores {@link #REAL_GL}
+     * <p><b>Why {@code null} no longer means real GL.</b> It used to, and that was a segfault: the Vulkan backend
+     * calls {@code setImpl(null)} when it closes - including after a frame fails - and the next mod GL call then went
+     * to {@code liblwjgl_opengl} with no GL context behind it. Measured: a SIGSEGV inside
+     * {@code glUseProgramObjectARB} on the frame that drew a gun after a program failed to link.</p>
+     *
+     * <p>A closed renderer means there is nothing to call, so the calls are ignored and one line says so. A caller
+     * that wants real GL - a test, or a session that never had a Vulkan window - installs {@link #REAL_GL}
+     * explicitly.</p>
+     *
+     * @param next the implementation; {@code null} installs {@link #CLOSED}
      */
     public static void setImpl(Impl next) {
-        impl = next == null ? REAL_GL : next;
+        if (next == null) {
+            if (impl != CLOSED) {
+                LOGGER.info("the renderer has closed; mod GL calls are ignored from here (they used to reach real"
+                        + " GL, which has no context in a Vulkan window)");
+            }
+            impl = CLOSED;
+            return;
+        }
+        impl = next;
     }
+
+    /**
+     * The implementation for a renderer that has closed: every call is ignored.
+     *
+     * <p>Not a fallback to OpenGL - that is what {@link #REAL_GL} is for, and it is only valid when the window has a
+     * GL context. This is the "nothing can be done" answer, which is the truthful one after the device is gone.</p>
+     */
+    public static final Impl CLOSED = new Impl() {};
 
     /** The active implementation. Diagnostics and tests only. */
     public static Impl impl() {
