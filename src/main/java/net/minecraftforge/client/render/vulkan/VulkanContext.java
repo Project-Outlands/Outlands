@@ -36,6 +36,8 @@ import static org.lwjgl.opengl.GL20.GL_MAX_FRAGMENT_UNIFORM_COMPONENTS;
 import static org.lwjgl.opengl.GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS;
 import static org.lwjgl.opengl.GL20.GL_MAX_VERTEX_UNIFORM_COMPONENTS;
 import static org.lwjgl.opengl.GL30.GL_MAX_ARRAY_TEXTURE_LAYERS;
+import static org.lwjgl.opengl.GL11.GL_MAX_TEXTURE_SIZE;
+import static org.lwjgl.opengl.GL20.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 import static org.lwjgl.vulkan.KHRPortabilityEnumeration.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 import static org.lwjgl.vulkan.KHRPortabilityEnumeration.VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
@@ -233,14 +235,25 @@ final class VulkanContext {
      * one. Returning a number that means something else would be worse than returning none, so nothing is
      * approximated beyond that.</p>
      */
+    /** {@code GL_MAX_CUBE_MAP_TEXTURE_SIZE}, which LWJGL keeps out of the classes this file already imports. */
+    private static final int GL_MAX_CUBE_MAP_TEXTURE_SIZE = 34076;
+
     int glLimit(int glEnum) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            // Without this the struct stays zeroed and every answer below is 0 - which the caller reads as "this
+            // backend has no answer", so all six limits were reported as unimplemented while the mapping existed.
+            vkGetPhysicalDeviceProperties(physicalDevice, properties);
             VkPhysicalDeviceLimits limits = properties.limits();
             return switch (glEnum) {
                 case GL_MAX_VERTEX_ATTRIBS -> limits.maxVertexInputAttributes();
                 case GL_MAX_TEXTURE_IMAGE_UNITS, GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS ->
                         limits.maxPerStageDescriptorSamplers();
+                // GL counts texture units across the whole pipeline; the Vulkan quantity a program can actually use is
+                // how many samplers fit in one descriptor set, since that is what every draw binds.
+                case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS -> limits.maxDescriptorSetSamplers();
+                case GL_MAX_TEXTURE_SIZE -> limits.maxImageDimension2D();
+                case GL_MAX_CUBE_MAP_TEXTURE_SIZE -> limits.maxImageDimensionCube();
                 case GL_MAX_ARRAY_TEXTURE_LAYERS -> limits.maxImageArrayLayers();
                 // 4-byte components per uniform buffer: the unit GL counts them in. See the method comment.
                 case GL_MAX_VERTEX_UNIFORM_COMPONENTS, GL_MAX_FRAGMENT_UNIFORM_COMPONENTS ->

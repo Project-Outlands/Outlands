@@ -16,7 +16,10 @@ layout(push_constant) uniform PushConstants {
     /** The overlay colour as RGBA8, unpacked with unpackUnorm4x8. */
     uint overlayColorPacked;
     float alphaReference;
-    /** Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode, bit 5 radial fog. */
+    /**
+     * Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode, bit 5 radial fog, bits 6-8 the alpha test's
+     * comparison function as {@code glComparison - 512}.
+     */
     int flags;
     int fogMode;
     float fogStart;
@@ -63,7 +66,25 @@ void main() {
     }
     vec4 sample4 = texture(atlas, uv);
 
-    if (((pc.flags & 1) != 0 && !(sample4.a > pc.alphaReference)) || sample4.a == 0.0) {
+    // glAlphaFunc's comparison, all eight of them. GL_ALWAYS (the default) is index 7 and never discards, so a draw
+    // that never called glAlphaFunc costs one compare.
+    if ((pc.flags & 1) != 0) {
+        int comparison = (pc.flags >> 6) & 7;
+        float a = sample4.a;
+        bool passes = comparison == 7
+                || (comparison == 1 && a < pc.alphaReference)
+                || (comparison == 2 && a == pc.alphaReference)
+                || (comparison == 3 && a <= pc.alphaReference)
+                || (comparison == 4 && a > pc.alphaReference)
+                || (comparison == 5 && a != pc.alphaReference)
+                || (comparison == 6 && a >= pc.alphaReference);
+        if (!passes) {
+            discard;
+        }
+    }
+    // A fully transparent texel never draws, test or no test - which is what the fixed pipeline's texture-alpha
+    // path did and what every vanilla model relies on.
+    if (sample4.a == 0.0) {
         discard;
     }
 

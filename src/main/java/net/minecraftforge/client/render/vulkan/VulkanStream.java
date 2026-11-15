@@ -66,8 +66,6 @@ final class VulkanStream implements AutoCloseable {
     private final Map<VulkanPipeline.PipelineState, VulkanPipeline> pipelines = new HashMap<>();
     /** The render targets a recorded switch can name, or {@code null} before the backend installs them. */
     private VulkanRenderTargets renderTargets;
-    /** {@code GL_GREATER}, the alpha test comparison vanilla sets when it enables the test. */
-    private static final int GL_GREATER = 516;
 
     private int[] offsets = new int[256];
     private int[] indexOffsets = new int[256];
@@ -660,11 +658,6 @@ final class VulkanStream implements AutoCloseable {
                 float curAlphaRef = draw.state().alphaReference();
                 float curAlphaTest = draw.state().alphaTest() ? 1.0F : 0.0F;
                 long curLayout = pipeline.layout();
-                if (draw.state().alphaTest() && draw.state().alphaComparison() != GL_GREATER) {
-                    throw new UnsupportedOperationException("alpha test comparison "
-                            + draw.state().alphaComparison() + " is not implemented; the shader discards on GL_GREATER"
-                            + " (516) only, which is the one vanilla sets");
-                }
                 int curFogMode = ds.fogMode();
                 float curFogStart = ds.fogStart();
                 float curFogEnd = ds.fogEnd();
@@ -888,6 +881,15 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /**
+     * {@code glAlphaFunc}'s comparison as the three-bit index the fragment shader reads: {@code glComparison - 512},
+     * so {@code GL_NEVER} is 0 and {@code GL_ALWAYS} is 7. A value outside the eight is clamped rather than thrown -
+     * it cannot arrive from a GL enum, and refusing a draw over it would fail the frame.
+     */
+    static int alphaComparisonIndex(int glComparison) {
+        return Math.max(0, Math.min(7, glComparison - 512));
+    }
+
+    /**
      * Fills the 128-byte push block for one draw and pushes it.
      *
      * <p>One packing path for both kinds of draw, because they read the same block: the stream shader takes the
@@ -922,7 +924,10 @@ final class VulkanStream implements AutoCloseable {
         // Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode (1 a light was replaced, 2 the texture, 0 the
         // hurt-flash mix), bit 5 radial fog. The stream path has no flip mode of its own, so that field stays 0 here;
         // the radial case needs no bit because a zero tangent already means GL's planar distance.
-        constants.putInt(88, (state.alphaTest() ? 1 : 0) | ((state.overlayMode() & 3) << 3));
+        // Bits 6-8 carry the alpha test's comparison function, so a mod that sets GL_ALWAYS or GL_LEQUAL gets the
+        // test it asked for instead of a failed frame.
+        int comparison = alphaComparisonIndex(state.alphaComparison());
+        constants.putInt(88, (state.alphaTest() ? 1 : 0) | ((state.overlayMode() & 3) << 3) | (comparison << 6));
         constants.putInt(92, state.fogMode());
         constants.putFloat(96, state.fogStart());
         constants.putFloat(100, state.fogEnd());

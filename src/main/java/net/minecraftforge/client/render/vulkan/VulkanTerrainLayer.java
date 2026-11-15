@@ -47,7 +47,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
     private static final org.apache.logging.log4j.Logger LOGGER =
             org.apache.logging.log4j.LogManager.getLogger("Outlands|render");
-    private static int logFrameCounter = 0;
 
     private final VkDevice device;
     private final VulkanContext context;
@@ -560,10 +559,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 }
                 drawn = slotDrawnTotal[slot][layer];
                 drawCount += drawn;
-                if (++logFrameCounter % 300 == 1 && list.size() > 0) {
-                    LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: TIER 1 GPU HIT)",
-                            layer, drawn, list.size());
-                }
                 return;
             }
 
@@ -603,10 +598,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
                 slotCacheValid[slot][layer] = cacheable;
                 drawn = totalDrawn;
                 drawCount += drawn;
-                if (++logFrameCounter % 300 == 1 && list.size() > 0) {
-                    LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: TIER 2 STAGING HIT)",
-                            layer, drawn, list.size());
-                }
                 return;
             }
 
@@ -808,10 +799,6 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             slotCacheValid[slot][layer] = cacheable;
 
             drawCount += drawn;
-            if (++logFrameCounter % 300 == 1 && list.size() > 0) {
-                LOGGER.info("terrain layer {}: {} of {} slices drawn via MDI (cache: REBUILD MISS, culled: {})",
-                        layer, drawn, list.size(), culled);
-            }
         }
     }
 
