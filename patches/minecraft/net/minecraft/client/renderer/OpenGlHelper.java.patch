@@ -419,7 +419,43 @@
      }
  
      public static boolean useVbo()
-@@ -834,6 +860,9 @@
+@@ -628,8 +654,18 @@
+         return vboSupported && Minecraft.getMinecraft().gameSettings.useVbo;
+     }
+ 
+     public static void glBindFramebuffer(int target, int framebufferIn)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Vanilla's own Framebuffer reaches the backend through its attached instance; this entry point is what a
++            // mod calls with a framebuffer *it* created, and the backend has no render target for that handle. Binding
++            // something else would be worse than saying so: journeymap, modularui and IvToolkit call this directly.
++            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce(
++                    "glBindFramebuffer",
++                    "a framebuffer the mod created has no render target here, so the binding is ignored");
++            return;
++        }
+         if (framebufferSupported)
+         {
+             switch (framebufferType)
+@@ -820,8 +856,16 @@
+         }
+     }
+ 
+     public static void setActiveTexture(int texture)
+     {
++        if (net.minecraftforge.client.render.texture.TextureBackends.forNonGl() != null)
++        {
++            // Through GlStateManager, so its own idea of the active unit stays in step. Measured: TurretMod's
++            // grayscale shader calls this directly and the call reached real GL - a SIGSEGV inside glActiveTexture,
++            // because a Vulkan window has no context behind it.
++            GlStateManager.setActiveTexture(texture);
++            return;
++        }
+         if (arbMultitexture)
+         {
+             ARBMultitexture.glActiveTextureARB(texture);
+@@ -834,6 +878,9 @@
  
      public static void setClientActiveTexture(int texture)
      {
@@ -429,7 +465,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -846,6 +875,12 @@
+@@ -846,6 +893,12 @@
  
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
@@ -442,7 +478,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
-@@ -854,10 +889,17 @@
+@@ -854,10 +907,17 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -460,7 +496,22 @@
          if (openGL14)
          {
              if (extBlendFuncSeparate)
-@@ -891,7 +933,9 @@
+@@ -875,8 +935,14 @@
+         }
+     }
+ 
+     public static boolean isFramebufferEnabled()
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // False, not true: the backend draws into the game's own targets, and a mod that creates a raw framebuffer
++            // has nowhere to put it. Answering true would send it down a path whose every call is a reported gap.
++            return false;
++        }
+         return framebufferSupported && Minecraft.getMinecraft().gameSettings.fboEnable;
+     }
+ 
+@@ -891,7 +957,9 @@
          GlStateManager.depthMask(false);
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -471,7 +522,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
-@@ -900,7 +944,7 @@
+@@ -900,7 +968,7 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(0, 0, 0, 255).endVertex();
          tessellator.draw();
@@ -480,7 +531,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
-@@ -909,66 +953,35 @@
+@@ -909,66 +977,35 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(127, 127, 255, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(127, 127, 255, 255).endVertex();
          tessellator.draw();
