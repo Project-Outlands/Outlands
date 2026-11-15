@@ -33,6 +33,11 @@ import org.lwjgl.opengl.GL11;
  */
 public final class FrameShim implements ShimGl.Impl {
 
+    /** {@code GL_TEXTURE_WIDTH}. */
+    private static final int GL_TEXTURE_WIDTH = 4096;
+    /** {@code GL_TEXTURE_HEIGHT}. */
+    private static final int GL_TEXTURE_HEIGHT = 4097;
+
     /** {@code GL_CULL_FACE_MODE}: which face culling removes. */
     private static final int GL_CULL_FACE_MODE = 2885;
     /** {@code GL_TEXTURE_BINDING_2D}: the texture bound to the active unit. */
@@ -822,6 +827,76 @@ public final class FrameShim implements ShimGl.Impl {
                 "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
                         + " backend does that yet; the destination is left as it was");
     }
+    /**
+     * {@code glReadBuffer}: which attachment a later {@code glReadPixels} reads from.
+     *
+     * <p>Recorded nowhere, because the only reader is {@code glReadPixels} - which this backend does not implement
+     * yet, and reports as such. Answering the call instead of letting it reach real GL is the point: in a Vulkan
+     * window there is no GL context behind it, so a mod that asks FTBLib's question would take the process down.</p>
+     */
+    @Override
+    public void glReadBuffer(int mode) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glReadBuffer(mode);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glReadBuffer",
+                "it selects the attachment a read-back would use, and read-back is not implemented yet");
+    }
+
+    /**
+     * {@code glBlitFramebuffer}.
+     *
+     * <p>Caught rather than passed through, which is the whole point: journeymap calls it, and a call into
+     * {@code liblwjgl_opengl} with no GL context is a segfault, not an exception - the same shape as the crash this
+     * backend already had once. A real implementation is a copy between attachments, which the render target layer
+     * already knows how to do for {@code glCopyTexSubImage2D}.</p>
+     */
+    @Override
+    public void glBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1,
+                                  int dstY1, int mask, int filter) {
+        FrameState state = state();
+        if (state == null) {
+            ShimGl.REAL_GL.glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glBlitFramebuffer",
+                "a blit between attachments needs the render target layer's copy path, which only"
+                        + " glCopyTexSubImage2D uses today; nothing is copied");
+    }
+
+    /**
+     * {@code glGetTexLevelParameteri}: the size of a texture the game uploaded.
+     *
+     * <p><b>Answered rather than refused.</b> Bookshelf and journeymap ask the bound texture for its width and height
+     * before copying it, and a 0 there is a wrong answer that makes them skip the feature - while the backend has the
+     * size, because it is the thing that uploaded the pixels. Only level 0 and only the size queries are answered;
+     * anything else reports once, since a wrong number is worse than a reported gap.</p>
+     */
+    @Override
+    public int glGetTexLevelParameteri(int target, int level, int parameterName) {
+        FrameState state = state();
+        if (state == null) {
+            return ShimGl.REAL_GL.glGetTexLevelParameteri(target, level, parameterName);
+        }
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        if (textures != null && level == 0) {
+            net.minecraftforge.client.render.texture.TextureImage image = textures.image(textures.boundTexture());
+            if (image != null) {
+                return switch (parameterName) {
+                    case GL_TEXTURE_WIDTH -> image.width();
+                    case GL_TEXTURE_HEIGHT -> image.height();
+                    default -> 0;
+                };
+            }
+        }
+        FrameStates.reportSkippedOnce("glGetTexLevelParameteri(" + parameterName + ")",
+                "only a level-0 texture's width and height are known here; anything else would be a guess");
+        return 0;
+    }
+
     @Override
     public void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
         FrameState state = state();

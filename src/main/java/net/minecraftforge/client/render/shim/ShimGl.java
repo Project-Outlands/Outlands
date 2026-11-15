@@ -237,8 +237,19 @@ public final class ShimGl {
         default void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {}
         /** {@code glGetTexImage} (LWJGL 2 shape). */
         default void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {}
-        /** {@code glCopyTexImage2D} (LWJGL 2 shape). */
-        default void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {}
+        /** {@code glReadBuffer}: which attachment a subsequent {@code glReadPixels} reads from. */
+        default void glReadBuffer(int mode) {}
+
+        /** {@code glBlitFramebuffer}. */
+        default void glBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0,
+                                       int dstX1, int dstY1, int mask, int filter) {}
+
+        /** {@code glGetTexLevelParameteri}: {@code GL_TEXTURE_WIDTH}, {@code GL_TEXTURE_HEIGHT} and friends. */
+        default int glGetTexLevelParameteri(int target, int level, int parameterName) { return 0; }
+
+        /** {@code glCopyTexImage2D}. */
+        default void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height,
+                                      int border) {}
         /**
          * {@code glBlendColor}: the constant colour the {@code GL_CONSTANT_*} blend factors read.
          *
@@ -606,6 +617,23 @@ public final class ShimGl {
         @Override
         public void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
             GL11.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
+        }
+
+        @Override
+        public void glReadBuffer(int mode) {
+            GL11.glReadBuffer(mode);
+        }
+
+        @Override
+        public void glBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1,
+                                      int dstY1, int mask, int filter) {
+            org.lwjgl.opengl.GL30.glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask,
+                    filter);
+        }
+
+        @Override
+        public int glGetTexLevelParameteri(int target, int level, int parameterName) {
+            return GL11.glGetTexLevelParameteri(target, level, parameterName);
         }
         @Override
         public void glEnableClientState(int array) {
@@ -1045,6 +1073,16 @@ public final class ShimGl {
     }
     public static void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
         impl.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
+    }
+    public static void glReadBuffer(int mode) {
+        impl.glReadBuffer(mode);
+    }
+    public static void glBlitFramebuffer(int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1,
+                                         int dstY1, int mask, int filter) {
+        impl.glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+    }
+    public static int glGetTexLevelParameteri(int target, int level, int parameterName) {
+        return impl.glGetTexLevelParameteri(target, level, parameterName);
     }
     public static void glEnableClientState(int array) {
         impl.glEnableClientState(array);

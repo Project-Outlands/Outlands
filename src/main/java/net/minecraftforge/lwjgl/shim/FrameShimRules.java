@@ -63,6 +63,9 @@ public final class FrameShimRules implements ShimRewriteRules {
      */
     public static final String ARB_BUFFER_OBJECT = "org/lwjgl/opengl/ARBBufferObject";
 
+    /** GL 3.0's class, where {@code glBlitFramebuffer} lives in the LWJGL 2 the mods were compiled against. */
+    public static final String GL30 = "org/lwjgl/opengl/GL30";
+
     /** GL 1.2's class, where {@code glBlendColor} lives in the LWJGL 2 the mods were compiled against. */
     public static final String GL14 = "org/lwjgl/opengl/GL14";
 
@@ -189,6 +192,12 @@ public final class FrameShimRules implements ShimRewriteRules {
             entry("glGetTexImage", "(IIIILjava/nio/ByteBuffer;)V"),
             entry("glGetTexImage", "(IIIILjava/nio/IntBuffer;)V"),
             entry("glCopyTexImage2D", "(IIIIIIII)V"),
+            // The read-back family's neighbours, which were reaching real GL - a segfault in a Vulkan window rather
+            // than a reported gap. Measured users: journeymap blits, FTBLib and IvToolkit select a read buffer, and
+            // four mods ask a texture for its size.
+            entry("glReadBuffer", "(I)V"),
+            entry("glGetTexLevelParameteri", "(III)I"),
+            new RetargetEntry(GL30, "glBlitFramebuffer", "(IIIIIIIIII)V", FACADE),
             // Display lists. Immersive Intelligence's AMT model renderers compile their quads once and replay them
             // per frame; the names come from GLAllocation, which the patch already routes, so only the three calls
             // the mod makes itself need entries. glGenLists/glDeleteLists are deliberately absent: no mod in the
