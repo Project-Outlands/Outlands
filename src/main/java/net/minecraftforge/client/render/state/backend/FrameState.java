@@ -316,6 +316,9 @@ public interface FrameState {
 
     void shadeModel(int glModel);
 
+    /** {@code GL_SMOOTH} (7425) or {@code GL_FLAT} (7424): whether a primitive interpolates its colour. */
+    int shadeModel();
+
     void cullFace(int glFace);
 
     /**

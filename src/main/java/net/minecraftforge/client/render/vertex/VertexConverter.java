@@ -509,6 +509,53 @@ public final class VertexConverter {
         lighting.shadeFactor(ex * invLen, ey * invLen, ez * invLen, outVertex, outConstant);
     }
 
+    /** {@code GL_QUADS}: the mode whose flat shading this converter applies. */
+    private static final int GL_QUADS = 7;
+    /** {@code GL_TRIANGLES}. */
+    private static final int GL_TRIANGLES = 4;
+
+    private static boolean flatShadingReported;
+
+    /**
+     * {@code glShadeModel(GL_FLAT)}: every vertex of a primitive takes the colour of its last one.
+     *
+     * <p><b>Why a pass over the output rather than a branch in the loop.</b> Flat shading is a property of the
+     * <i>primitive</i>, and the loop that writes vertices does not know where one primitive ends. Copying the
+     * provoking vertex's finished colour forward afterwards is the same answer with none of the bookkeeping, and it
+     * also carries the lighting with it - which is what GL's flat shading does.</p>
+     *
+     * <p>Only quads and triangles are handled: a strip or a fan would need the triangle order, and no draw in the
+     * pack asks for one while the model is flat. Anything else is reported once and left smooth, because a wrong
+     * primitive is worse than an interpolation.</p>
+     */
+    public static void applyFlatShading(ByteBuffer target, int targetOffset, int vertexCount, int glMode) {
+        int primitive = switch (glMode) {
+            case GL_QUADS -> 4;
+            case GL_TRIANGLES -> 3;
+            default -> 0;
+        };
+        if (primitive == 0) {
+            if (!flatShadingReported) {
+                flatShadingReported = true;
+                net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce(
+                        "flat shading of primitive mode " + glMode,
+                        "flat shading is applied to quads and triangles; a strip or fan needs the triangle order");
+            }
+            return;
+        }
+        for (int start = 0; start + primitive <= vertexCount; start += primitive) {
+            int from = targetOffset + (start + primitive - 1) * STRIDE + COLOR_OFFSET;
+            int r = target.get(from) & 0xFF;
+            int g = target.get(from + 1) & 0xFF;
+            int b = target.get(from + 2) & 0xFF;
+            int a = target.get(from + 3) & 0xFF;
+            for (int i = 0; i < primitive - 1; i++) {
+                int to = targetOffset + (start + i) * STRIDE + COLOR_OFFSET;
+                target.put(to, (byte) r).put(to + 1, (byte) g).put(to + 2, (byte) b).put(to + 3, (byte) a);
+            }
+        }
+    }
+
     private static int clampByte(int value) {
         return value < 0 ? 0 : Math.min(value, 255);
     }

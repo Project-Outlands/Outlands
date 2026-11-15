@@ -32,6 +32,13 @@ public final class DrawState {
     /** {@code glPolygonMode}: point, line or fill, per face. */
     private int polygonModeFace = 1032;
     private int polygonModeMode = 6914;
+    /**
+     * {@code glShadeModel}: {@code GL_SMOOTH} (7425, the GL default) or {@code GL_FLAT} (7424).
+     *
+     * <p>It is not a pipeline state - it decides whether a primitive takes its colour from one vertex or interpolates
+     * between them - so it travels to the vertex converter, which is where the colours are computed.</p>
+     */
+    private int shadeModel = 7425;
     private boolean texture2d;
     private boolean alphaTest;
     private float alphaReference;
@@ -262,6 +269,7 @@ public final class DrawState {
         this.logicOp = state.logicOp();
         this.polygonModeFace = state.polygonModeFace();
         this.polygonModeMode = state.polygonModeMode();
+        this.shadeModel = state.shadeModel();
         this.texture2d = texture2dEnabled(state);
         this.alphaTest = state.alphaTestEnabled();
         this.alphaReference = state.alphaReference();
@@ -442,6 +450,9 @@ public final class DrawState {
     public int polygonModeFace() { return polygonModeFace; }
 
     public int polygonModeMode() { return polygonModeMode; }
+
+    /** {@code GL_SMOOTH} or {@code GL_FLAT}; see {@link #shadeModel}. */
+    public int shadeModel() { return shadeModel; }
     public boolean texture2d() { return texture2d; }
     public boolean alphaTest() { return alphaTest; }
     public float alphaReference() { return alphaReference; }

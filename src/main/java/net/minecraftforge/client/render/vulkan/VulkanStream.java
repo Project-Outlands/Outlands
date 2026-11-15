@@ -346,6 +346,11 @@ final class VulkanStream implements AutoCloseable {
                     ds.lightingEnabled(), ds.normalMatrix(), ds.lighting(),
                     ds.textureMatrix(),
                     targetVbo, currentVertexOffset);
+            if (ds.shadeModel() == GL_FLAT) {
+                // After the loop, because flat shading is a property of the primitive and the colours are finished by
+                // then - which is also how GL's own flat shading carries the lighting across a face.
+                VertexConverter.applyFlatShading(targetVbo, currentVertexOffset, draw.vertexCount(), draw.mode());
+            }
             currentVertexOffset += draw.vertexCount() * VertexConverter.STRIDE;
 
             PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
@@ -885,6 +890,9 @@ final class VulkanStream implements AutoCloseable {
      * so {@code GL_NEVER} is 0 and {@code GL_ALWAYS} is 7. A value outside the eight is clamped rather than thrown -
      * it cannot arrive from a GL enum, and refusing a draw over it would fail the frame.
      */
+    /** {@code GL_FLAT}: the shade model whose primitives take one colour. */
+    private static final int GL_FLAT = 7424;
+
     static int alphaComparisonIndex(int glComparison) {
         return Math.max(0, Math.min(7, glComparison - 512));
     }
