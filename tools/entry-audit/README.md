@@ -1,5 +1,13 @@
 # entry-audit
 
+Two questions, two scripts: does the pack call a **vanilla** method that still reaches real OpenGL (`audit.py`), and
+does it call **`org.lwjgl.opengl`** directly in a way the ruleset does not route (`gl-surface.py`)?
+
+Both are the same failure — a call that lands in `liblwjgl_opengl` with no GL context behind it, which is a SIGSEGV
+rather than an exception, so the log never says which call it was.
+
+## audit.py — vanilla's entry points
+
 Which vanilla methods does the pack call that still reach real OpenGL?
 
 The shim patches vanilla's own bodies, so a mod that calls `GlStateManager.enableBlend` or `TextureManager.bindTexture`
@@ -47,6 +55,25 @@ python3 tools/entry-audit/audit.py <pack>/mods --patched projects/mcpbase/minecr
 ```
 
 Without that, "0 holes" would also be what a broken classifier prints.
+
+## gl-surface.py — the raw GL surface
+
+```sh
+python3 tools/entry-audit/gl-surface.py <pack>/mods
+```
+
+Reads the ruleset out of `FrameShimRules.java` (owner constants and the `entry`/`arb`/`gl13`/`gl14`/`gl15`/`gl20`/
+`gl30` helpers), scans the pack for references into `org/lwjgl/opengl/**`, and reports the triples the rules do not
+cover. Three buckets, because they need different answers:
+
+| bucket | meaning |
+|---|---|
+| **uncovered** | a real GL call no rule routes: a mod that makes it takes the process down. Exit status 1. |
+| **implementers** | Actinium, Angelica, GTNHLib's VAO/VBO/shader wrappers, `com.mitchej123.glsm`, the LWJGL 3 shim. They *are* an OpenGL backend; under the Vulkan backend they are simply not the code path in use. |
+| **not GL calls** | `Display`, `Drawable`, `GLContext`, `ContextCapabilities`: window and context management, answered by the LWJGL 2 compatibility layer, not by the shim. |
+
+Measured on the SoS-TD pack: 666 distinct raw GL calls, **0 uncovered**, 385 in the implementer bucket, 105 in the
+window/context bucket.
 
 ## What it cannot see
 

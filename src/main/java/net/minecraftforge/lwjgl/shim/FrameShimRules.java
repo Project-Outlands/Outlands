@@ -66,6 +66,15 @@ public final class FrameShimRules implements ShimRewriteRules {
     /** GL 3.0's class, where {@code glBlitFramebuffer} lives in the LWJGL 2 the mods were compiled against. */
     public static final String GL30 = "org/lwjgl/opengl/GL30";
 
+    /** GL 2.0's class: the core shader objects, which SmoothFont and CodeChickenLib use instead of the ARB names. */
+    public static final String GL20 = "org/lwjgl/opengl/GL20";
+
+    /** GL 1.3's class, where {@code glActiveTexture} lives; SmoothFont's font shader binds its texture this way. */
+    public static final String GL13 = "org/lwjgl/opengl/GL13";
+
+    /** GL 1.5's class: buffer objects by their core names, which is what IvToolkit's model loader calls. */
+    public static final String GL15 = "org/lwjgl/opengl/GL15";
+
     /** GL 1.2's class, where {@code glBlendColor} lives in the LWJGL 2 the mods were compiled against. */
     public static final String GL14 = "org/lwjgl/opengl/GL14";
 
@@ -81,6 +90,18 @@ public final class FrameShimRules implements ShimRewriteRules {
     private static final List<RetargetEntry> ENTRIES = List.of(
             // Matrix stack: 45 of IC2C's 63 sites, and the largest single group in every other mod surveyed.
             entry("glPushMatrix", "()V"),
+            // The double and integer spellings of the calls above. They were absent because the first survey counted
+            // the float forms; the pack scan found these next to them - glScaled 15 sites in CodeChicken's microblock
+            // renderers, glRotated 7, glVertex2f 10 in modernsplash, glVertex2i 3 in JEI Utilities, glVertex3d 4.
+            entry("glScaled", "(DDD)V"),
+            entry("glRotated", "(DDDD)V"),
+            entry("glVertex2f", "(FF)V"),
+            entry("glVertex3d", "(DDD)V"),
+            entry("glVertex2i", "(II)V"),
+            entry("glTexCoord2f", "(FF)V"),
+            entry("glColor3f", "(FFF)V"),
+            entry("glColor4ub", "(BBBB)V"),
+            entry("glColor4d", "(DDDD)V"),
             entry("glPopMatrix", "()V"),
             entry("glTranslatef", "(FFF)V"),
             entry("glTranslated", "(DDD)V"),
@@ -212,6 +233,101 @@ public final class FrameShimRules implements ShimRewriteRules {
             // exists in LWJGL 3 as well, so this is a retarget and not a table entry.
             entry("glGetBoolean", "(I)Z"),
 
+            // Texture objects. The whole family was missing, and a mod calling any of it reached real GL: TurretMod's
+            // turret camera allocates its own texture this way and the process died inside GL11C.nglGenTextures.
+            // Measured across the pack: glGenTextures 3, glDeleteTextures 3, glBindTexture 9, glTexParameteri 11,
+            // glTexParameterf 2, glTexImage2D 6, glTexSubImage2D 2, glPixelStorei 4, glGenerateMipmap 2.
+            entry("glGenTextures", "()I"),
+            entry("glDeleteTextures", "(I)V"),
+            entry("glBindTexture", "(II)V"),
+            entry("glTexParameteri", "(III)V"),
+            entry("glTexParameterf", "(IIF)V"),
+            entry("glTexImage2D", "(IIIIIIIILjava/nio/ByteBuffer;)V"),
+            entry("glTexSubImage2D", "(IIIIIIIILjava/nio/ByteBuffer;)V"),
+            entry("glPixelStorei", "(II)V"),
+            gl30("glGenerateMipmap", "(I)V"),
+
+            // Core GL 2.0 shader objects, the same object model as the ARB block under the names a mod written against
+            // GL 2.0 core uses. Measured: SmoothFont's font shader (about forty sites) and CodeChickenLib's
+            // ShaderProgram. Their absence was a segfault in liblwjgl_opengl, not a reported gap.
+            gl20("glCreateProgram", "()I"),
+            gl20("glCreateShader", "(I)I"),
+            gl20("glShaderSource", "(ILjava/lang/CharSequence;)V"),
+            gl20("glCompileShader", "(I)V"),
+            gl20("glAttachShader", "(II)V"),
+            gl20("glLinkProgram", "(I)V"),
+            gl20("glValidateProgram", "(I)V"),
+            gl20("glUseProgram", "(I)V"),
+            gl20("glDeleteProgram", "(I)V"),
+            gl20("glDeleteShader", "(I)V"),
+            gl20("glGetProgrami", "(II)I"),
+            gl20("glGetShaderi", "(II)I"),
+            gl20("glGetProgramInfoLog", "(II)Ljava/lang/String;"),
+            gl20("glGetShaderInfoLog", "(II)Ljava/lang/String;"),
+            gl20("glGetUniformLocation", "(ILjava/lang/CharSequence;)I"),
+            gl20("glUniform1i", "(II)V"),
+            gl20("glUniform1f", "(IF)V"),
+            gl20("glUniform2f", "(IFF)V"),
+            gl20("glUniform3f", "(IFFF)V"),
+            gl20("glUniform4f", "(IFFFF)V"),
+            gl20("glUniform2i", "(III)V"),
+            gl20("glUniform3i", "(IIII)V"),
+            gl20("glUniform4i", "(IIIII)V"),
+            gl20("glUniformMatrix4", "(IZLjava/nio/FloatBuffer;)V"),
+            // The three integer uniform forms the ARB block was missing. LibrarianLib's boolean-vector uniforms are
+            // the only users, and they reached real GL.
+            arb("glUniform2iARB", "(III)V"),
+            arb("glUniform3iARB", "(IIII)V"),
+            arb("glUniform4iARB", "(IIIII)V"),
+            // Buffer objects by their GL 1.5 names: IvToolkit's model loader uploads geometry this way and then points
+            // client arrays at offsets inside it, which the client-array path already understands.
+            gl15("glGenBuffers", "()I"),
+            gl15("glBindBuffer", "(II)V"),
+            gl15("glBufferData", "(ILjava/nio/ByteBuffer;I)V"),
+            gl15("glDeleteBuffers", "(I)V"),
+            // The remaining state queries. modularui's projection reads four values at once, SmoothFont asks whether
+            // its shader compiled, and Cleanroom's own hook helper prints the GL strings.
+            entry("glGetInteger", "(ILjava/nio/IntBuffer;)V"),
+            entry("glGetError", "()I"),
+            entry("glGetString", "(I)Ljava/lang/String;"),
+            // IvToolkit's depth buffer selects a draw buffer before rendering into its own target.
+            entry("glDrawBuffer", "(I)V"),
+
+            // The long tail the pack-wide scan turned up: one or two call sites each, all of them real GL calls that
+            // would have reached liblwjgl_opengl. Measured owners and users:
+            //   glVertex2d - jeresources; glFrustum - modularui's schema renderer; glClipPlane - Immersive
+            //   Intelligence's AMT item; glFlush - modernsplash; glGetTexEnvi/f - SmoothFont; glGetTexParameteri -
+            //   journeymap; the IntBuffer texture forms - modernsplash and mcjty's TrueTypeFont; glTexImage1D -
+            //   LibrarianLib's blur; glActiveTexture - SmoothFont; glBlendFuncSeparate - LibrarianLib's particles;
+            //   glBlendEquationSeparate, glDetachShader and the active-uniform queries - LibrarianLib and SmoothFont.
+            entry("glVertex2d", "(DD)V"),
+            entry("glFrustum", "(DDDDDD)V"),
+            entry("glClipPlane", "(ILjava/nio/DoubleBuffer;)V"),
+            entry("glFlush", "()V"),
+            entry("glGetTexEnvi", "(II)I"),
+            entry("glGetTexEnvf", "(II)F"),
+            entry("glGetTexParameteri", "(II)I"),
+            entry("glGenTextures", "(Ljava/nio/IntBuffer;)V"),
+            entry("glDeleteTextures", "(Ljava/nio/IntBuffer;)V"),
+            entry("glTexImage2D", "(IIIIIIIILjava/nio/IntBuffer;)V"),
+            entry("glTexSubImage2D", "(IIIIIIIILjava/nio/IntBuffer;)V"),
+            entry("glTexImage1D", "(IIIIIIILjava/nio/FloatBuffer;)V"),
+            gl13("glActiveTexture", "(I)V"),
+            gl14("glBlendFuncSeparate", "(IIII)V"),
+            gl20("glBlendEquationSeparate", "(II)V"),
+            gl20("glDetachShader", "(II)V"),
+            gl20("glGetActiveUniform", "(III)Ljava/lang/String;"),
+            gl20("glGetActiveUniformType", "(II)I"),
+            gl20("glGetActiveUniformSize", "(II)I"),
+            gl20("glUniformMatrix2", "(IZLjava/nio/FloatBuffer;)V"),
+            arb("glUniform2fARB", "(IFF)V"),
+            arb("glUniform4fARB", "(IFFFF)V"),
+            // GL 3.0's framebuffer objects by their core names: pregenerator's preview texture creates one.
+            gl30("glGenFramebuffers", "()I"),
+            gl30("glBindFramebuffer", "(II)V"),
+            gl30("glFramebufferTexture2D", "(IIIII)V"),
+            gl30("glDeleteFramebuffers", "(I)V"),
+
             // ARB_shader_objects: the whole shader surface of the three mods that use shaders at all. The
             // sequence is the same in each of them - create, source, compile, attach, link, ask the status, look up
             // a uniform, write it, use the program - so one set of entries covers all three. The two extra
@@ -277,6 +393,22 @@ public final class FrameShimRules implements ShimRewriteRules {
 
     private static RetargetEntry gl14(String name, String desc) {
         return new RetargetEntry(GL14, name, desc, FACADE);
+    }
+
+    private static RetargetEntry gl30(String name, String desc) {
+        return new RetargetEntry(GL30, name, desc, FACADE);
+    }
+
+    private static RetargetEntry gl20(String name, String desc) {
+        return new RetargetEntry(GL20, name, desc, FACADE);
+    }
+
+    private static RetargetEntry gl15(String name, String desc) {
+        return new RetargetEntry(GL15, name, desc, FACADE);
+    }
+
+    private static RetargetEntry gl13(String name, String desc) {
+        return new RetargetEntry(GL13, name, desc, FACADE);
     }
 
     @Override

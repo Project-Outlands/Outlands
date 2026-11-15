@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,5 +84,51 @@ class TexturePixelsTest {
             bytes[i] = out.get(from + i);
         }
         return bytes;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The inverse, for glTexImage2D. Same two facts, mirrored: the rows arrive bottom-up and the channels are whatever
+    // the caller's enum pair says. A mod uploading its own texture through the raw call is the only user, so getting
+    // it wrong shows up as one mod's texture upside down - or blue - and nothing in the log.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Test
+    void readFlipsTheRowsBack() {
+        ByteBuffer in = ByteBuffer.allocate(2 * 2 * 4);
+        // GL order: bottom row (blue, white) first, then the top row (red, green).
+        in.put(new byte[] {0, 0, (byte) 255, (byte) 255, (byte) 255, (byte) 255, (byte) 255, (byte) 255});
+        in.put(new byte[] {(byte) 255, 0, 0, (byte) 255, 0, (byte) 255, 0, (byte) 255});
+        in.flip();
+
+        assertArrayEquals(ARGB, TexturePixels.read(2, 2, RGBA, UNSIGNED_BYTE, in), "rows top-down after the flip");
+    }
+
+    @Test
+    void readSwapsBlueAndRedForBgra() {
+        ByteBuffer in = ByteBuffer.allocate(4);
+        in.put(new byte[] {0, 0, (byte) 255, (byte) 255}).flip();
+        // BGRA bytes B=0,G=0,R=255,A=255 are the int 0xFFFF0000 - red.
+        assertArrayEquals(new int[] {0xFFFF0000}, TexturePixels.read(1, 1, BGRA, UNSIGNED_BYTE, in));
+    }
+
+    @Test
+    void readTakesPackedIntsAsTheyAre() {
+        ByteBuffer in = ByteBuffer.allocate(4);
+        // GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV is the pair vanilla uploads with: the int already is 0xAARRGGBB.
+        in.putInt(0xFF3366CC).flip();
+        assertArrayEquals(new int[] {0xFF3366CC}, TexturePixels.read(1, 1, BGRA, 33639, in));
+    }
+
+    @Test
+    void readFillsOpaqueAlphaForRgb() {
+        ByteBuffer in = ByteBuffer.allocate(3);
+        in.put(new byte[] {10, 20, 30}).flip();
+        assertArrayEquals(new int[] {0xFF0A141E}, TexturePixels.read(1, 1, RGB, UNSIGNED_BYTE, in));
+    }
+
+    @Test
+    void readDeclinesAPairItCannotConvert() {
+        ByteBuffer in = ByteBuffer.allocate(8);
+        assertNull(TexturePixels.read(1, 1, RGBA, 5124, in), "GL_INT is not a layout the byte contract converts");
     }
 }

@@ -71,7 +71,13 @@ public final class ShimGl {
 
         default void glScalef(float x, float y, float z) {}
 
+        /** {@code glScaled}: the same scale, from doubles. CodeChicken's microblock renderers call this one. */
+        default void glScaled(double x, double y, double z) {}
+
         default void glRotatef(float angle, float x, float y, float z) {}
+
+        /** {@code glRotated}: the same rotation, from doubles. */
+        default void glRotated(double angle, double x, double y, double z) {}
 
         default void glMatrixMode(int mode) {}
 
@@ -102,6 +108,209 @@ public final class ShimGl {
 
         /** {@code glVertex3f}: one vertex of the open immediate-mode primitive. */
         default void glVertex3f(float x, float y, float z) {}
+
+        /** {@code glVertex2f}: the z is zero, which is where an orthographic GUI draws. */
+        default void glVertex2f(float x, float y) {}
+
+        /** {@code glVertex3d}: the double form of {@link #glVertex3f}. */
+        default void glVertex3d(double x, double y, double z) {}
+
+        /** {@code glVertex2i}: integer coordinates, which is how JEI's drag line and modernsplash's quads are built. */
+        default void glVertex2i(int x, int y) {}
+
+        /** {@code glTexCoord2f}: the texture coordinate of the vertices that follow. */
+        default void glTexCoord2f(float u, float v) {}
+
+        /** {@code glColor3f}: the float form of the current colour, with an implied opaque alpha. */
+        default void glColor3f(float red, float green, float blue) {}
+
+        /** {@code glColor4ub}: unsigned bytes, which is how a packed colour arrives from a mod's own packing. */
+        default void glColor4ub(byte red, byte green, byte blue, byte alpha) {}
+
+        /** {@code glColor4d}: the double form of {@link #glColor4f}. */
+        default void glColor4d(double red, double green, double blue, double alpha) {}
+
+        /** {@code glGenTextures}: a new texture handle. */
+        default int glGenTextures() { return 0; }
+
+        /** {@code glDeleteTextures}: releases a handle {@link #glGenTextures} handed out. */
+        default void glDeleteTextures(int texture) {}
+
+        /** {@code glBindTexture}: makes a texture the one the active unit samples. */
+        default void glBindTexture(int target, int texture) {}
+
+        /** {@code glTexParameteri}: integer sampler state (filter, wrap, mipmap range). */
+        default void glTexParameteri(int target, int parameterName, int value) {}
+
+        /** {@code glTexParameterf}: floating-point sampler state (anisotropy). */
+        default void glTexParameterf(int target, int parameterName, float value) {}
+
+        /** {@code glTexImage2D}: allocates or replaces a mip level from packed bytes. */
+        default void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                                  int format, int type, java.nio.ByteBuffer pixels) {}
+
+        /** {@code glTexSubImage2D}: replaces part of a mip level from packed bytes. */
+        default void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                     int format, int type, java.nio.ByteBuffer pixels) {}
+
+        /** {@code glPixelStorei}: the unpack/pack alignment, which this backend's byte contract does not have. */
+        default void glPixelStorei(int parameterName, int value) {}
+
+        /** {@code glGenerateMipmap}: builds the mip chain of the bound texture. */
+        default void glGenerateMipmap(int target) {}
+
+        // Core GL 2.0 shader objects. The ARB block above answers the same object model under the extension's names;
+        // these are the names a mod written against GL 2.0 core uses, and until now they reached real GL: measured
+        // users are SmoothFont's font shader (about forty sites) and CodeChickenLib's ShaderProgram.
+
+        default int glCreateProgram() { return 0; }
+
+        default int glCreateShader(int type) { return 0; }
+
+        default void glShaderSource(int shader, CharSequence source) {}
+
+        default void glCompileShader(int shader) {}
+
+        default void glAttachShader(int program, int shader) {}
+
+        default void glLinkProgram(int program) {}
+
+        default void glValidateProgram(int program) {}
+
+        default void glUseProgram(int program) {}
+
+        default void glDeleteProgram(int program) {}
+
+        default void glDeleteShader(int shader) {}
+
+        /** {@code glGetProgrami}: link status, attach counts and the like, by core enum. */
+        default int glGetProgrami(int program, int parameterName) { return 0; }
+
+        /** {@code glGetShaderi}: compile status and the like, by core enum. */
+        default int glGetShaderi(int shader, int parameterName) { return 0; }
+
+        default String glGetProgramInfoLog(int program, int maxLength) { return ""; }
+
+        default String glGetShaderInfoLog(int shader, int maxLength) { return ""; }
+
+        default int glGetUniformLocation(int program, CharSequence name) { return -1; }
+
+        default void glUniform1i(int location, int value) {}
+
+        default void glUniform1f(int location, float value) {}
+
+        default void glUniform2f(int location, float v0, float v1) {}
+
+        default void glUniform3f(int location, float v0, float v1, float v2) {}
+
+        default void glUniform4f(int location, float v0, float v1, float v2, float v3) {}
+
+        default void glUniform2i(int location, int v0, int v1) {}
+
+        default void glUniform3i(int location, int v0, int v1, int v2) {}
+
+        default void glUniform4i(int location, int v0, int v1, int v2, int v3) {}
+
+        default void glUniformMatrix4(int location, boolean transpose, java.nio.FloatBuffer value) {}
+
+        /** The three integer uniform forms the ARB block was missing; LibrarianLib's boolean-vector uniforms use them. */
+        default void glUniform2iARB(int location, int v0, int v1) {}
+
+        default void glUniform3iARB(int location, int v0, int v1, int v2) {}
+
+        default void glUniform4iARB(int location, int v0, int v1, int v2, int v3) {}
+
+        // Buffer objects by their GL 1.5 names. The same store the client-array path reads offsets out of.
+
+        default int glGenBuffers() { return 0; }
+
+        default void glBindBuffer(int target, int buffer) {}
+
+        default void glBufferData(int target, java.nio.ByteBuffer data, int usage) {}
+
+        default void glDeleteBuffers(int buffer) {}
+
+        /** {@code glGetInteger} into an array: modularui's projection code reads four state values at once. */
+        default void glGetInteger(int parameterName, java.nio.IntBuffer values) {}
+
+        /** {@code glGetError}: there is no GL error queue behind this backend, so the answer is always NO_ERROR. */
+        default int glGetError() { return 0; }
+
+        /** {@code glGetString}: vendor, renderer and version strings. */
+        default String glGetString(int name) { return null; }
+
+        /** {@code glDrawBuffer}: which colour attachment a draw goes to. Only the default one is modelled. */
+        default void glDrawBuffer(int mode) {}
+
+        /** {@code glVertex2d}: the double form of {@link #glVertex2f}. */
+        default void glVertex2d(double x, double y) {}
+
+        /** {@code glFrustum}: the perspective block of the fixed-function projection. */
+        default void glFrustum(double left, double right, double bottom, double top, double near, double far) {}
+
+        /** {@code glClipPlane}: a user clip plane, which no pipeline stage of this backend has. */
+        default void glClipPlane(int plane, java.nio.DoubleBuffer equation) {}
+
+        /** {@code glFlush}: start the GL commands already issued. */
+        default void glFlush() {}
+
+        /** {@code glGetTexEnvi}/{@code glGetTexEnvf}: the fixed-function texture environment. */
+        default int glGetTexEnvi(int target, int parameterName) { return 0; }
+
+        default float glGetTexEnvf(int target, int parameterName) { return 0.0F; }
+
+        /** {@code glGetTexParameteri}: a sampler parameter read back. */
+        default int glGetTexParameteri(int target, int parameterName) { return 0; }
+
+        /** {@code glGenTextures} into an array: several handles at once. */
+        default void glGenTextures(java.nio.IntBuffer textures) {}
+
+        default void glDeleteTextures(java.nio.IntBuffer textures) {}
+
+        /** {@code glTexImage2D} from ints, which is the same byte contract the texture backend already speaks. */
+        default void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                                  int format, int type, java.nio.IntBuffer pixels) {}
+
+        default void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                     int format, int type, java.nio.IntBuffer pixels) {}
+
+        /** {@code glTexImage1D}: one-dimensional textures, which this backend does not model. */
+        default void glTexImage1D(int target, int level, int internalFormat, int width, int border, int format,
+                                  int type, java.nio.FloatBuffer pixels) {}
+
+        /** {@code glActiveTexture}: the unit the following binds and draws apply to. */
+        default void glActiveTexture(int unit) {}
+
+        /** {@code glBlendFuncSeparate}: separate factors for the alpha channel. */
+        default void glBlendFuncSeparate(int sourceRgb, int destinationRgb, int sourceAlpha, int destinationAlpha) {}
+
+        /** {@code glBlendEquationSeparate}: separate blend equations for colour and alpha. */
+        default void glBlendEquationSeparate(int modeRgb, int modeAlpha) {}
+
+        default void glDetachShader(int program, int shader) {}
+
+        default String glGetActiveUniform(int program, int index, int maxLength) { return ""; }
+
+        default int glGetActiveUniformType(int program, int index) { return 0; }
+
+        default int glGetActiveUniformSize(int program, int index) { return 0; }
+
+        default void glUniformMatrix2(int location, boolean transpose, java.nio.FloatBuffer value) {}
+
+        default void glUniform2fARB(int location, float v0, float v1) {}
+
+        default void glUniform4fARB(int location, float v0, float v1, float v2, float v3) {}
+
+        // GL 3.0's framebuffer objects by their core names. Pregenerator's preview texture is the one caller, and the
+        // answers are the ones OpenGlHelper's patch gives: a framebuffer a mod creates has no render target here.
+
+        default int glGenFramebuffers() { return 0; }
+
+        default void glBindFramebuffer(int target, int framebuffer) {}
+
+        default void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level) {}
+
+        default void glDeleteFramebuffers(int framebuffer) {}
 
         default void glLineWidth(float width) {}
 
@@ -368,6 +577,410 @@ public final class ShimGl {
         @Override
         public void glScalef(float x, float y, float z) {
             GL11.glScalef(x, y, z);
+        }
+
+        @Override
+        public void glScaled(double x, double y, double z) {
+            GL11.glScaled(x, y, z);
+        }
+
+        @Override
+        public void glRotated(double angle, double x, double y, double z) {
+            GL11.glRotated(angle, x, y, z);
+        }
+
+        @Override
+        public void glVertex2f(float x, float y) {
+            GL11.glVertex2f(x, y);
+        }
+
+        @Override
+        public void glVertex3d(double x, double y, double z) {
+            GL11.glVertex3d(x, y, z);
+        }
+
+        @Override
+        public void glVertex2i(int x, int y) {
+            GL11.glVertex2i(x, y);
+        }
+
+        @Override
+        public void glTexCoord2f(float u, float v) {
+            GL11.glTexCoord2f(u, v);
+        }
+
+        @Override
+        public void glColor3f(float red, float green, float blue) {
+            GL11.glColor3f(red, green, blue);
+        }
+
+        @Override
+        public void glColor4ub(byte red, byte green, byte blue, byte alpha) {
+            GL11.glColor4ub(red, green, blue, alpha);
+        }
+
+        @Override
+        public void glColor4d(double red, double green, double blue, double alpha) {
+            GL11.glColor4d(red, green, blue, alpha);
+        }
+
+        @Override
+        public int glGenTextures() {
+            return GL11.glGenTextures();
+        }
+
+        @Override
+        public void glDeleteTextures(int texture) {
+            GL11.glDeleteTextures(texture);
+        }
+
+        @Override
+        public void glBindTexture(int target, int texture) {
+            GL11.glBindTexture(target, texture);
+        }
+
+        @Override
+        public void glTexParameteri(int target, int parameterName, int value) {
+            GL11.glTexParameteri(target, parameterName, value);
+        }
+
+        @Override
+        public void glTexParameterf(int target, int parameterName, float value) {
+            GL11.glTexParameterf(target, parameterName, value);
+        }
+
+        @Override
+        public void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                                 int format, int type, java.nio.ByteBuffer pixels) {
+            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+        }
+
+        @Override
+        public void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                    int format, int type, java.nio.ByteBuffer pixels) {
+            GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+        }
+
+        @Override
+        public void glPixelStorei(int parameterName, int value) {
+            GL11.glPixelStorei(parameterName, value);
+        }
+
+        @Override
+        public void glGenerateMipmap(int target) {
+            org.lwjgl.opengl.GL30.glGenerateMipmap(target);
+        }
+
+        @Override
+        public int glCreateProgram() {
+            return org.lwjgl.opengl.GL20.glCreateProgram();
+        }
+
+        @Override
+        public int glCreateShader(int type) {
+            return org.lwjgl.opengl.GL20.glCreateShader(type);
+        }
+
+        @Override
+        public void glShaderSource(int shader, CharSequence source) {
+            org.lwjgl.opengl.GL20.glShaderSource(shader, source);
+        }
+
+        @Override
+        public void glCompileShader(int shader) {
+            org.lwjgl.opengl.GL20.glCompileShader(shader);
+        }
+
+        @Override
+        public void glAttachShader(int program, int shader) {
+            org.lwjgl.opengl.GL20.glAttachShader(program, shader);
+        }
+
+        @Override
+        public void glLinkProgram(int program) {
+            org.lwjgl.opengl.GL20.glLinkProgram(program);
+        }
+
+        @Override
+        public void glValidateProgram(int program) {
+            org.lwjgl.opengl.GL20.glValidateProgram(program);
+        }
+
+        @Override
+        public void glUseProgram(int program) {
+            org.lwjgl.opengl.GL20.glUseProgram(program);
+        }
+
+        @Override
+        public void glDeleteProgram(int program) {
+            org.lwjgl.opengl.GL20.glDeleteProgram(program);
+        }
+
+        @Override
+        public void glDeleteShader(int shader) {
+            org.lwjgl.opengl.GL20.glDeleteShader(shader);
+        }
+
+        @Override
+        public int glGetProgrami(int program, int parameterName) {
+            return org.lwjgl.opengl.GL20.glGetProgrami(program, parameterName);
+        }
+
+        @Override
+        public int glGetShaderi(int shader, int parameterName) {
+            return org.lwjgl.opengl.GL20.glGetShaderi(shader, parameterName);
+        }
+
+        @Override
+        public String glGetProgramInfoLog(int program, int maxLength) {
+            return org.lwjgl.opengl.GL20.glGetProgramInfoLog(program, maxLength);
+        }
+
+        @Override
+        public String glGetShaderInfoLog(int shader, int maxLength) {
+            return org.lwjgl.opengl.GL20.glGetShaderInfoLog(shader, maxLength);
+        }
+
+        @Override
+        public int glGetUniformLocation(int program, CharSequence name) {
+            return org.lwjgl.opengl.GL20.glGetUniformLocation(program, name);
+        }
+
+        @Override
+        public void glUniform1i(int location, int value) {
+            org.lwjgl.opengl.GL20.glUniform1i(location, value);
+        }
+
+        @Override
+        public void glUniform1f(int location, float value) {
+            org.lwjgl.opengl.GL20.glUniform1f(location, value);
+        }
+
+        @Override
+        public void glUniform2f(int location, float v0, float v1) {
+            org.lwjgl.opengl.GL20.glUniform2f(location, v0, v1);
+        }
+
+        @Override
+        public void glUniform3f(int location, float v0, float v1, float v2) {
+            org.lwjgl.opengl.GL20.glUniform3f(location, v0, v1, v2);
+        }
+
+        @Override
+        public void glUniform4f(int location, float v0, float v1, float v2, float v3) {
+            org.lwjgl.opengl.GL20.glUniform4f(location, v0, v1, v2, v3);
+        }
+
+        @Override
+        public void glUniform2i(int location, int v0, int v1) {
+            org.lwjgl.opengl.GL20.glUniform2i(location, v0, v1);
+        }
+
+        @Override
+        public void glUniform3i(int location, int v0, int v1, int v2) {
+            org.lwjgl.opengl.GL20.glUniform3i(location, v0, v1, v2);
+        }
+
+        @Override
+        public void glUniform4i(int location, int v0, int v1, int v2, int v3) {
+            org.lwjgl.opengl.GL20.glUniform4i(location, v0, v1, v2, v3);
+        }
+
+        @Override
+        public void glUniformMatrix4(int location, boolean transpose, java.nio.FloatBuffer value) {
+            org.lwjgl.opengl.GL20.glUniformMatrix4fv(location, transpose, value);
+        }
+
+        @Override
+        public void glUniform2iARB(int location, int v0, int v1) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform2iARB(location, v0, v1);
+        }
+
+        @Override
+        public void glUniform3iARB(int location, int v0, int v1, int v2) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform3iARB(location, v0, v1, v2);
+        }
+
+        @Override
+        public void glUniform4iARB(int location, int v0, int v1, int v2, int v3) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform4iARB(location, v0, v1, v2, v3);
+        }
+
+        @Override
+        public int glGenBuffers() {
+            return GL15.glGenBuffers();
+        }
+
+        @Override
+        public void glBindBuffer(int target, int buffer) {
+            GL15.glBindBuffer(target, buffer);
+        }
+
+        @Override
+        public void glBufferData(int target, java.nio.ByteBuffer data, int usage) {
+            GL15.glBufferData(target, data, usage);
+        }
+
+        @Override
+        public void glDeleteBuffers(int buffer) {
+            GL15.glDeleteBuffers(buffer);
+        }
+
+        @Override
+        public void glGetInteger(int parameterName, java.nio.IntBuffer values) {
+            GL11.glGetIntegerv(parameterName, values);
+        }
+
+        @Override
+        public int glGetError() {
+            return GL11.glGetError();
+        }
+
+        @Override
+        public String glGetString(int name) {
+            return GL11.glGetString(name);
+        }
+
+        @Override
+        public void glDrawBuffer(int mode) {
+            GL11.glDrawBuffer(mode);
+        }
+
+        @Override
+        public void glVertex2d(double x, double y) {
+            GL11.glVertex2d(x, y);
+        }
+
+        @Override
+        public void glFrustum(double left, double right, double bottom, double top, double near, double far) {
+            GL11.glFrustum(left, right, bottom, top, near, far);
+        }
+
+        @Override
+        public void glClipPlane(int plane, java.nio.DoubleBuffer equation) {
+            GL11.glClipPlane(plane, equation);
+        }
+
+        @Override
+        public void glFlush() {
+            GL11.glFlush();
+        }
+
+        @Override
+        public int glGetTexEnvi(int target, int parameterName) {
+            return GL11.glGetTexEnvi(target, parameterName);
+        }
+
+        @Override
+        public float glGetTexEnvf(int target, int parameterName) {
+            return GL11.glGetTexEnvf(target, parameterName);
+        }
+
+        @Override
+        public int glGetTexParameteri(int target, int parameterName) {
+            return GL11.glGetTexParameteri(target, parameterName);
+        }
+
+        @Override
+        public void glGenTextures(java.nio.IntBuffer textures) {
+            GL11.glGenTextures(textures);
+        }
+
+        @Override
+        public void glDeleteTextures(java.nio.IntBuffer textures) {
+            GL11.glDeleteTextures(textures);
+        }
+
+        @Override
+        public void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                                 int format, int type, java.nio.IntBuffer pixels) {
+            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+        }
+
+        @Override
+        public void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                    int format, int type, java.nio.IntBuffer pixels) {
+            GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+        }
+
+        @Override
+        public void glTexImage1D(int target, int level, int internalFormat, int width, int border, int format,
+                                 int type, java.nio.FloatBuffer pixels) {
+            GL11.glTexImage1D(target, level, internalFormat, width, border, format, type, pixels);
+        }
+
+        @Override
+        public void glActiveTexture(int unit) {
+            org.lwjgl.opengl.GL13.glActiveTexture(unit);
+        }
+
+        @Override
+        public void glBlendFuncSeparate(int sourceRgb, int destinationRgb, int sourceAlpha, int destinationAlpha) {
+            org.lwjgl.opengl.GL14.glBlendFuncSeparate(sourceRgb, destinationRgb, sourceAlpha, destinationAlpha);
+        }
+
+        @Override
+        public void glBlendEquationSeparate(int modeRgb, int modeAlpha) {
+            org.lwjgl.opengl.GL20.glBlendEquationSeparate(modeRgb, modeAlpha);
+        }
+
+        @Override
+        public void glDetachShader(int program, int shader) {
+            org.lwjgl.opengl.GL20.glDetachShader(program, shader);
+        }
+
+        @Override
+        public String glGetActiveUniform(int program, int index, int maxLength) {
+            // LWJGL 3's form takes the size and type outputs alongside the name; the LWJGL 2 call the mods make
+            // returns the name alone, so they go into throwaway buffers.
+            return org.lwjgl.opengl.GL20.glGetActiveUniform(program, index, maxLength,
+                    java.nio.IntBuffer.allocate(1), java.nio.IntBuffer.allocate(1));
+        }
+
+        @Override
+        public int glGetActiveUniformType(int program, int index) {
+            // LWJGL 2 answered this with a name of its own; LWJGL 3 only has the GL 3.1 query behind it.
+            return org.lwjgl.opengl.GL31.glGetActiveUniformsi(program, index, 0x8B86);
+        }
+
+        @Override
+        public int glGetActiveUniformSize(int program, int index) {
+            return org.lwjgl.opengl.GL31.glGetActiveUniformsi(program, index, 0x8B87);
+        }
+
+        @Override
+        public void glUniformMatrix2(int location, boolean transpose, java.nio.FloatBuffer value) {
+            org.lwjgl.opengl.GL20.glUniformMatrix2fv(location, transpose, value);
+        }
+
+        @Override
+        public void glUniform2fARB(int location, float v0, float v1) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform2fARB(location, v0, v1);
+        }
+
+        @Override
+        public void glUniform4fARB(int location, float v0, float v1, float v2, float v3) {
+            org.lwjgl.opengl.ARBShaderObjects.glUniform4fARB(location, v0, v1, v2, v3);
+        }
+
+        @Override
+        public int glGenFramebuffers() {
+            return org.lwjgl.opengl.GL30.glGenFramebuffers();
+        }
+
+        @Override
+        public void glBindFramebuffer(int target, int framebuffer) {
+            org.lwjgl.opengl.GL30.glBindFramebuffer(target, framebuffer);
+        }
+
+        @Override
+        public void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level) {
+            org.lwjgl.opengl.GL30.glFramebufferTexture2D(target, attachment, textarget, texture, level);
+        }
+
+        @Override
+        public void glDeleteFramebuffers(int framebuffer) {
+            org.lwjgl.opengl.GL30.glDeleteFramebuffers(framebuffer);
         }
 
         @Override
@@ -882,6 +1495,324 @@ public final class ShimGl {
 
     public static void glScalef(float x, float y, float z) {
         impl.glScalef(x, y, z);
+    }
+
+    public static void glScaled(double x, double y, double z) {
+        impl.glScaled(x, y, z);
+    }
+
+    public static void glRotated(double angle, double x, double y, double z) {
+        impl.glRotated(angle, x, y, z);
+    }
+
+    public static void glVertex2f(float x, float y) {
+        impl.glVertex2f(x, y);
+    }
+
+    public static void glVertex3d(double x, double y, double z) {
+        impl.glVertex3d(x, y, z);
+    }
+
+    public static void glVertex2i(int x, int y) {
+        impl.glVertex2i(x, y);
+    }
+
+    public static void glTexCoord2f(float u, float v) {
+        impl.glTexCoord2f(u, v);
+    }
+
+    public static void glColor3f(float red, float green, float blue) {
+        impl.glColor3f(red, green, blue);
+    }
+
+    public static void glColor4ub(byte red, byte green, byte blue, byte alpha) {
+        impl.glColor4ub(red, green, blue, alpha);
+    }
+
+    public static void glColor4d(double red, double green, double blue, double alpha) {
+        impl.glColor4d(red, green, blue, alpha);
+    }
+
+    public static int glGenTextures() {
+        return impl.glGenTextures();
+    }
+
+    public static void glDeleteTextures(int texture) {
+        impl.glDeleteTextures(texture);
+    }
+
+    public static void glBindTexture(int target, int texture) {
+        impl.glBindTexture(target, texture);
+    }
+
+    public static void glTexParameteri(int target, int parameterName, int value) {
+        impl.glTexParameteri(target, parameterName, value);
+    }
+
+    public static void glTexParameterf(int target, int parameterName, float value) {
+        impl.glTexParameterf(target, parameterName, value);
+    }
+
+    public static void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                                    int format, int type, java.nio.ByteBuffer pixels) {
+        impl.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+    }
+
+    public static void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                       int format, int type, java.nio.ByteBuffer pixels) {
+        impl.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+    }
+
+    public static void glPixelStorei(int parameterName, int value) {
+        impl.glPixelStorei(parameterName, value);
+    }
+
+    public static void glGenerateMipmap(int target) {
+        impl.glGenerateMipmap(target);
+    }
+
+    public static int glCreateProgram() {
+        return impl.glCreateProgram();
+    }
+
+    public static int glCreateShader(int type) {
+        return impl.glCreateShader(type);
+    }
+
+    public static void glShaderSource(int shader, CharSequence source) {
+        impl.glShaderSource(shader, source);
+    }
+
+    public static void glCompileShader(int shader) {
+        impl.glCompileShader(shader);
+    }
+
+    public static void glAttachShader(int program, int shader) {
+        impl.glAttachShader(program, shader);
+    }
+
+    public static void glLinkProgram(int program) {
+        impl.glLinkProgram(program);
+    }
+
+    public static void glValidateProgram(int program) {
+        impl.glValidateProgram(program);
+    }
+
+    public static void glUseProgram(int program) {
+        impl.glUseProgram(program);
+    }
+
+    public static void glDeleteProgram(int program) {
+        impl.glDeleteProgram(program);
+    }
+
+    public static void glDeleteShader(int shader) {
+        impl.glDeleteShader(shader);
+    }
+
+    public static int glGetProgrami(int program, int parameterName) {
+        return impl.glGetProgrami(program, parameterName);
+    }
+
+    public static int glGetShaderi(int shader, int parameterName) {
+        return impl.glGetShaderi(shader, parameterName);
+    }
+
+    public static String glGetProgramInfoLog(int program, int maxLength) {
+        return impl.glGetProgramInfoLog(program, maxLength);
+    }
+
+    public static String glGetShaderInfoLog(int shader, int maxLength) {
+        return impl.glGetShaderInfoLog(shader, maxLength);
+    }
+
+    public static int glGetUniformLocation(int program, CharSequence name) {
+        return impl.glGetUniformLocation(program, name);
+    }
+
+    public static void glUniform1i(int location, int value) {
+        impl.glUniform1i(location, value);
+    }
+
+    public static void glUniform1f(int location, float value) {
+        impl.glUniform1f(location, value);
+    }
+
+    public static void glUniform2f(int location, float v0, float v1) {
+        impl.glUniform2f(location, v0, v1);
+    }
+
+    public static void glUniform3f(int location, float v0, float v1, float v2) {
+        impl.glUniform3f(location, v0, v1, v2);
+    }
+
+    public static void glUniform4f(int location, float v0, float v1, float v2, float v3) {
+        impl.glUniform4f(location, v0, v1, v2, v3);
+    }
+
+    public static void glUniform2i(int location, int v0, int v1) {
+        impl.glUniform2i(location, v0, v1);
+    }
+
+    public static void glUniform3i(int location, int v0, int v1, int v2) {
+        impl.glUniform3i(location, v0, v1, v2);
+    }
+
+    public static void glUniform4i(int location, int v0, int v1, int v2, int v3) {
+        impl.glUniform4i(location, v0, v1, v2, v3);
+    }
+
+    public static void glUniformMatrix4(int location, boolean transpose, java.nio.FloatBuffer value) {
+        impl.glUniformMatrix4(location, transpose, value);
+    }
+
+    public static void glUniform2iARB(int location, int v0, int v1) {
+        impl.glUniform2iARB(location, v0, v1);
+    }
+
+    public static void glUniform3iARB(int location, int v0, int v1, int v2) {
+        impl.glUniform3iARB(location, v0, v1, v2);
+    }
+
+    public static void glUniform4iARB(int location, int v0, int v1, int v2, int v3) {
+        impl.glUniform4iARB(location, v0, v1, v2, v3);
+    }
+
+    public static int glGenBuffers() {
+        return impl.glGenBuffers();
+    }
+
+    public static void glBindBuffer(int target, int buffer) {
+        impl.glBindBuffer(target, buffer);
+    }
+
+    public static void glBufferData(int target, java.nio.ByteBuffer data, int usage) {
+        impl.glBufferData(target, data, usage);
+    }
+
+    public static void glDeleteBuffers(int buffer) {
+        impl.glDeleteBuffers(buffer);
+    }
+
+    public static void glGetInteger(int parameterName, java.nio.IntBuffer values) {
+        impl.glGetInteger(parameterName, values);
+    }
+
+    public static int glGetError() {
+        return impl.glGetError();
+    }
+
+    public static String glGetString(int name) {
+        return impl.glGetString(name);
+    }
+
+    public static void glDrawBuffer(int mode) {
+        impl.glDrawBuffer(mode);
+    }
+
+    public static void glVertex2d(double x, double y) {
+        impl.glVertex2d(x, y);
+    }
+
+    public static void glFrustum(double left, double right, double bottom, double top, double near, double far) {
+        impl.glFrustum(left, right, bottom, top, near, far);
+    }
+
+    public static void glClipPlane(int plane, java.nio.DoubleBuffer equation) {
+        impl.glClipPlane(plane, equation);
+    }
+
+    public static void glFlush() {
+        impl.glFlush();
+    }
+
+    public static int glGetTexEnvi(int target, int parameterName) {
+        return impl.glGetTexEnvi(target, parameterName);
+    }
+
+    public static float glGetTexEnvf(int target, int parameterName) {
+        return impl.glGetTexEnvf(target, parameterName);
+    }
+
+    public static int glGetTexParameteri(int target, int parameterName) {
+        return impl.glGetTexParameteri(target, parameterName);
+    }
+
+    public static void glGenTextures(java.nio.IntBuffer textures) {
+        impl.glGenTextures(textures);
+    }
+
+    public static void glDeleteTextures(java.nio.IntBuffer textures) {
+        impl.glDeleteTextures(textures);
+    }
+
+    public static void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border, int format, int type, java.nio.IntBuffer pixels) {
+        impl.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+    }
+
+    public static void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height, int format, int type, java.nio.IntBuffer pixels) {
+        impl.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+    }
+
+    public static void glTexImage1D(int target, int level, int internalFormat, int width, int border, int format, int type, java.nio.FloatBuffer pixels) {
+        impl.glTexImage1D(target, level, internalFormat, width, border, format, type, pixels);
+    }
+
+    public static void glActiveTexture(int unit) {
+        impl.glActiveTexture(unit);
+    }
+
+    public static void glBlendFuncSeparate(int sourceRgb, int destinationRgb, int sourceAlpha, int destinationAlpha) {
+        impl.glBlendFuncSeparate(sourceRgb, destinationRgb, sourceAlpha, destinationAlpha);
+    }
+
+    public static void glBlendEquationSeparate(int modeRgb, int modeAlpha) {
+        impl.glBlendEquationSeparate(modeRgb, modeAlpha);
+    }
+
+    public static void glDetachShader(int program, int shader) {
+        impl.glDetachShader(program, shader);
+    }
+
+    public static String glGetActiveUniform(int program, int index, int maxLength) {
+        return impl.glGetActiveUniform(program, index, maxLength);
+    }
+
+    public static int glGetActiveUniformType(int program, int index) {
+        return impl.glGetActiveUniformType(program, index);
+    }
+
+    public static int glGetActiveUniformSize(int program, int index) {
+        return impl.glGetActiveUniformSize(program, index);
+    }
+
+    public static void glUniformMatrix2(int location, boolean transpose, java.nio.FloatBuffer value) {
+        impl.glUniformMatrix2(location, transpose, value);
+    }
+
+    public static void glUniform2fARB(int location, float v0, float v1) {
+        impl.glUniform2fARB(location, v0, v1);
+    }
+
+    public static void glUniform4fARB(int location, float v0, float v1, float v2, float v3) {
+        impl.glUniform4fARB(location, v0, v1, v2, v3);
+    }
+
+    public static int glGenFramebuffers() {
+        return impl.glGenFramebuffers();
+    }
+
+    public static void glBindFramebuffer(int target, int framebuffer) {
+        impl.glBindFramebuffer(target, framebuffer);
+    }
+
+    public static void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level) {
+        impl.glFramebufferTexture2D(target, attachment, textarget, texture, level);
+    }
+
+    public static void glDeleteFramebuffers(int framebuffer) {
+        impl.glDeleteFramebuffers(framebuffer);
     }
 
     public static void glRotatef(float angle, float x, float y, float z) {

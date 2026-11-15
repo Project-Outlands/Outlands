@@ -42,14 +42,18 @@ class FrameShimRulesTest {
     void entriesAreTheMeasuredSurface() {
         List<RetargetEntry> entries = FrameShimRules.INSTANCE.entries();
 
-        assertEquals(97, entries.size(), "the measured surface: the pack, Immersive Engineering's queries and"
+        assertEquals(176, entries.size(), "the measured surface: the pack, Immersive Engineering's queries and"
                 + " raster/stencil entries, one boolean query, the ARB shader block, the state setters the whole"
                 + " instance was scanned for, the display-list calls, the client arrays with their buffers, the"
-                + " attribute stack, stencil clear, readback family and the blend colour, and the read-back family's"
+                + " attribute stack, stencil clear, readback family and the blend colour, the read-back family's"
                 + " neighbours - glBlitFramebuffer, glReadBuffer and glGetTexLevelParameteri - which journeymap,"
-                + " FTBLib, IvToolkit, Bookshelf and LibrarianLib call");
+                + " FTBLib, IvToolkit, Bookshelf and LibrarianLib call, and the pack-wide scan's additions: the double"
+                + " and integer spellings of the matrix and vertex calls, the texture object family that killed the"
+                + " process inside GL11C.nglGenTextures, and the core GL 2.0 shader objects, GL 1.5 buffer objects,"
+                + " GL 3.0 framebuffer objects and long tail of one-site calls the pack-wide scan found");
         Set<String> owners = Set.of(FrameShimRules.GL11, FrameShimRules.ARB_SHADER_OBJECTS,
-                FrameShimRules.ARB_BUFFER_OBJECT, FrameShimRules.GL14, FrameShimRules.GL30);
+                FrameShimRules.ARB_BUFFER_OBJECT, FrameShimRules.GL13, FrameShimRules.GL14,
+                FrameShimRules.GL15, FrameShimRules.GL20, FrameShimRules.GL30);
         for (RetargetEntry entry : entries) {
             assertTrue(owners.contains(entry.fromOwner()), entry.name() + " from " + entry.fromOwner());
             assertEquals(FrameShimRules.FACADE, entry.toOwner(), entry.name());

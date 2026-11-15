@@ -11,6 +11,7 @@ import net.minecraftforge.client.render.state.backend.FrameStates;
 
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL15;
 
 /**
  * {@link ShimGl}'s implementation for a renderer that is not OpenGL: mod GL calls land in the same
@@ -34,6 +35,8 @@ import org.lwjgl.opengl.GL11;
 public final class FrameShim implements ShimGl.Impl {
 
     /** {@code GL_TEXTURE_WIDTH}. */
+    /** {@code GL_TEXTURE_2D}: the only target the backend models. */
+    private static final int GL_TEXTURE_2D = 3553;
     private static final int GL_TEXTURE_WIDTH = 4096;
     /** {@code GL_TEXTURE_HEIGHT}. */
     private static final int GL_TEXTURE_HEIGHT = 4097;
@@ -205,6 +208,33 @@ public final class FrameShim implements ShimGl.Impl {
         state.scale(x, y, z);
     }
 
+    /**
+     * The double form of {@link #glScalef}.
+     *
+     * <p>Worth its own entry rather than being left to the table: CodeChicken's microblock renderers scale with this
+     * one, fifteen call sites, and a scale that reaches real GL is a block drawn at the wrong size rather than a
+     * visible error.</p>
+     */
+    @Override
+    public void glScaled(double x, double y, double z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glScaled(x, y, z);
+            return;
+        }
+        state.scale((float) x, (float) y, (float) z);
+    }
+
+    @Override
+    public void glRotated(double angle, double x, double y, double z) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glRotated(angle, x, y, z);
+            return;
+        }
+        state.rotate((float) angle, (float) x, (float) y, (float) z);
+    }
+
     @Override
     public void glRotatef(float angle, float x, float y, float z) {
         FrameState state = state();
@@ -369,6 +399,686 @@ public final class FrameShim implements ShimGl.Impl {
         // The colour is read here rather than passed in because that is where GL keeps it: glColor* sets it once and
         // it applies to every vertex until it changes.
         FrameStates.immediate().vertex(x, y, z, state.currentColor());
+    }
+
+    @Override
+    public void glVertex2f(float x, float y) {
+        this.glVertex3f(x, y, 0.0F);
+    }
+
+    @Override
+    public void glVertex3d(double x, double y, double z) {
+        this.glVertex3f((float) x, (float) y, (float) z);
+    }
+
+    @Override
+    public void glVertex2i(int x, int y) {
+        this.glVertex3f(x, y, 0.0F);
+    }
+
+    @Override
+    public void glTexCoord2f(float u, float v) {
+        if (state() == null) {
+            GL11.glTexCoord2f(u, v);
+            return;
+        }
+        FrameStates.immediate().texCoord(u, v);
+    }
+
+    @Override
+    public void glColor3f(float red, float green, float blue) {
+        this.glColor4f(red, green, blue, 1.0F);
+    }
+
+    @Override
+    public void glColor4ub(byte red, byte green, byte blue, byte alpha) {
+        this.glColor4f((red & 0xFF) / 255.0F, (green & 0xFF) / 255.0F, (blue & 0xFF) / 255.0F,
+                (alpha & 0xFF) / 255.0F);
+    }
+
+    @Override
+    public void glColor4d(double red, double green, double blue, double alpha) {
+        this.glColor4f((float) red, (float) green, (float) blue, (float) alpha);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Texture objects. The whole family reaches real GL from a mod that calls it directly - measured: TurretMod's
+    // turret camera allocates its own texture with glGenTextures and takes the process down inside glActiveTexture's
+    // neighbour, a SIGSEGV with no Java frame to point at. Vanilla's own path already goes through GlStateManager,
+    // which is patched, so these forward there rather than keeping a second copy of the same bookkeeping.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Override
+    public int glGenTextures() {
+        if (state() == null) {
+            return GL11.glGenTextures();
+        }
+        return net.minecraft.client.renderer.GlStateManager.generateTexture();
+    }
+
+    @Override
+    public void glDeleteTextures(int texture) {
+        if (state() == null) {
+            GL11.glDeleteTextures(texture);
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.deleteTexture(texture);
+    }
+
+    @Override
+    public void glBindTexture(int target, int texture) {
+        if (state() == null) {
+            GL11.glBindTexture(target, texture);
+            return;
+        }
+        if (target != GL_TEXTURE_2D) {
+            FrameStates.reportSkippedOnce("glBindTexture(" + target + ")",
+                    "only GL_TEXTURE_2D is modelled; the backend has one kind of texture");
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.bindTexture(texture);
+    }
+
+    @Override
+    public void glTexParameteri(int target, int parameterName, int value) {
+        if (state() == null) {
+            GL11.glTexParameteri(target, parameterName, value);
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.glTexParameteri(target, parameterName, value);
+    }
+
+    @Override
+    public void glTexParameterf(int target, int parameterName, float value) {
+        if (state() == null) {
+            GL11.glTexParameterf(target, parameterName, value);
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.glTexParameterf(target, parameterName, value);
+    }
+
+    @Override
+    public void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                             int format, int type, java.nio.ByteBuffer pixels) {
+        if (state() == null) {
+            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+            return;
+        }
+        int[] argb = pixels == null ? null : TexturePixels.read(width, height, format, type, pixels);
+        if (pixels != null && argb == null) {
+            FrameStates.reportSkippedOnce("glTexImage2D(format " + format + ", type " + type + ")",
+                    "that pixel layout is not one the byte contract converts");
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.glTexImage2D(target, level, internalFormat, width, height, border,
+                format, type, argb == null ? null : java.nio.IntBuffer.wrap(argb));
+    }
+
+    @Override
+    public void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                int format, int type, java.nio.ByteBuffer pixels) {
+        if (state() == null) {
+            GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+            return;
+        }
+        int[] argb = TexturePixels.read(width, height, format, type, pixels);
+        if (argb == null) {
+            FrameStates.reportSkippedOnce("glTexSubImage2D(format " + format + ", type " + type + ")",
+                    "that pixel layout is not one the byte contract converts");
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.glTexSubImage2D(target, level, xOffset, yOffset, width, height,
+                format, type, java.nio.IntBuffer.wrap(argb));
+    }
+
+    @Override
+    public void glPixelStorei(int parameterName, int value) {
+        if (state() == null) {
+            GL11.glPixelStorei(parameterName, value);
+            return;
+        }
+        // GlStateManager's own body reports it once and says why: the alignment it configures belongs to GL's strided
+        // unpack path, and this backend hands its data over tightly packed.
+        net.minecraft.client.renderer.GlStateManager.glPixelStorei(parameterName, value);
+    }
+
+    @Override
+    public void glGenerateMipmap(int target) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL30.glGenerateMipmap(target);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glGenerateMipmap",
+                "mip levels are uploaded, not generated: the backend keeps the levels a mod hands it");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Core GL 2.0 shader objects. The ARB block above and this one are the same object model under two sets of names,
+    // and the pack has both: Immersive Engineering and Immersive Intelligence use ARB, SmoothFont and CodeChickenLib's
+    // ShaderProgram use the core names. Delegating to the ARB implementations keeps one namespace - a second
+    // implementation would hand out two kinds of program id and every draw would be recorded against the wrong one.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Override
+    public int glCreateProgram() {
+        return this.glCreateProgramObjectARB();
+    }
+
+    @Override
+    public int glCreateShader(int type) {
+        return this.glCreateShaderObjectARB(type);
+    }
+
+    @Override
+    public void glShaderSource(int shader, CharSequence source) {
+        this.glShaderSourceARB(shader, source);
+    }
+
+    @Override
+    public void glCompileShader(int shader) {
+        this.glCompileShaderARB(shader);
+    }
+
+    @Override
+    public void glAttachShader(int program, int shader) {
+        this.glAttachObjectARB(program, shader);
+    }
+
+    @Override
+    public void glLinkProgram(int program) {
+        this.glLinkProgramARB(program);
+    }
+
+    @Override
+    public void glValidateProgram(int program) {
+        this.glValidateProgramARB(program);
+    }
+
+    @Override
+    public void glUseProgram(int program) {
+        this.glUseProgramObjectARB(program);
+    }
+
+    @Override
+    public void glDeleteProgram(int program) {
+        this.glDeleteObjectARB(program);
+    }
+
+    @Override
+    public void glDeleteShader(int shader) {
+        this.glDeleteObjectARB(shader);
+    }
+
+    @Override
+    public int glGetProgrami(int program, int parameterName) {
+        return this.glGetObjectParameteriARB(program, parameterName);
+    }
+
+    @Override
+    public int glGetShaderi(int shader, int parameterName) {
+        return this.glGetObjectParameteriARB(shader, parameterName);
+    }
+
+    @Override
+    public String glGetProgramInfoLog(int program, int maxLength) {
+        return this.glGetInfoLogARB(program, maxLength);
+    }
+
+    @Override
+    public String glGetShaderInfoLog(int shader, int maxLength) {
+        return this.glGetInfoLogARB(shader, maxLength);
+    }
+
+    @Override
+    public int glGetUniformLocation(int program, CharSequence name) {
+        return this.glGetUniformLocationARB(program, name);
+    }
+
+    @Override
+    public void glUniform1i(int location, int value) {
+        this.glUniform1iARB(location, value);
+    }
+
+    @Override
+    public void glUniform1f(int location, float value) {
+        this.glUniform1fARB(location, value);
+    }
+
+    @Override
+    public void glUniform3f(int location, float v0, float v1, float v2) {
+        this.glUniform3fARB(location, v0, v1, v2);
+    }
+
+    @Override
+    public void glUniform2f(int location, float v0, float v1) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform2f(location, v0, v1);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniform2f",
+                "the two-component float uniform has no facade entry yet; the one, three and four component forms do");
+    }
+
+    @Override
+    public void glUniform4f(int location, float v0, float v1, float v2, float v3) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform4f(location, v0, v1, v2, v3);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniform4f",
+                "the four-component float uniform has no facade entry yet; the one and three component forms do");
+    }
+
+    @Override
+    public void glUniform2i(int location, int v0, int v1) {
+        this.glUniform2iARB(location, v0, v1);
+    }
+
+    @Override
+    public void glUniform3i(int location, int v0, int v1, int v2) {
+        this.glUniform3iARB(location, v0, v1, v2);
+    }
+
+    @Override
+    public void glUniform4i(int location, int v0, int v1, int v2, int v3) {
+        this.glUniform4iARB(location, v0, v1, v2, v3);
+    }
+
+    @Override
+    public void glUniformMatrix4(int location, boolean transpose, java.nio.FloatBuffer value) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniformMatrix4(location, transpose, value);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniformMatrix4",
+                "matrix uniforms are not carried through the facade yet");
+    }
+
+    @Override
+    public void glUniform2iARB(int location, int v0, int v1) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform2iARB(location, v0, v1);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniform2iARB", "the two-component integer uniform is not carried yet");
+    }
+
+    @Override
+    public void glUniform3iARB(int location, int v0, int v1, int v2) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform3iARB(location, v0, v1, v2);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniform3iARB", "the three-component integer uniform is not carried yet");
+    }
+
+    @Override
+    public void glUniform4iARB(int location, int v0, int v1, int v2, int v3) {
+        if (!shaders()) {
+            ShimGl.REAL_GL.glUniform4iARB(location, v0, v1, v2, v3);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniform4iARB", "the four-component integer uniform is not carried yet");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Buffer objects by their GL 1.5 names, which is where IvToolkit's model loader uploads its geometry. The store is
+    // the one the client-array path already reads offsets out of, so the draw that follows sees these bytes.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Override
+    public int glGenBuffers() {
+        net.minecraftforge.client.render.state.backend.BufferObjects buffers =
+                net.minecraftforge.client.render.state.backend.BufferObjects.forNonGl();
+        if (buffers == null) {
+            return GL15.glGenBuffers();
+        }
+        return buffers.generate(1);
+    }
+
+    @Override
+    public void glBindBuffer(int target, int buffer) {
+        net.minecraftforge.client.render.state.backend.BufferObjects buffers =
+                net.minecraftforge.client.render.state.backend.BufferObjects.forNonGl();
+        if (buffers == null) {
+            GL15.glBindBuffer(target, buffer);
+            return;
+        }
+        buffers.bind(target, buffer);
+    }
+
+    @Override
+    public void glBufferData(int target, java.nio.ByteBuffer data, int usage) {
+        net.minecraftforge.client.render.state.backend.BufferObjects buffers =
+                net.minecraftforge.client.render.state.backend.BufferObjects.forNonGl();
+        if (buffers == null) {
+            GL15.glBufferData(target, data, usage);
+            return;
+        }
+        buffers.data(target, data);
+    }
+
+    @Override
+    public void glDeleteBuffers(int buffer) {
+        net.minecraftforge.client.render.state.backend.BufferObjects buffers =
+                net.minecraftforge.client.render.state.backend.BufferObjects.forNonGl();
+        if (buffers == null) {
+            GL15.glDeleteBuffers(buffer);
+            return;
+        }
+        buffers.delete(buffer, 1);
+    }
+
+    @Override
+    public void glGetInteger(int parameterName, java.nio.IntBuffer values) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glGetIntegerv(parameterName, values);
+            return;
+        }
+        // One value at a time through the same switch the scalar form uses, so the two cannot disagree. The scalar
+        // form is what modularui's projection code would have called had it known the count.
+        values.put(values.position(), this.glGetInteger(parameterName));
+    }
+
+    @Override
+    public int glGetError() {
+        if (state() == null) {
+            return GL11.glGetError();
+        }
+        // There is no error queue behind a recorded frame, and reporting a stale one would be worse than none: the
+        // mods that check it (SmoothFont) use it to decide whether their shader compiled, and that question is
+        // answered by the status query instead.
+        return 0;
+    }
+
+    @Override
+    public String glGetString(int name) {
+        if (state() == null) {
+            return GL11.glGetString(name);
+        }
+        return net.minecraftforge.client.render.GlAnswers.glString(name);
+    }
+
+    @Override
+    public void glDrawBuffer(int mode) {
+        if (state() == null) {
+            GL11.glDrawBuffer(mode);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glDrawBuffer",
+                "a draw goes to the target's only colour attachment; there is no second buffer to select");
+    }
+
+    @Override
+    public void glVertex2d(double x, double y) {
+        this.glVertex3f((float) x, (float) y, 0.0F);
+    }
+
+    @Override
+    public void glFrustum(double left, double right, double bottom, double top, double near, double far) {
+        if (state() == null) {
+            GL11.glFrustum(left, right, bottom, top, near, far);
+            return;
+        }
+        // modularui's schema renderer builds a perspective projection this way. The matrix stack is recorded, so this
+        // is a composition like glOrtho's - reported until it has one, because drawing with the wrong projection is a
+        // picture that looks broken rather than an error that says so.
+        FrameStates.reportSkippedOnce("glFrustum",
+                "the perspective block of the fixed-function projection is not composed into the recorded matrix yet");
+    }
+
+    @Override
+    public void glClipPlane(int plane, java.nio.DoubleBuffer equation) {
+        if (state() == null) {
+            GL11.glClipPlane(plane, equation);
+            return;
+        }
+        // Immersive Intelligence's AMT item clips its model with this. No stage of the pipeline has a user clip plane,
+        // so the model is drawn whole rather than not at all.
+        FrameStates.reportSkippedOnce("glClipPlane",
+                "a user clip plane has no pipeline equivalent here, so the geometry is drawn unclipped");
+    }
+
+    @Override
+    public void glFlush() {
+        if (state() == null) {
+            GL11.glFlush();
+            return;
+        }
+        // Same answer as glFinish: the frame is submitted whole, so there is nothing queued to start.
+        FrameStates.reportSkippedOnce("glFlush", "draws are submitted with the frame, so there is nothing to start");
+    }
+
+    @Override
+    public int glGetTexEnvi(int target, int parameterName) {
+        if (state() == null) {
+            return GL11.glGetTexEnvi(target, parameterName);
+        }
+        FrameStates.reportSkippedOnce("glGetTexEnvi",
+                "the fixed-function texture environment is recorded as a draw's state, not as a value to read back");
+        return 0;
+    }
+
+    @Override
+    public float glGetTexEnvf(int target, int parameterName) {
+        if (state() == null) {
+            return GL11.glGetTexEnvf(target, parameterName);
+        }
+        FrameStates.reportSkippedOnce("glGetTexEnvf",
+                "the fixed-function texture environment is recorded as a draw's state, not as a value to read back");
+        return 0.0F;
+    }
+
+    @Override
+    public int glGetTexParameteri(int target, int parameterName) {
+        if (state() == null) {
+            return GL11.glGetTexParameteri(target, parameterName);
+        }
+        // journeymap asks a texture for its wrap mode before copying it. The parameter store records what mods set, but
+        // has no reader yet, so the answer is GL's default rather than a guess at what was set.
+        FrameStates.reportSkippedOnce("glGetTexParameteri",
+                "sampler parameters are recorded but not readable yet; the answer is the GL default");
+        return 0;
+    }
+
+    @Override
+    public void glGenTextures(java.nio.IntBuffer textures) {
+        net.minecraftforge.client.render.texture.TextureBackend backend =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        if (backend == null) {
+            GL11.glGenTextures(textures);
+            return;
+        }
+        for (int i = 0; i < textures.remaining(); i++) {
+            textures.put(textures.position() + i, backend.create());
+        }
+    }
+
+    @Override
+    public void glDeleteTextures(java.nio.IntBuffer textures) {
+        net.minecraftforge.client.render.texture.TextureBackend backend =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        if (backend == null) {
+            GL11.glDeleteTextures(textures);
+            return;
+        }
+        for (int i = 0; i < textures.remaining(); i++) {
+            backend.delete(textures.get(textures.position() + i));
+        }
+    }
+
+    @Override
+    public void glTexImage2D(int target, int level, int internalFormat, int width, int height, int border,
+                             int format, int type, java.nio.IntBuffer pixels) {
+        if (state() == null) {
+            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, pixels);
+            return;
+        }
+        // Already ARGB ints: the same contract the texture backend speaks, and the same call vanilla's patched
+        // GlStateManager.glTexImage2D makes.
+        net.minecraft.client.renderer.GlStateManager.glTexImage2D(target, level, internalFormat, width, height, border,
+                format, type, pixels);
+    }
+
+    @Override
+    public void glTexSubImage2D(int target, int level, int xOffset, int yOffset, int width, int height,
+                                int format, int type, java.nio.IntBuffer pixels) {
+        if (state() == null) {
+            GL11.glTexSubImage2D(target, level, xOffset, yOffset, width, height, format, type, pixels);
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.glTexSubImage2D(target, level, xOffset, yOffset, width, height,
+                format, type, pixels);
+    }
+
+    @Override
+    public void glTexImage1D(int target, int level, int internalFormat, int width, int border, int format,
+                             int type, java.nio.FloatBuffer pixels) {
+        if (state() == null) {
+            GL11.glTexImage1D(target, level, internalFormat, width, border, format, type, pixels);
+            return;
+        }
+        // LibrarianLib's Gaussian blur uses this for its lookup table. One-dimensional textures are not modelled, so
+        // the blur samples nothing rather than the process dying.
+        FrameStates.reportSkippedOnce("glTexImage1D", "one-dimensional textures are not modelled");
+    }
+
+    @Override
+    public void glActiveTexture(int unit) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL13.glActiveTexture(unit);
+            return;
+        }
+        // Through GlStateManager so its own counter stays in step, exactly like OpenGlHelper.setActiveTexture.
+        net.minecraft.client.renderer.GlStateManager.setActiveTexture(unit);
+    }
+
+    @Override
+    public void glBlendFuncSeparate(int sourceRgb, int destinationRgb, int sourceAlpha, int destinationAlpha) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL14.glBlendFuncSeparate(sourceRgb, destinationRgb, sourceAlpha, destinationAlpha);
+            return;
+        }
+        net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(sourceRgb, destinationRgb, sourceAlpha,
+                destinationAlpha);
+    }
+
+    @Override
+    public void glBlendEquationSeparate(int modeRgb, int modeAlpha) {
+        FrameState state = state();
+        if (state == null) {
+            org.lwjgl.opengl.GL20.glBlendEquationSeparate(modeRgb, modeAlpha);
+            return;
+        }
+        if (modeRgb != modeAlpha) {
+            FrameStates.reportSkippedOnce("glBlendEquationSeparate",
+                    "colour and alpha share one blend equation here; the colour equation is the one recorded");
+        }
+        state.blendEquation(modeRgb);
+    }
+
+    @Override
+    public void glDetachShader(int program, int shader) {
+        if (!shaders()) {
+            org.lwjgl.opengl.GL20.glDetachShader(program, shader);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glDetachShader",
+                "shader objects are reference-counted by deletion, so detaching changes nothing here");
+    }
+
+    @Override
+    public String glGetActiveUniform(int program, int index, int maxLength) {
+        if (!shaders()) {
+            return org.lwjgl.opengl.GL20.glGetActiveUniform(program, index, maxLength,
+                    java.nio.IntBuffer.allocate(1), java.nio.IntBuffer.allocate(1));
+        }
+        FrameStates.reportSkippedOnce("glGetActiveUniform",
+                "uniforms are looked up by name; enumerating them is not modelled");
+        return "";
+    }
+
+    @Override
+    public int glGetActiveUniformType(int program, int index) {
+        if (!shaders()) {
+            return org.lwjgl.opengl.GL31.glGetActiveUniformsi(program, index, 0x8B86);
+        }
+        FrameStates.reportSkippedOnce("glGetActiveUniformType",
+                "uniforms are looked up by name; enumerating them is not modelled");
+        return 0;
+    }
+
+    @Override
+    public int glGetActiveUniformSize(int program, int index) {
+        if (!shaders()) {
+            return org.lwjgl.opengl.GL31.glGetActiveUniformsi(program, index, 0x8B87);
+        }
+        FrameStates.reportSkippedOnce("glGetActiveUniformSize",
+                "uniforms are looked up by name; enumerating them is not modelled");
+        return 0;
+    }
+
+    @Override
+    public void glUniformMatrix2(int location, boolean transpose, java.nio.FloatBuffer value) {
+        if (!shaders()) {
+            org.lwjgl.opengl.GL20.glUniformMatrix2fv(location, transpose, value);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glUniformMatrix2", "matrix uniforms are not carried through the facade yet");
+    }
+
+    @Override
+    public void glUniform2fARB(int location, float v0, float v1) {
+        this.glUniform2f(location, v0, v1);
+    }
+
+    @Override
+    public void glUniform4fARB(int location, float v0, float v1, float v2, float v3) {
+        this.glUniform4f(location, v0, v1, v2, v3);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // GL 3.0 framebuffer objects by their core names. Pregenerator's preview texture is the only caller in the pack,
+    // and the answers are OpenGlHelper's patch's answers: a framebuffer a mod creates has no render target here.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Override
+    public int glGenFramebuffers() {
+        if (state() == null) {
+            return org.lwjgl.opengl.GL30.glGenFramebuffers();
+        }
+        FrameStates.reportSkippedOnce("glGenFramebuffers",
+                "a framebuffer created by the mod has no render target here, so it cannot be rendered into");
+        return 0;
+    }
+
+    @Override
+    public void glBindFramebuffer(int target, int framebuffer) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL30.glBindFramebuffer(target, framebuffer);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glBindFramebuffer",
+                "a framebuffer the mod created has no render target here, so the binding is ignored");
+    }
+
+    @Override
+    public void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL30.glFramebufferTexture2D(target, attachment, textarget, texture, level);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glFramebufferTexture2D", "nothing to attach it to: see glGenFramebuffers");
+    }
+
+    @Override
+    public void glDeleteFramebuffers(int framebuffer) {
+        if (state() == null) {
+            org.lwjgl.opengl.GL30.glDeleteFramebuffers(framebuffer);
+            return;
+        }
+        // Nothing was created, so nothing to release.
     }
 
     @Override
