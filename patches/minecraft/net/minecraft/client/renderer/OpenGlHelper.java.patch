@@ -438,7 +438,70 @@
          if (framebufferSupported)
          {
              switch (framebufferType)
-@@ -820,8 +856,16 @@
+@@ -682,8 +718,14 @@
+         }
+     }
+ 
+     public static void glDeleteFramebuffers(int framebufferIn)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // A handle from glGenFramebuffers below, which never made one. Measured: IvToolkit's ping-pong and depth
++            // buffers are the only callers in the pack.
++            return;
++        }
+         if (framebufferSupported)
+         {
+             switch (framebufferType)
+@@ -700,8 +742,18 @@
+         }
+     }
+ 
+     public static int glGenFramebuffers()
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Zero, and said out loud: the backend has no render target for a framebuffer a mod creates itself, so the
++            // mod's own post-processing step is a no-op rather than a segfault. Reported once, because the feature it
++            // wanted is missing from the picture and nothing else would say so.
++            net.minecraftforge.client.render.state.backend.FrameStates.reportSkippedOnce(
++                    "glGenFramebuffers",
++                    "a framebuffer created by the mod has no render target here, so it cannot be rendered into");
++            return 0;
++        }
+         if (!framebufferSupported)
+         {
+             return -1;
+@@ -780,8 +832,14 @@
+         }
+     }
+ 
+     public static int glCheckFramebufferStatus(int target)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Not GL_FRAMEBUFFER_COMPLETE: the answer is the one that makes the caller skip the path it was about to
++            // take, and every other value means "not usable".
++            return 0;
++        }
+         if (!framebufferSupported)
+         {
+             return -1;
+@@ -802,8 +860,13 @@
+         }
+     }
+ 
+     public static void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level)
+     {
++        if (net.minecraftforge.client.render.state.backend.FrameStates.forNonGl() != null)
++        {
++            // Nothing to attach it to: see glGenFramebuffers.
++            return;
++        }
+         if (framebufferSupported)
+         {
+             switch (framebufferType)
+@@ -820,8 +883,16 @@
          }
      }
  
@@ -455,7 +518,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glActiveTextureARB(texture);
-@@ -834,6 +878,9 @@
+@@ -834,6 +905,9 @@
  
      public static void setClientActiveTexture(int texture)
      {
@@ -465,7 +528,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glClientActiveTextureARB(texture);
-@@ -846,6 +893,12 @@
+@@ -846,6 +920,12 @@
  
      public static void setLightmapTextureCoords(int target, float x, float y)
      {
@@ -478,7 +541,7 @@
          if (arbMultitexture)
          {
              ARBMultitexture.glMultiTexCoord2fARB(target, x, y);
-@@ -854,10 +907,17 @@
+@@ -854,10 +934,17 @@
          {
              GL13.glMultiTexCoord2f(target, x, y);
          }
@@ -496,7 +559,7 @@
          if (openGL14)
          {
              if (extBlendFuncSeparate)
-@@ -875,8 +935,14 @@
+@@ -875,8 +962,14 @@
          }
      }
  
@@ -511,7 +574,7 @@
          return framebufferSupported && Minecraft.getMinecraft().gameSettings.fboEnable;
      }
  
-@@ -891,7 +957,9 @@
+@@ -891,7 +984,9 @@
          GlStateManager.depthMask(false);
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -522,7 +585,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
-@@ -900,7 +968,7 @@
+@@ -900,7 +995,7 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(0, 0, 0, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(0, 0, 0, 255).endVertex();
          tessellator.draw();
@@ -531,7 +594,7 @@
          bufferbuilder.begin(1, DefaultVertexFormats.POSITION_COLOR);
          bufferbuilder.pos(0.0, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
          bufferbuilder.pos(p_188785_0_, 0.0, 0.0).color(255, 0, 0, 255).endVertex();
-@@ -909,66 +977,35 @@
+@@ -909,66 +1004,35 @@
          bufferbuilder.pos(0.0, 0.0, 0.0).color(127, 127, 255, 255).endVertex();
          bufferbuilder.pos(0.0, 0.0, p_188785_0_).color(127, 127, 255, 255).endVertex();
          tessellator.draw();

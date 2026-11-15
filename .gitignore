@@ -17,6 +17,8 @@ version.txt
 !/.idea/icon.svg
 
 /tools/**/__pycache__/
+# the entry audit's cache of one pack's references: derived, and pack specific
+/tools/entry-audit/refs.json
 
 # run logs from the dev server/client
 projects/*/logs/
