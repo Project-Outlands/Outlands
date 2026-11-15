@@ -27,7 +27,7 @@ import java.util.List;
 public final class FrameDraws {
 
     /** One thing the frame asked a backend to do, in the order it asked. */
-    public sealed interface Operation permits Draw, FramebufferCopy, TerrainLayer, Clear, TargetBind {}
+    public sealed interface Operation permits Draw, FramebufferCopy, ReadPixels, TerrainLayer, Clear, TargetBind {}
 
     /**
      * One recorded draw: its vertices plus the state it was issued with.
@@ -91,6 +91,23 @@ public final class FrameDraws {
      */
     public record FramebufferCopy(int texture, int level, int xOffset, int yOffset, int x, int y, int width,
                                   int height) implements Operation {}
+
+    /**
+     * One {@code glReadPixels}: the framebuffer into the caller's buffer, at this point in the sequence.
+     *
+     * <p><b>Where the pixels come from.</b> The copy is recorded into the frame's command buffer like everything else,
+     * so it reads the framebuffer exactly as GL would have: after the draws that preceded it and before the ones that
+     * follow. That is the whole reason this is an operation and not an immediate call - the backend has not drawn
+     * anything at the moment the game asks.</p>
+     *
+     * <p><b>When the caller sees them.</b> The buffer is filled after the frame's fence signals, which is later than
+     * GL delivers them. A caller that reads the buffer in the same method gets what was there before; one that reads
+     * it after {@code Display.update()} gets the right pixels. No mod in the pack reads synchronously, and the honest
+     * alternative - starting the frame early at the call site - would restructure the frame for a feature nothing
+     * uses that way.</p>
+     */
+    public record ReadPixels(int x, int y, int width, int height, int format, int type,
+                             java.nio.ByteBuffer destination) implements Operation {}
 
     /**
      * One render layer of the captured terrain, at its place in the sequence.
@@ -248,6 +265,18 @@ public final class FrameDraws {
      *
      * @return {@code false} when nothing is collecting, which means there is no frame to copy inside
      */
+    /** Records one {@code glReadPixels}; {@code false} when no frame is collecting, so there is nothing to read. */
+    public static boolean recordReadPixels(int x, int y, int width, int height, int format, int type,
+                                           java.nio.ByteBuffer destination) {
+        if (!collecting) {
+            return false;
+        }
+        synchronized (LOCK) {
+            ACTIVE_DRAWS.add(new ReadPixels(x, y, width, height, format, type, destination));
+        }
+        return true;
+    }
+
     public static boolean recordFramebufferCopy(int texture, int level, int xOffset, int yOffset, int x, int y,
                                                 int width, int height) {
         if (!collecting) {

@@ -376,6 +376,7 @@ final class VulkanSwapchain {
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
             // waiting here costs the player nothing.
             finishScreenshot(frame);
+            finishReads(frame);
         }
 
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
@@ -450,6 +451,23 @@ final class VulkanSwapchain {
         region.get(0).imageExtent().set(width, height, 1);
         vkCmdCopyImageToBuffer(commandBuffer, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 screenshotBuffer.handle(), region);
+    }
+
+    /**
+     * Fills the buffers {@code glReadPixels} was called with, now that the frame's copies have landed.
+     *
+     * <p>The wait is the same fence the screenshot path waits on, and it is free here for the same reason: the image
+     * is already on screen, so the frame is done and the player is waiting for the next one.</p>
+     */
+    private void finishReads(int frame) {
+        if (textures == null) {
+            return;
+        }
+        if (!textures.hasReads(frame)) {
+            return;
+        }
+        VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
+        textures.finishReads(frame);
     }
 
     /** Writes out the screenshot whose copy the submitted frame contains, if there is one. */

@@ -772,6 +772,13 @@ public final class FrameShim implements ShimGl.Impl {
         state.clearStencil(value);
     }
 
+    /**
+     * {@code glReadPixels}: the framebuffer into the caller's buffer.
+     *
+     * <p>Recorded at its place in the frame, like a framebuffer copy, because the backend has not drawn anything yet
+     * when the game asks. The copy therefore sees exactly what GL would - the draws before it, none after - and the
+     * buffer is filled once the frame's fence signals.</p>
+     */
     @Override
     public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.ByteBuffer pixels) {
         FrameState state = state();
@@ -779,9 +786,11 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
             return;
         }
-        FrameStates.reportSkippedOnce("glReadPixels",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        if (pixels == null || !net.minecraftforge.client.render.vertex.FrameDraws.recordReadPixels(x, y, width, height,
+                format, type, pixels)) {
+            FrameStates.reportSkippedOnce("glReadPixels outside a frame",
+                    "there is no framebuffer to read from, so the destination is left as it was");
+        }
     }
     @Override
     public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.FloatBuffer pixels) {
@@ -790,9 +799,8 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
             return;
         }
-        FrameStates.reportSkippedOnce("glReadPixels",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        FrameStates.reportSkippedOnce("glReadPixels(FloatBuffer/IntBuffer)",
+                "the byte form is the one the pack uses; the typed forms would need the same copy plus a widening");
     }
     @Override
     public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.IntBuffer pixels) {
@@ -801,10 +809,18 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glReadPixels(x, y, width, height, format, type, pixels);
             return;
         }
-        FrameStates.reportSkippedOnce("glReadPixels",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        FrameStates.reportSkippedOnce("glReadPixels(FloatBuffer/IntBuffer)",
+                "the byte form is the one the pack uses; the typed forms would need the same copy plus a widening");
     }
+    /**
+     * {@code glGetTexImage}: a texture's pixels, answered from the copy the backend uploaded.
+     *
+     * <p><b>Why this one needs no read-back path at all.</b> A texture's pixels arrive from the game - the backend is
+     * the thing that received them - so they are already in host memory as {@code TextureImage.argb}. Reading a
+     * texture is therefore a format conversion, not a GPU copy, and it can answer synchronously like GL does. The
+     * mods that ask are exporters and icon builders: Bookshelf, LibrarianLib's {@code TextureMapExporter}, Quark's
+     * {@code TextureDump} and TurretMod.</p>
+     */
     @Override
     public void glGetTexImage(int target, int level, int format, int type, java.nio.ByteBuffer pixels) {
         FrameState state = state();
@@ -812,10 +828,28 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glGetTexImage(target, level, format, type, pixels);
             return;
         }
-        FrameStates.reportSkippedOnce("glGetTexImage",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        if (pixels == null) {
+            return;
+        }
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        net.minecraftforge.client.render.texture.TextureImage image =
+                textures == null ? null : textures.image(textures.boundTexture());
+        if (image == null || level != 0) {
+            FrameStates.reportSkippedOnce("glGetTexImage(level " + level + ")",
+                    "only the pixels of a level-0 texture the game uploaded are kept here");
+            return;
+        }
+        int[] argb = image.argb();
+        int width = image.width();
+        int height = image.height();
+        int at = pixels.position();
+        if (!TexturePixels.write(argb, width, height, format, type, pixels, at)) {
+            FrameStates.reportSkippedOnce("glGetTexImage(format " + format + ", type " + type + ")",
+                    "only the RGBA and BGRA byte forms are converted here, which is what the pack's exporters ask for");
+        }
     }
+
     @Override
     public void glGetTexImage(int target, int level, int format, int type, java.nio.IntBuffer pixels) {
         FrameState state = state();
@@ -823,9 +857,10 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glGetTexImage(target, level, format, type, pixels);
             return;
         }
-        FrameStates.reportSkippedOnce("glGetTexImage",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        // The int form asks for 32-bit components. GL_UNSIGNED_INT_8_8_8_8 packs one texel per int, which is what
+        // this backend already holds; anything else would need a widening this code has no user for.
+        FrameStates.reportSkippedOnce("glGetTexImage(IntBuffer)",
+                "the int form is only used for GL_UNSIGNED_INT_8_8_8_8, and no mod in the pack asks for it");
     }
     /**
      * {@code glReadBuffer}: which attachment a later {@code glReadPixels} reads from.
@@ -897,6 +932,14 @@ public final class FrameShim implements ShimGl.Impl {
         return 0;
     }
 
+    /**
+     * {@code glCopyTexImage2D}: the framebuffer into a texture, allocating it first.
+     *
+     * <p>The same copy {@code glCopyTexSubImage2D} already does - which is what makes the main menu's panorama blur
+     * work - with one difference: the destination has to be created at the source's size before it can be written.
+     * That is exactly what TurretMod's turret camera needs: render the camera's view, copy it into a texture, and draw
+     * that texture on the monitor block.</p>
+     */
     @Override
     public void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
         FrameState state = state();
@@ -904,9 +947,21 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
             return;
         }
-        FrameStates.reportSkippedOnce("glCopyTexImage2D",
-                "reading pixels back needs a staged copy out of the image and a fence to wait on, and nothing in the"
-                        + " backend does that yet; the destination is left as it was");
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        if (textures == null || textures.boundTexture() == 0) {
+            FrameStates.reportSkippedOnce("glCopyTexImage2D with no texture bound",
+                    "the copy has no destination");
+            return;
+        }
+        if (level != 0) {
+            FrameStates.reportSkippedOnce("glCopyTexImage2D(level " + level + ")",
+                    "only level 0 is a destination for a framebuffer copy here");
+            return;
+        }
+        // Allocate, then copy into it at the origin: GL defines this call as "create the level from the framebuffer".
+        textures.upload(textures.boundTexture(), 0, width, height, null);
+        textures.copyFromFramebuffer(0, 0, 0, x, y, width, height);
     }
     @Override
     public void glEnableClientState(int array) {

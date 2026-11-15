@@ -74,6 +74,14 @@ final class VulkanTextures implements AutoCloseable {
     private final Long2LongMap samplers = new Long2LongOpenHashMap();
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
+    /**
+     * Read-backs recorded in this frame, per slot: the caller's buffer and the staging buffer its pixels land in.
+     *
+     * <p>Kept apart from {@code pendingStaging} because those buffers go back to a pool the moment the fence signals,
+     * while these are still being copied out at that point - freeing one first would hand its contents to the next
+     * upload.</p>
+     */
+    private final List<Readback>[] pendingReads;
     private final List<VulkanBuffer> stagingPool = new ArrayList<>();
 
     private final VulkanImage white;
@@ -126,8 +134,10 @@ final class VulkanTextures implements AutoCloseable {
         this.source = source;
         this.srgbTextures = srgbRenderTarget;
         this.pendingStaging = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.pendingReads = new List[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int slot = 0; slot < this.pendingStaging.length; slot++) {
             this.pendingStaging[slot] = new ArrayList<>();
+            this.pendingReads[slot] = new ArrayList<>();
         }
 
         this.samplers.defaultReturnValue(0L);
@@ -338,6 +348,104 @@ final class VulkanTextures implements AutoCloseable {
     void releaseSlot(int slot) {
         stagingPool.addAll(pendingStaging[slot]);
         pendingStaging[slot].clear();
+    }
+
+    /** One recorded read-back: where the pixels go and what they were copied into. */
+    private record Readback(net.minecraftforge.client.render.vertex.FrameDraws.ReadPixels request, VulkanBuffer buffer,
+                            int width, int height) {}
+
+    /**
+     * Records {@code glReadPixels}: the current target's rectangle into a host-visible buffer.
+     *
+     * <p>The instance has just been ended by the caller, so the source may leave its attachment layout - the same
+     * precondition {@link #copyFromFramebuffer} has.</p>
+     */
+    void readPixels(VkCommandBuffer commandBuffer, net.minecraftforge.client.render.vertex.FrameDraws.ReadPixels read,
+                    FrameRenderTarget target, int slot) {
+        int width = Math.max(1, Math.min(read.width(), target.width() - Math.max(0, read.x())));
+        int height = Math.max(1, Math.min(read.height(), target.height() - Math.max(0, read.y())));
+        VulkanBuffer buffer = VulkanBuffer.createReadback(context.device(), context, width * height * 4);
+        pendingReads[slot].add(new Readback(read, buffer, width, height));
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            org.lwjgl.vulkan.VkImageMemoryBarrier2.Buffer toTransfer =
+                    org.lwjgl.vulkan.VkImageMemoryBarrier2.calloc(1, stack);
+            toTransfer.get(0)
+                    .sType$Default()
+                    .srcStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                    .srcAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                    .dstStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT)
+                    .dstAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT)
+                    .oldLayout(org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                    .newLayout(org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                    .image(target.colorImage())
+                    .subresourceRange(org.lwjgl.vulkan.VkImageSubresourceRange.calloc(stack)
+                            .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                            .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1));
+            org.lwjgl.vulkan.VK13.vkCmdPipelineBarrier2(commandBuffer,
+                    org.lwjgl.vulkan.VkDependencyInfo.calloc(stack).sType$Default()
+                            .pImageMemoryBarriers(toTransfer));
+
+            // GL's framebuffer origin is the bottom-left and Vulkan's is the top-left, so the rectangle is converted
+            // here and the rows are handed to the caller in GL's order - bottom row first - by the fill below.
+            int topDownY = target.height() - read.y() - height;
+            org.lwjgl.vulkan.VkBufferImageCopy.Buffer region =
+                    org.lwjgl.vulkan.VkBufferImageCopy.calloc(1, stack);
+            region.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
+            region.get(0).imageSubresource()
+                    .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            region.get(0).imageOffset().set(Math.max(0, read.x()), Math.max(0, topDownY), 0);
+            region.get(0).imageExtent().set(width, height, 1);
+            org.lwjgl.vulkan.VK10.vkCmdCopyImageToBuffer(commandBuffer, target.colorImage(),
+                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer.handle(), region);
+
+            // Back to the attachment layout, because the instance is reopened over this image straight afterwards.
+            org.lwjgl.vulkan.VkImageMemoryBarrier2.Buffer back =
+                    org.lwjgl.vulkan.VkImageMemoryBarrier2.calloc(1, stack);
+            back.get(0)
+                    .sType$Default()
+                    .srcStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COPY_BIT)
+                    .srcAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_TRANSFER_READ_BIT)
+                    .dstStageMask(org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                    .dstAccessMask(org.lwjgl.vulkan.VK13.VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                    .oldLayout(org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+                    .newLayout(org.lwjgl.vulkan.VK13.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
+                    .image(target.colorImage())
+                    .subresourceRange(org.lwjgl.vulkan.VkImageSubresourceRange.calloc(stack)
+                            .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                            .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1));
+            org.lwjgl.vulkan.VK13.vkCmdPipelineBarrier2(commandBuffer,
+                    org.lwjgl.vulkan.VkDependencyInfo.calloc(stack).sType$Default()
+                            .pImageMemoryBarriers(back));
+        }
+    }
+
+    /**
+     * Fills the callers' buffers with the pixels their copies produced.
+     *
+     * <p>Called once the slot's fence has signalled, which is the first moment the staging buffer holds anything.</p>
+     */
+    /** Whether this slot has read-backs whose pixels are still to be handed over. */
+    boolean hasReads(int slot) {
+        return !pendingReads[slot].isEmpty();
+    }
+
+    void finishReads(int slot) {
+        if (pendingReads[slot].isEmpty()) {
+            return;
+        }
+        for (Readback readback : pendingReads[slot]) {
+            try {
+                // The window's image is BGRA on every driver measured, and the copy above takes it as it is.
+                byte[] bgra = readback.buffer().read(readback.width() * readback.height() * 4);
+                net.minecraftforge.client.render.shim.FramebufferPixels.write(bgra, readback.width(),
+                        readback.height(), readback.request());
+            } finally {
+                readback.buffer().close();
+            }
+        }
+        pendingReads[slot].clear();
     }
 
 

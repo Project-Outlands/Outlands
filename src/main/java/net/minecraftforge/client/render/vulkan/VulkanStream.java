@@ -444,6 +444,17 @@ final class VulkanStream implements AutoCloseable {
                     lastPushedLayout = 0L;
                     continue;
                 }
+                if (op instanceof FrameDraws.ReadPixels read) {
+                    // The same split as a framebuffer copy, and for the same reason: the copy reads the image the
+                    // instance is painting, so the instance is closed around it and reopened with LOAD afterwards.
+                    vkCmdEndRendering(commandBuffer);
+                    textures.readPixels(commandBuffer, read, current, slot);
+                    current.beginRendering(commandBuffer);
+                    appliedViewport[0] = Integer.MIN_VALUE;
+                    appliedScissor[0] = Integer.MIN_VALUE;
+                    lastPushedLayout = 0L;
+                    continue;
+                }
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
                     // The copy reads the framebuffer this instance is painting, so the instance is closed around it
                     // and reopened with LOAD afterwards. Splitting is the only way to keep both the source content
