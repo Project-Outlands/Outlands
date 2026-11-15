@@ -141,7 +141,8 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
-        float[] cachedFactor = {1.0F, 1.0F, 1.0F};
+        float[] cachedVertex = {1.0F, 1.0F, 1.0F};
+        float[] cachedConstant = {0.0F, 0.0F, 0.0F};
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
@@ -198,19 +199,16 @@ public final class VertexConverter {
                     lastNx = nx;
                     lastNy = ny;
                     lastNz = nz;
-                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting, cachedFactor);
+                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting,
+                            cachedVertex, cachedConstant);
                 }
 
-                // With colour material off the vertex colour is not the material, so it takes no part: the
-                // material's lit colour is what GL writes, and white is what multiplies to it here.
-                if (!lighting.usesColorMaterial()) {
-                    r = 255;
-                    g = 255;
-                    b = 255;
-                }
-                r = clampByte(Math.round(r * cachedFactor[0]));
-                g = clampByte(Math.round(g * cachedFactor[1]));
-                b = clampByte(Math.round(b * cachedFactor[2]));
+                // GL's equation as the model rearranged it: vertex * A + B. With colour material off - or on with a
+                // mode that names no component this model has - A is zero and B is the material's own lit colour, so
+                // the vertex colour takes no part and no special case is needed here.
+                r = clampByte(Math.round(r * cachedVertex[0] + 255.0F * cachedConstant[0]));
+                g = clampByte(Math.round(g * cachedVertex[1] + 255.0F * cachedConstant[1]));
+                b = clampByte(Math.round(b * cachedVertex[2] + 255.0F * cachedConstant[2]));
             }
 
             target.putInt(base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
@@ -269,7 +267,8 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
-        float[] cachedFactor = {1.0F, 1.0F, 1.0F};
+        float[] cachedVertex = {1.0F, 1.0F, 1.0F};
+        float[] cachedConstant = {0.0F, 0.0F, 0.0F};
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
@@ -328,19 +327,16 @@ public final class VertexConverter {
                     lastNx = nx;
                     lastNy = ny;
                     lastNz = nz;
-                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting, cachedFactor);
+                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting,
+                            cachedVertex, cachedConstant);
                 }
 
-                // With colour material off the vertex colour is not the material, so it takes no part: the
-                // material's lit colour is what GL writes, and white is what multiplies to it here.
-                if (!lighting.usesColorMaterial()) {
-                    r = 255;
-                    g = 255;
-                    b = 255;
-                }
-                r = clampByte(Math.round(r * cachedFactor[0]));
-                g = clampByte(Math.round(g * cachedFactor[1]));
-                b = clampByte(Math.round(b * cachedFactor[2]));
+                // GL's equation as the model rearranged it: vertex * A + B. With colour material off - or on with a
+                // mode that names no component this model has - A is zero and B is the material's own lit colour, so
+                // the vertex colour takes no part and no special case is needed here.
+                r = clampByte(Math.round(r * cachedVertex[0] + 255.0F * cachedConstant[0]));
+                g = clampByte(Math.round(g * cachedVertex[1] + 255.0F * cachedConstant[1]));
+                b = clampByte(Math.round(b * cachedVertex[2] + 255.0F * cachedConstant[2]));
             }
 
             target.putInt(base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
@@ -476,7 +472,8 @@ public final class VertexConverter {
      */
     private static void computeLightingFactor(float nx, float ny, float nz,
                                               VertexFormatElement.EnumType type,
-                                              float[] nm, LightingModel lighting, float[] out) {
+                                              float[] nm, LightingModel lighting,
+                                              float[] outVertex, float[] outConstant) {
         if (type == VertexFormatElement.EnumType.BYTE || type == VertexFormatElement.EnumType.UBYTE) {
             nx /= 127.0F;
             ny /= 127.0F;
@@ -484,9 +481,14 @@ public final class VertexConverter {
         }
         float lenSq = nx * nx + ny * ny + nz * nz;
         if (lenSq <= 0.01F) {
-            out[0] = 1.0F;
-            out[1] = 1.0F;
-            out[2] = 1.0F;
+            // A zero normal means "no normal": drawn unattenuated rather than black, which is what the model asked
+            // for. The constant part is zero because there is no Lambert term to add.
+            outVertex[0] = 1.0F;
+            outVertex[1] = 1.0F;
+            outVertex[2] = 1.0F;
+            outConstant[0] = 0.0F;
+            outConstant[1] = 0.0F;
+            outConstant[2] = 0.0F;
             return;
         }
         // Transform normal to eye space using column-major 3x3 normalMatrix:
@@ -495,13 +497,16 @@ public final class VertexConverter {
         float ez = nm[2] * nx + nm[5] * ny + nm[8] * nz;
         float eLenSq = ex * ex + ey * ey + ez * ez;
         if (eLenSq < 1e-4F) {
-            out[0] = 1.0F;
-            out[1] = 1.0F;
-            out[2] = 1.0F;
+            outVertex[0] = 1.0F;
+            outVertex[1] = 1.0F;
+            outVertex[2] = 1.0F;
+            outConstant[0] = 0.0F;
+            outConstant[1] = 0.0F;
+            outConstant[2] = 0.0F;
             return;
         }
         float invLen = 1.0F / (float) Math.sqrt(eLenSq);
-        lighting.shadeFactor(ex * invLen, ey * invLen, ez * invLen, out);
+        lighting.shadeFactor(ex * invLen, ey * invLen, ez * invLen, outVertex, outConstant);
     }
 
     private static int clampByte(int value) {

@@ -215,6 +215,7 @@ public final class FrameStates {
         }
     }
 
+
     /**
      * Whether a GL call describing how vertex data is fed is this backend's to ignore.
      *
@@ -311,38 +312,39 @@ public final class FrameStates {
     /**
      * Answers {@code glColorMaterial}: the mode decides which material components the vertex colour stands in for.
      *
-     * <p>Only {@code GL_AMBIENT_AND_DIFFUSE} is acted on, which is the mode vanilla sets and the only one it uses. The
-     * other modes make the colour drive one component at a time, which would need the per-component material the
-     * model does not carry; reported once rather than quietly treated as the mode that is implemented.</p>
+     * <p>All five modes are acted on now - see {@code LightingModel.shadeFactor}, which carries each one as a pair of
+     * terms instead of a single factor. Vanilla uses two of them: {@code RenderHelper} sets
+     * {@code GL_AMBIENT_AND_DIFFUSE} for items and entities, and {@code EntityRenderer.setupFog} sets
+     * {@code GL_AMBIENT} for the world pass.</p>
      */
     public static boolean colorMaterial(int face, int mode) {
         FrameState state = forNonGl();
         if (state == null) {
             return false;
         }
-        if (mode != 5634) {     // GL_AMBIENT_AND_DIFFUSE
-            reportSkippedOnce("fixed-function lighting (glColorMaterial mode " + mode + ")",
-                    "only GL_AMBIENT_AND_DIFFUSE is modelled, which is the mode the game uses");
-            return true;
-        }
         state.colorMaterial(face, mode);
         return true;
     }
 
     /**
-     * Answers {@code glTexEnv}: recorded as a skipped effect.
+     * Whether a {@code glTexEnv} call has been recorded and the real one should be skipped.
      *
-     * <p>The texture environment is GL's per-unit combine stage. Vanilla uses it twice: to build entity brightness out
-     * of the lightmap unit's constant colour and the previous unit ({@code RenderLivingBase}), and to switch a unit to
-     * {@code REPLACE} or {@code COMBINE} for overlays. This backend samples one texture and multiplies it by the
-     * vertex colour, so a draw that asked for a different combine mode is drawn with the modulate it always does.</p>
+     * <p><b>What is modelled.</b> The environment is recorded per unit (mode, combine function, sources, operands and
+     * the constant colour), and the two shapes that occur are honoured: {@code GL_MODULATE}, which is what the
+     * fragment shader always does, and the {@code COMBINE + REPLACE} / {@code COMBINE + INTERPOLATE} pairs that make an
+     * outline overlay - see {@code FrameStateVk.updateOverlayColor}.</p>
+     *
+     * <p><b>What is measured, not assumed.</b> Every {@code glTexEnv} call site in the pack was read: three mods use
+     * it, two of them set {@code GL_MODULATE} (ModernSplash's splash, mcjtylib's font), and subpocket's GUI sets the
+     * combine pair above. Anything else would be drawn as modulate, which is what this line says.</p>
      */
     public static boolean skipTextureEnv(String operation) {
         if (forNonGl() == null) {
             return false;
         }
         reportSkippedOnce("the texture environment (" + operation + ")",
-                "a draw asking for a combine or replace mode is sampled as texture times colour");
+                "modulate and the combine/replace pairs that make an overlay are modelled; any other combine setup"
+                        + " is sampled as texture times colour");
         return true;
     }
 

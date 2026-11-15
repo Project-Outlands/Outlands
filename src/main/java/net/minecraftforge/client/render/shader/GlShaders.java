@@ -52,6 +52,10 @@ public final class GlShaders {
     public static final int FRAGMENT_SHADER = 35632;
     public static final int COMPILE_STATUS = 35713;
     public static final int LINK_STATUS = 35714;
+    /** {@code GL_OBJECT_VALIDATE_STATUS_ARB}. */
+    public static final int VALIDATE_STATUS = 35715;
+    /** {@code GL_OBJECT_INFO_LOG_LENGTH_ARB}. */
+    public static final int INFO_LOG_LENGTH = 35716;
 
     /** One shader object: a stage's source, and its module once compiled. */
     public record Shader(int id, int glType, String source, byte[] spirv, String log,
@@ -329,13 +333,42 @@ public final class GlShaders {
         }
     }
 
-    /** {@code glGetShaderi}: {@link #COMPILE_STATUS}, and nothing else the game asks for. */
+    /** {@code glGetShaderi}: {@link #COMPILE_STATUS} and {@link #INFO_LOG_LENGTH}. */
     public static int shaderStatus(int shader, int parameter) {
         Shader existing = SHADERS.get(shader);
         if (existing == null) {
             return 0;
         }
-        return parameter == COMPILE_STATUS ? (existing.compiled() ? 1 : 0) : 0;
+        return switch (parameter) {
+            case COMPILE_STATUS -> existing.compiled() ? 1 : 0;
+            case INFO_LOG_LENGTH -> logLength(existing.log());
+            default -> 0;
+        };
+    }
+
+    /**
+     * The length GL reports for an info log: the characters plus the terminator, or 0 when there is no log.
+     *
+     * <p>Answering 0 for a non-empty log is worse than it sounds. Every GLSL loader in the pack - seven of them, all
+     * the same {@code ShaderHelper} pattern - asks for this length and then allocates that many bytes for
+     * {@code glGetInfoLogARB}. A zero there does not stop them reading the log, it just makes the buffer empty, so a
+     * shader that fails to compile reports "error: " and nothing else.</p>
+     */
+    /**
+     * {@link #INFO_LOG_LENGTH} for an object that may be either a shader or a program - ARB names both from one
+     * namespace, so the query cannot tell them apart and has to ask both.
+     */
+    public static int objectLogLength(int object) {
+        Shader shader = SHADERS.get(object);
+        if (shader != null) {
+            return logLength(shader.log());
+        }
+        Program program = PROGRAMS.get(object);
+        return program == null ? 0 : logLength(program.log());
+    }
+
+    private static int logLength(String log) {
+        return log == null || log.isEmpty() ? 0 : log.length() + 1;
     }
 
     public static String shaderLog(int shader) {
@@ -507,12 +540,37 @@ public final class GlShaders {
         existing.linked = true;
     }
 
+    /**
+     * {@code glGetProgrami}: {@link #LINK_STATUS}, {@link #VALIDATE_STATUS} and {@link #INFO_LOG_LENGTH}.
+     *
+     * <p><b>Validation answers the link status, and that is the truthful answer here.</b> GL's validation asks whether
+     * the program can run <i>under the current state</i> - too many uniforms, a sampler of a disabled type, and so on.
+     * This backend has no such state to fail against: a pipeline is built per draw from the program plus that draw's
+     * state, so an impossible combination fails when it is created and names itself. Answering 0 instead, which is
+     * what happened before, made seven shader loaders report "validation failed" for a program that then drew fine.</p>
+     */
     public static int programStatus(int program, int parameter) {
         Program existing = PROGRAMS.get(program);
         if (existing == null) {
             return 0;
         }
-        return parameter == LINK_STATUS ? (existing.linked() ? 1 : 0) : 0;
+        return switch (parameter) {
+            case LINK_STATUS, VALIDATE_STATUS -> existing.linked() ? 1 : 0;
+            case INFO_LOG_LENGTH -> logLength(existing.log());
+            default -> 0;
+        };
+    }
+
+    /**
+     * {@code glValidateProgramARB}: nothing to do, because there is no fixed state for a program to be invalid under.
+     *
+     * <p>Recorded rather than ignored so the report names the program if a later implementation ever has something to
+     * check; the status it would set is already what {@link #programStatus} answers.</p>
+     */
+    public static void validateProgram(int program) {
+        if (!PROGRAMS.containsKey(program)) {
+            LOGGER.warn("glValidateProgramARB({}): no such program", program);
+        }
     }
 
     public static String programLog(int program) {

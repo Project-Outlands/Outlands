@@ -289,9 +289,12 @@ class FrameStateVkTest {
         var afterAmbient = state.lighting();
         assertNotSame(before, afterAmbient, "the model ambient changed");
         float[] factor = new float[3];
-        // A normal pointing away from both default lights leaves only the ambient term.
-        afterAmbient.shadeFactor(0.0F, -1.0F, 0.0F, factor);
+        float[] constant = new float[3];
+        // A normal pointing away from both default lights leaves only the ambient term, which with colour material
+        // on AMBIENT_AND_DIFFUSE multiplies the vertex colour.
+        afterAmbient.shadeFactor(0.0F, -1.0F, 0.0F, factor, constant);
         assertEquals(0.5F, factor[0], 1.0e-5F, "the ambient reaches the shaded result");
+        assertEquals(0.0F, constant[0], 1.0e-5F, "and nothing is added to it");
     }
 
     @Test
@@ -305,7 +308,8 @@ class FrameStateVkTest {
 
         // The seeded default direction of every light is +Z, so this normal faces light 0 head on.
         float[] factor = new float[3];
-        state.lighting().shadeFactor(0.0F, 0.0F, 1.0F, factor);
+        float[] constant = new float[3];
+        state.lighting().shadeFactor(0.0F, 0.0F, 1.0F, factor, constant);
 
         assertEquals(0.5F + 0.1F + 0.2F, factor[0], 1.0e-4F, "model ambient + light ambient + red diffuse");
         assertEquals(0.5F + 0.05F, factor[1], 1.0e-4F, "green gets the ambients and its own diffuse");
@@ -321,12 +325,13 @@ class FrameStateVkTest {
         state.capability(Capability.COLOR_MATERIAL, true);
 
         float[] factor = new float[3];
+        float[] constant = new float[3];
         // Light 0 is off (GL's default), so a normal pointing straight at it is lit by the ambient alone.
-        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor);
+        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor, constant);
         assertEquals(0.4F, factor[0], 1.0e-5F, "a disabled light is not a light");
 
         state.capability(Capability.LIGHT_0, true);
-        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor);
+        state.lighting().shadeFactor(0.0F, 1.0F, 0.0F, factor, constant);
         assertEquals(1.0F, factor[0], 1.0e-5F, "0.4 ambient + 0.6 diffuse, clamped");
     }
 

@@ -36,7 +36,15 @@ public final class LightingModel {
     /** The fixed-function lights GL guarantees: {@code GL_LIGHT0} through {@code GL_LIGHT7}. */
     public static final int LIGHTS = 8;
 
-    /** {@code GL_AMBIENT_AND_DIFFUSE}: the mode vanilla sets, and the only one it uses. */
+    /** {@code GL_AMBIENT}: the mode {@code EntityRenderer.setupFog} sets for the world pass. */
+    public static final int AMBIENT = 4608;
+    /** {@code GL_DIFFUSE}. */
+    public static final int DIFFUSE = 4609;
+    /** {@code GL_SPECULAR}: no term to drive, since the model has no specular. */
+    public static final int SPECULAR = 4610;
+    /** {@code GL_EMISSION}. */
+    public static final int EMISSION = 5632;
+    /** {@code GL_AMBIENT_AND_DIFFUSE}: the mode vanilla sets for items and entities. */
     public static final int AMBIENT_AND_DIFFUSE = 5634;
 
     /** GL's default material ambient, used when colour material is off. */
@@ -79,7 +87,8 @@ public final class LightingModel {
      * @param lightDirection    {@code LIGHTS * 3} unit vectors towards the lights, in eye space
      * @param lightEnabled      which lights are on
      * @param colorMaterial     whether {@code GL_COLOR_MATERIAL} is enabled
-     * @param colorMaterialMode the {@code glColorMaterial} mode; only {@link #AMBIENT_AND_DIFFUSE} is acted on
+     * @param colorMaterialMode the {@code glColorMaterial} mode; every one GL defines is acted on, and
+     *                          {@link #SPECULAR} is the one that changes nothing because the model has no specular
      */
     public LightingModel(float[] modelAmbient, float[] lightAmbient, float[] lightDiffuse, float[] lightDirection,
                          boolean[] lightEnabled, boolean colorMaterial, int colorMaterialMode) {
@@ -168,15 +177,55 @@ public final class LightingModel {
      * @param nz  eye-space normal z
      * @param out three components, in 0..1
      */
-    public void shadeFactor(float nx, float ny, float nz, float[] out) {
-        // GL multiplies the material components by the light's; with colour material on both material components are
-        // 1 relative to the vertex colour, and with it off they are GL's defaults.
-        final float materialAmbient = colorMaterial ? 1.0F : DEFAULT_MATERIAL_AMBIENT;
-        final float materialDiffuse = colorMaterial ? 1.0F : DEFAULT_MATERIAL_DIFFUSE;
+    public void shadeFactor(float nx, float ny, float nz, float[] outVertex, float[] outConstant) {
+        // GL's equation, rearranged as  colour = vertex * outVertex + outConstant  so that the vertex colour stays a
+        // per-vertex multiply while everything that depends only on the normal is cached for a run of identical ones.
+        // Which material components the vertex colour drives is exactly what glColorMaterial's mode selects:
+        //
+        //   AMBIENT_AND_DIFFUSE  ambient and diffuse both follow it        -> vertex * (ambientSum + diffuse)
+        //   AMBIENT              only ambient follows it                   -> vertex * ambientSum + 0.8 * diffuse
+        //   DIFFUSE              only diffuse follows it                   -> vertex * diffuse   + 0.2 * ambientSum
+        //   EMISSION             it is added, not substituted              -> vertex * 1 + 0.2 * ambient + 0.8 * diffuse
+        //   SPECULAR             nothing follows it (no specular term)     -> 0.2 * ambient + 0.8 * diffuse
+        //   colour material off  nothing follows it                        -> the same as SPECULAR
+        // Start from "the colour drives nothing", which is colour material off: GL's default material.
+        float vertexAmbient = 0.0F;
+        float vertexDiffuse = 0.0F;
+        float constantAmbient = DEFAULT_MATERIAL_AMBIENT;
+        float constantDiffuse = DEFAULT_MATERIAL_DIFFUSE;
+        float emission = 0.0F;
+        if (colorMaterial) {
+            // Each mode moves one component from the constant side to the vertex side - not both, which would count
+            // it twice and made a diffuse-only model come out at 0.8 + 0.8.
+            switch (colorMaterialMode) {
+                case AMBIENT_AND_DIFFUSE -> {
+                    vertexAmbient = 1.0F;
+                    constantAmbient = 0.0F;
+                    vertexDiffuse = 1.0F;
+                    constantDiffuse = 0.0F;
+                }
+                case AMBIENT -> {
+                    vertexAmbient = 1.0F;
+                    constantAmbient = 0.0F;
+                }
+                case DIFFUSE -> {
+                    vertexDiffuse = 1.0F;
+                    constantDiffuse = 0.0F;
+                }
+                case EMISSION -> emission = 1.0F;
+                default -> {
+                    // SPECULAR and anything else: the vertex colour drives no material component, which is the same
+                    // picture as colour material being off.
+                }
+            }
+        }
 
-        float r = materialAmbient * ambientSum[0];
-        float g = materialAmbient * ambientSum[1];
-        float b = materialAmbient * ambientSum[2];
+        float vr = vertexAmbient * ambientSum[0] + emission;
+        float vg = vertexAmbient * ambientSum[1] + emission;
+        float vb = vertexAmbient * ambientSum[2] + emission;
+        float cr = constantAmbient * ambientSum[0];
+        float cg = constantAmbient * ambientSum[1];
+        float cb = constantAmbient * ambientSum[2];
 
         for (int i = 0; i < diffuseLightCount; i++) {
             int at = diffuseLights[i] * 3;
@@ -184,15 +233,25 @@ public final class LightingModel {
             if (dot <= 0.0F) {
                 continue;
             }
-            float k = dot * materialDiffuse;
-            r += k * lightDiffuse[at];
-            g += k * lightDiffuse[at + 1];
-            b += k * lightDiffuse[at + 2];
+            vr += dot * vertexDiffuse * lightDiffuse[at];
+            vg += dot * vertexDiffuse * lightDiffuse[at + 1];
+            vb += dot * vertexDiffuse * lightDiffuse[at + 2];
+            float k = dot * constantDiffuse;
+            cr += k * lightDiffuse[at];
+            cg += k * lightDiffuse[at + 1];
+            cb += k * lightDiffuse[at + 2];
         }
 
-        out[0] = Math.min(1.0F, r);
-        out[1] = Math.min(1.0F, g);
-        out[2] = Math.min(1.0F, b);
+        // Clamped per term, not per product: an over-lit vertex keeps its texture colour instead of saturating to
+        // white. GL clamps the finished colour, so the two differ only where a model is lit past 1 - and this is the
+        // behaviour the renderer has always produced, pinned by VertexConverterTest, so changing it here would alter
+        // the picture for every tinted model.
+        outVertex[0] = Math.min(1.0F, vr);
+        outVertex[1] = Math.min(1.0F, vg);
+        outVertex[2] = Math.min(1.0F, vb);
+        outConstant[0] = Math.min(1.0F, cr);
+        outConstant[1] = Math.min(1.0F, cg);
+        outConstant[2] = Math.min(1.0F, cb);
     }
 
     /**

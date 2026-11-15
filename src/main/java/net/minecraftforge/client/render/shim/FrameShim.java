@@ -1077,12 +1077,14 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glValidateProgramARB(program);
             return;
         }
-        // Validation asks whether a program would run in the current GL state. There is no such state to ask
-        // about: the pipeline is built from the recorded draw state, so a program that linked is a program that
-        // runs. Reported once rather than silently ignored, because a mod that branches on the answer would be
-        // branching on nothing.
+        // Validation asks whether a program would run in the current GL state. There is no such state to ask about:
+        // the pipeline is built from the recorded draw state, so a program that linked is a program that runs - and
+        // that is what GL_OBJECT_VALIDATE_STATUS_ARB answers below. Reported once, because a mod that branches on the
+        // answer now gets "valid" and should be told why that is the whole truth here.
+        GlShaders.validateProgram(program);
         FrameStates.reportSkippedOnce("glValidateProgramARB",
-                "validation describes GL state, and this backend builds its pipeline from the draw instead");
+                "validation describes GL state, and this backend builds its pipeline from the draw instead, so the"
+                        + " validate status answers the link status");
     }
 
     @Override
@@ -1118,7 +1120,9 @@ public final class FrameShim implements ShimGl.Impl {
             // The ARB constants are the core ones under another name: GL_OBJECT_COMPILE_STATUS_ARB is 35713 and
             // GL_OBJECT_LINK_STATUS_ARB is 35714, the same values OpenGlHelper's patch passes through.
             case GlShaders.COMPILE_STATUS -> GlShaders.shaderStatus(object, parameterName);
-            case GlShaders.LINK_STATUS -> GlShaders.programStatus(object, parameterName);
+            // One namespace for both kinds of object, so the query asks whichever has it.
+            case GlShaders.INFO_LOG_LENGTH -> GlShaders.objectLogLength(object);
+            case GlShaders.LINK_STATUS, GlShaders.VALIDATE_STATUS -> GlShaders.programStatus(object, parameterName);
             default -> {
                 FrameStates.reportSkippedOnce("glGetObjectParameteriARB(" + parameterName + ")",
                         "that question about a shader object has no answer here; the status queries do");
