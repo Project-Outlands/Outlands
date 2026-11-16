@@ -35,6 +35,10 @@ import org.lwjgl.opengl.GL15;
 public final class FrameShim implements ShimGl.Impl {
 
     /** {@code GL_TEXTURE_WIDTH}. */
+    /** {@code GL_FOG_MODE}: the fog equation (EXP, EXP2, LINEAR). */
+    private static final int GL_FOG_MODE = 2917;
+    /** {@code GL_FOG_DISTANCE_MODE_NV}: how the fog coordinate is measured, from GL_NV_fog_distance. */
+    private static final int GL_FOG_DISTANCE_MODE_NV = 34138;
     /** {@code GL_TEXTURE_2D}: the only target the backend models. */
     private static final int GL_TEXTURE_2D = 3553;
     private static final int GL_TEXTURE_WIDTH = 4096;
@@ -550,6 +554,100 @@ public final class FrameShim implements ShimGl.Impl {
         }
         FrameStates.reportSkippedOnce("glGenerateMipmap",
                 "mip levels are uploaded, not generated: the backend keeps the levels a mod hands it");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Fog and the double-precision vertex forms. Measured users are Thaumcraft 6 (glFogi/glFogf in its render event
+    // handler, and glelwjgl's tessellator for the doubles), Thaumic Attempts (glDepthRange) and TC6's mirror block
+    // (glTexGen, sphere mapping).
+    // ---------------------------------------------------------------------------------------------------------------
+
+    @Override
+    public void glFogi(int pname, int value) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glFogi(pname, value);
+            return;
+        }
+        if (pname == GL_FOG_MODE) {
+            state.fogMode(value);
+        } else if (pname == GL_FOG_DISTANCE_MODE_NV) {
+            state.fogDistanceMode(value);
+        } else {
+            // GL_FOG_* integer parameters beyond those two (the coordinate source) have no pipeline equivalent.
+            FrameStates.reportSkippedOnce("glFogi(" + pname + ")",
+                    "that integer fog parameter has no pipeline equivalent; the mode and distance mode are recorded");
+        }
+    }
+
+    @Override
+    public void glFogf(int pname, float value) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glFogf(pname, value);
+            return;
+        }
+        state.fog(pname, value);
+    }
+
+    @Override
+    public void glFog(int pname, java.nio.FloatBuffer params) {
+        FrameState state = state();
+        if (state == null) {
+            GL11.glFogfv(pname, params);
+            return;
+        }
+        state.fog(pname, params);
+    }
+
+    @Override
+    public void glDepthRange(double near, double far) {
+        if (state() == null) {
+            GL11.glDepthRange(near, far);
+            return;
+        }
+        // Vulkan's depth range is always [0, 1]; only VK_EXT_depth_range_unrestricted moves it, and nothing here needs
+        // that. Thaumic Attempts sets it around one GUI, which draws at the same depth either way.
+        FrameStates.reportSkippedOnce("glDepthRange",
+                "Vulkan's clip depth always maps to [0, 1]; the range is not a piece of state this backend has");
+    }
+
+    @Override
+    public void glTexGeni(int coord, int pname, int value) {
+        if (state() == null) {
+            GL11.glTexGeni(coord, pname, value);
+            return;
+        }
+        // TC6's mirror block asks for GL_SPHERE_MAP, which computes a reflection vector per vertex from the eye-space
+        // normal. No stage of this pipeline generates texture coordinates; the mirror draws with the coordinates its
+        // vertices already carry, which is the flat texture rather than the reflection.
+        FrameStates.reportSkippedOnce("glTexGeni",
+                "texture-coordinate generation has no pipeline equivalent; the coordinates come from the vertices");
+    }
+
+    @Override
+    public void glTexGen(int coord, int pname, java.nio.FloatBuffer params) {
+        if (state() == null) {
+            GL11.glTexGenfv(coord, pname, params);
+            return;
+        }
+        FrameStates.reportSkippedOnce("glTexGeni",
+                "texture-coordinate generation has no pipeline equivalent; the coordinates come from the vertices");
+    }
+
+    @Override
+    public void glColor3d(double red, double green, double blue) {
+        this.glColor4f((float) red, (float) green, (float) blue, 1.0F);
+    }
+
+    @Override
+    public void glNormal3d(double x, double y, double z) {
+        this.glNormal3f((float) x, (float) y, (float) z);
+    }
+
+    @Override
+    public void glTexCoord2d(double u, double v) {
+        this.glTexCoord2f((float) u, (float) v);
     }
 
     // ---------------------------------------------------------------------------------------------------------------

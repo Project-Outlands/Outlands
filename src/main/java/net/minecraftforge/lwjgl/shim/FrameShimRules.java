@@ -293,6 +293,23 @@ public final class FrameShimRules implements ShimRewriteRules {
             // IvToolkit's depth buffer selects a draw buffer before rendering into its own target.
             entry("glDrawBuffer", "(I)V"),
 
+            // Thaumcraft 6's fog, and the double-precision vertex forms its bundled glelwjgl tessellator uses. The fog
+            // setters exist on FrameState already (EntityRenderer drives them through GlStateManager's named setters,
+            // and IE's "flashed" effect through the NV distance mode); what was missing was the raw entry point.
+            // Measured: glFogi/glFogf in TC6's render event handler, glColor3d/glNormal3d/glTexCoord2d in
+            // com.sasmaster.glelwjgl.
+            entry("glFogi", "(II)V"),
+            entry("glFogf", "(IF)V"),
+            entry("glFog", "(ILjava/nio/FloatBuffer;)V"),
+            entry("glColor3d", "(DDD)V"),
+            entry("glNormal3d", "(DDD)V"),
+            entry("glTexCoord2d", "(DD)V"),
+            // glDepthRange (Thaumic Attempts' GUI) and glTexGen (TC6's mirror block) are recorded as reported gaps:
+            // Vulkan's clip depth always maps to [0, 1], and no stage here generates texture coordinates.
+            entry("glDepthRange", "(DD)V"),
+            entry("glTexGeni", "(III)V"),
+            entry("glTexGen", "(IILjava/nio/FloatBuffer;)V"),
+
             // The long tail the pack-wide scan turned up: one or two call sites each, all of them real GL calls that
             // would have reached liblwjgl_opengl. Measured owners and users:
             //   glVertex2d - jeresources; glFrustum - modularui's schema renderer; glClipPlane - Immersive

@@ -159,6 +159,36 @@ public final class ShimGl {
         /** {@code glGenerateMipmap}: builds the mip chain of the bound texture. */
         default void glGenerateMipmap(int target) {}
 
+        // Fog. The values are the ones EntityRenderer already sets through GlStateManager's named setters; these are
+        // the raw calls Thaumcraft 6 makes, and they were reaching real GL.
+
+        /** {@code glFogi}: the fog mode, or {@code GL_NV_fog_distance}'s distance mode, by pname. */
+        default void glFogi(int pname, int value) {}
+
+        /** {@code glFogf}: one scalar fog value, by pname (density, start, end). */
+        default void glFogf(int pname, float value) {}
+
+        /** {@code glFog}: the fog colour, from a buffer. */
+        default void glFog(int pname, java.nio.FloatBuffer params) {}
+
+        /** {@code glDepthRange}: the mapping from clip depth to window depth. */
+        default void glDepthRange(double near, double far) {}
+
+        /** {@code glTexGeni}: a texture-coordinate generation mode. */
+        default void glTexGeni(int coord, int pname, int value) {}
+
+        /** {@code glTexGen}: the same, from a buffer (the plane coefficients). */
+        default void glTexGen(int coord, int pname, java.nio.FloatBuffer params) {}
+
+        /** {@code glColor3d}: the double form of {@link #glColor3f}, which TC6's tessellator uses. */
+        default void glColor3d(double red, double green, double blue) {}
+
+        /** {@code glNormal3d}: the double form of the current normal. */
+        default void glNormal3d(double x, double y, double z) {}
+
+        /** {@code glTexCoord2d}: the double form of the current texture coordinate. */
+        default void glTexCoord2d(double u, double v) {}
+
         // Core GL 2.0 shader objects. The ARB block above answers the same object model under the extension's names;
         // these are the names a mod written against GL 2.0 core uses, and until now they reached real GL: measured
         // users are SmoothFont's font shader (about forty sites) and CodeChickenLib's ShaderProgram.
@@ -669,6 +699,51 @@ public final class ShimGl {
         @Override
         public void glGenerateMipmap(int target) {
             org.lwjgl.opengl.GL30.glGenerateMipmap(target);
+        }
+
+        @Override
+        public void glFogi(int pname, int value) {
+            GL11.glFogi(pname, value);
+        }
+
+        @Override
+        public void glFogf(int pname, float value) {
+            GL11.glFogf(pname, value);
+        }
+
+        @Override
+        public void glFog(int pname, java.nio.FloatBuffer params) {
+            GL11.glFogfv(pname, params);
+        }
+
+        @Override
+        public void glDepthRange(double near, double far) {
+            GL11.glDepthRange(near, far);
+        }
+
+        @Override
+        public void glTexGeni(int coord, int pname, int value) {
+            GL11.glTexGeni(coord, pname, value);
+        }
+
+        @Override
+        public void glTexGen(int coord, int pname, java.nio.FloatBuffer params) {
+            GL11.glTexGenfv(coord, pname, params);
+        }
+
+        @Override
+        public void glColor3d(double red, double green, double blue) {
+            GL11.glColor3d(red, green, blue);
+        }
+
+        @Override
+        public void glNormal3d(double x, double y, double z) {
+            GL11.glNormal3d(x, y, z);
+        }
+
+        @Override
+        public void glTexCoord2d(double u, double v) {
+            GL11.glTexCoord2d(u, v);
         }
 
         @Override
@@ -1569,6 +1644,42 @@ public final class ShimGl {
 
     public static void glGenerateMipmap(int target) {
         impl.glGenerateMipmap(target);
+    }
+
+    public static void glFogi(int pname, int value) {
+        impl.glFogi(pname, value);
+    }
+
+    public static void glFogf(int pname, float value) {
+        impl.glFogf(pname, value);
+    }
+
+    public static void glFog(int pname, java.nio.FloatBuffer params) {
+        impl.glFog(pname, params);
+    }
+
+    public static void glDepthRange(double near, double far) {
+        impl.glDepthRange(near, far);
+    }
+
+    public static void glTexGeni(int coord, int pname, int value) {
+        impl.glTexGeni(coord, pname, value);
+    }
+
+    public static void glTexGen(int coord, int pname, java.nio.FloatBuffer params) {
+        impl.glTexGen(coord, pname, params);
+    }
+
+    public static void glColor3d(double red, double green, double blue) {
+        impl.glColor3d(red, green, blue);
+    }
+
+    public static void glNormal3d(double x, double y, double z) {
+        impl.glNormal3d(x, y, z);
+    }
+
+    public static void glTexCoord2d(double u, double v) {
+        impl.glTexCoord2d(u, v);
     }
 
     public static int glCreateProgram() {
