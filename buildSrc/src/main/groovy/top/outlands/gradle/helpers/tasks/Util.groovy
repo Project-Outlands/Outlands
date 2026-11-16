@@ -91,8 +91,18 @@ class Util {
 		return ret
 	}
 
+	/**
+	 * The natives artifacts, as launcher-JSON library entries.
+	 *
+	 * <p><b>The module list has to be complete, and a miss is an error rather than a skip.</b> {@code natives} is
+	 * matched against each file name by substring, and a file that matches nothing used to be swallowed by the
+	 * catch below. That is how {@code lwjgl-shaderc}'s natives never reached a single launcher: the module was wired
+	 * into {@code lwjglNatives} but not into the list passed here, so every one of its natives jars was dropped
+	 * without a word, and the game failed at the first mod shader with "Failed to locate library: libshaderc.so".</p>
+	 */
 	static def getLWJGLNatives(nativeConfig, compileConfig, natives, arch) {
 		def ret = [:]
+		def unclaimed = []
 		def data = [ '' : [:]]
 		nativeConfig.resolvedConfiguration.resolvedArtifacts.each {
 			data.putIfAbsent(it.moduleVersion.id.name, [
@@ -139,7 +149,14 @@ class Util {
 								]
 						]
 				]
-			} catch (ignored) {}
+			} catch (ignored) {
+				// A natives jar that no module claims is a packaging bug, not a file to skip: the launcher would
+				// install everything except this one, and the failure lands on a player at runtime.
+				if (file.getName().contains('-natives-')) unclaimed << file.getName()
+			}
+		}
+		if (!unclaimed.isEmpty()) {
+			throw new GradleException("these natives jars match no module in ${natives}: ${unclaimed}")
 		}
 		return ret
 	}

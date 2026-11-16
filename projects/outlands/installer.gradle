@@ -30,7 +30,11 @@ tasks.register('installerArtifacts') {
             // The Vulkan module names are concatenated in front of lwjglLibraries[0]: the helper matches jar names by
             // substring, and 'lwjgl' is a substring of every module name, so the specific ones have to come first.
             lwjglNatives: Util.getLWJGLNatives(nativesCfg, testCfg,
-                    project.vulkanLibraries + lwjglLibraries[0], lwjglLibraries[1])
+                    // Every module whose natives a launcher has to install. shaderCompilerLibraries is in this list
+                    // because shaderc is a runtime dependency (the backend compiles a mod's GLSL in-process): leaving
+                    // it out dropped all eight of its natives jars silently, and the game died at the first mod
+                    // shader with "Failed to locate library: libshaderc.so".
+                    project.vulkanLibraries + project.shaderCompilerLibraries + lwjglLibraries[0], lwjglLibraries[1])
         ]
         outputFile.get().asFile.text = new JsonBuilder(result).toPrettyString()
     }
