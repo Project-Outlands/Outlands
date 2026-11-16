@@ -27,6 +27,18 @@ public final class RasterOcclusionCuller extends BoxOccluder {
      */
     private static final boolean ENABLED = !"false".equals(System.getProperty("outlands.cull.raster"));
 
+    static {
+        // One line at class load, so a log says which side of the switch it ran on. Without it an A/B cannot be read
+        // back afterwards: the two runs look identical in the log and the property is only in the launch command.
+        org.apache.logging.log4j.LogManager.getLogger("Outlands|render")
+                .info("raster occlusion culling: {}", ENABLED ? "on" : "off");
+    }
+
+    /** Whether the culler is enabled, for callers that should skip the whole path rather than ask it to do nothing. */
+    public static boolean enabled() {
+        return ENABLED;
+    }
+
     private int viewSequence = 0;
 
     public enum SectionVisibility {
