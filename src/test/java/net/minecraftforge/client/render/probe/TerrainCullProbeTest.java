@@ -7,14 +7,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The traversal probe's bookkeeping.
  *
- * <p>Two numbers decide whether the visibility walk moves off the render thread: its cost per frame and how many
- * sections it looked at. Both are pinned here only in the way they could be silently wrong - a frame that reports no
- * sections because the counter was reset at the wrong time, and a worst-frame figure that is really the last frame.</p>
+ * <p>What is pinned is only the way the figures could be silently wrong: a walk that reports no sections because the
+ * counter was reset at the wrong time, and a worst-walk figure that is really the last walk.</p>
  */
 class TerrainCullProbeTest {
 
     @Test
     void aFrameReportsItsOwnSectionsAndKeepsTheBusiest() {
+        // The probe is off unless asked for, so the test turns it on for its own body.
+        TerrainCullProbe.forceForTests(true);
+        try {
+            assertAccounting();
+        } finally {
+            TerrainCullProbe.forceForTests(false);
+        }
+    }
+
+    private static void assertAccounting() {
         TerrainCullProbe.reportAndReset(); // start from a known state
 
         TerrainCullProbe.begin();
@@ -39,11 +48,10 @@ class TerrainCullProbeTest {
         String report = TerrainCullProbe.reportAndReset();
         assertTrue(report.contains("4 sections/walk"), report);
         assertTrue(report.contains("walk "), report);
-        assertTrue(report.contains("setup "), report);
         assertTrue(report.contains("at most 7"), report);
         assertTrue(report.contains("2 walks in 2 calls"), report);
         assertTrue(report.contains("visible 0 traversable 0 hidden 0"), report);
         assertTrue(report.contains("published 100"), report);
-        assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: none"), "the report resets the totals");
+        assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: no walks"), "the report resets the totals");
     }
 }

@@ -519,12 +519,7 @@ final class VulkanSwapchain {
      *
      * <p>Deliberately not behind a property. The numbers are four counters and the line is printed once.</p>
      */
-    /** The frame count the item probe's last report covered, so its figures can be per frame. */
-    private static long lastItemReportFrames;
-
     static String report() {
-        long itemFrames = framesRecorded - lastItemReportFrames;
-        lastItemReportFrames = framesRecorded;
         return "renderer: " + framesRecorded + " frames, at most " + maxInstances
                 + " rendering instances in a frame (" + maxBinds + " binds at most, " + maxSwitches
                 + " of them into a target),"
@@ -532,23 +527,25 @@ final class VulkanSwapchain {
                 + copyOverBudget + " times, images " + VulkanImage.createdCount() + " created / "
                 + VulkanImage.destroyedCount() + " destroyed ("
                 + (VulkanImage.createdCount() - VulkanImage.destroyedCount()) + " live), "
-                + VulkanRenderTargets.stats() + ", "
-                // The measurement behind the batched-submission question: how much of what this session drew could be
-                // one indirect draw per run if the texture were chosen per draw instead of per bind.
-                + net.minecraftforge.client.render.vertex.FrameDraws.batchingStats() + ", "
-                // And the one behind the item display-list question: what item rendering costs on the screen the
-                // player is on right now. Reset per line, so the figure is "since the last report".
-                + net.minecraftforge.client.render.probe.ItemRenderProbe.reportAndReset(itemFrames) + ", "
-                // And the last piece of the section-graph question: what the visibility walk itself costs.
-                + net.minecraftforge.client.render.probe.TerrainCullProbe.reportAndReset();
+                + VulkanRenderTargets.stats() + cullReport();
+    }
+
+    /**
+     * The visibility walk's figures, but only when its probe is switched on.
+     *
+     * <p>Every question this renderer answered was measured the same way and the answer written down; the line keeps
+     * only the counters that stay useful (instances, copies, images, targets). A probe that answers a closed question
+     * does not belong in it.</p>
+     */
+    private static String cullReport() {
+        String report = net.minecraftforge.client.render.probe.TerrainCullProbe.reportAndReset();
+        return report == null ? "" : ", " + report;
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
-        // The frame that was just built is over: fold its item count into the peak before the next one starts.
-        net.minecraftforge.client.render.probe.ItemRenderProbe.endFrame();
         RenderInstance.resetOpened();
         int copiesBefore = VulkanImage.copyCount();
         int binds = 0;

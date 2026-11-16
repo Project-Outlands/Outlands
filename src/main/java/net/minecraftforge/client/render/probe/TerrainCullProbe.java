@@ -14,7 +14,12 @@ package net.minecraftforge.client.render.probe;
  */
 public final class TerrainCullProbe {
 
-    private static final boolean ENABLED = !"false".equals(System.getProperty("outlands.probe.cull"));
+    /**
+     * Off unless asked for. The walk costs nothing at rest - vanilla skips it whenever the camera has not moved or
+     * turned - so this is a probe for a specific question ("how expensive is the moving case at this render
+     * distance"), not something a normal run should pay for.
+     */
+    private static volatile boolean enabled = Boolean.getBoolean("outlands.probe.cull");
 
     private static long startedAt;
     private static long nanos;
@@ -39,16 +44,21 @@ public final class TerrainCullProbe {
 
     private TerrainCullProbe() {}
 
+    /** Turns the probe on or off for a test, which cannot rely on the launch command. */
+    static void forceForTests(boolean value) {
+        enabled = value;
+    }
+
     /** Starts timing one frame's traversal. */
     public static void begin() {
-        if (ENABLED) {
+        if (enabled) {
             startedAt = System.nanoTime();
         }
     }
 
     /** Ends timing one frame's traversal and folds the frame into the peaks. */
     public static void end() {
-        if (!ENABLED) {
+        if (!enabled) {
             return;
         }
         long elapsed = System.nanoTime() - startedAt;
@@ -77,14 +87,14 @@ public final class TerrainCullProbe {
 
     /** Starts timing the traversal loop itself, which is the part Sodium moves off the render thread. */
     public static void beginWalk() {
-        if (ENABLED) {
+        if (enabled) {
             walkStartedAt = System.nanoTime();
         }
     }
 
     /** Ends the traversal loop's timing. */
     public static void endWalk() {
-        if (!ENABLED) {
+        if (!enabled) {
             return;
         }
         long elapsed = System.nanoTime() - walkStartedAt;
@@ -107,7 +117,7 @@ public final class TerrainCullProbe {
      * nothing, while "it culled 62% of what it reached" is the same statement in any scene.</p>
      */
     public static void verdict(boolean rendered, boolean traversed) {
-        if (!ENABLED) {
+        if (!enabled) {
             return;
         }
         if (!traversed) {
@@ -121,7 +131,7 @@ public final class TerrainCullProbe {
 
     /** Records how many sections the walk ended up publishing. */
     public static void result(int size) {
-        if (!ENABLED) {
+        if (!enabled) {
             return;
         }
         resultSize = size;
@@ -129,11 +139,11 @@ public final class TerrainCullProbe {
 
     /** The totals since the last call, formatted for the renderer's line, and reset. */
     public static String reportAndReset() {
-        if (!ENABLED) {
-            return "terrain cull: probe off";
+        if (!enabled) {
+            return null;
         }
         if (frames == 0) {
-            return "terrain cull: none";
+            return "terrain cull: no walks";
         }
         double perFrame = frames;
         // Per walk, not per frame. vanilla skips the traversal whenever the camera has not moved or turned, and
@@ -142,8 +152,7 @@ public final class TerrainCullProbe {
         // split fixes: two runs of the same scene looked 2.6x apart only because one of them walked on more frames.
         String report = "terrain cull: walk " + oneDecimal(walkNanos / 1_000_000.0 / Math.max(1, walks))
                 + " ms/walk (worst " + oneDecimal(walkMaxNanos / 1_000_000.0) + ", " + walks + " walks in "
-                + frames + " calls), setup " + oneDecimal(nanos / 1_000_000.0 / perFrame) + " ms/call (worst "
-                + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), "
+                + frames + " calls), "
                 + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + "),"
                 + " visible " + (long) (visible / Math.max(1, walks))
                 + " traversable " + (long) (traversable / Math.max(1, walks))

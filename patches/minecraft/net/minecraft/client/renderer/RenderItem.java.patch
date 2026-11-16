@@ -21,66 +21,16 @@
          Tessellator tessellator = Tessellator.getInstance();
          BufferBuilder bufferbuilder = tessellator.getBuffer();
          bufferbuilder.begin(7, DefaultVertexFormats.ITEM);
-@@ -129,26 +134,38 @@
-     {
-         if (!stack.isEmpty())
-         {
--            GlStateManager.pushMatrix();
--            GlStateManager.translate(-0.5F, -0.5F, -0.5F);
--
--            if (model.isBuiltInRenderer())
--            {
--                GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
--                GlStateManager.enableRescaleNormal();
+@@ -136,7 +141,7 @@
+             {
+                 GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+                 GlStateManager.enableRescaleNormal();
 -                TileEntityItemStackRenderer.instance.renderByItem(stack);
--            }
--            else
--            {
--                this.renderModel(model, stack);
--
--                if (stack.hasEffect())
--                {
--                    this.renderEffect(model);
--                }
--            }
--
--            GlStateManager.popMatrix();
-+            // Forge: the world and the GUI both arrive here, so this is where the cost of item rendering is measured.
-+            // Whether a display-list cache for items is worth building depends on that number, and it depends on the
-+            // screen - a hotbar is a few items, a JEI page is hundreds.
-+            net.minecraftforge.client.render.probe.ItemRenderProbe.begin();
-+
-+            try
-+            {
-+                GlStateManager.pushMatrix();
-+                GlStateManager.translate(-0.5F, -0.5F, -0.5F);
-+
-+                if (model.isBuiltInRenderer())
-+                {
-+                    GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-+                    GlStateManager.enableRescaleNormal();
-+                    stack.getItem().getTileEntityItemStackRenderer().renderByItem(stack);
-+                }
-+                else
-+                {
-+                    this.renderModel(model, stack);
-+
-+                    if (stack.hasEffect())
-+                    {
-+                        this.renderEffect(model);
-+                    }
-+                }
-+
-+                GlStateManager.popMatrix();
-+            }
-+            finally
-+            {
-+                net.minecraftforge.client.render.probe.ItemRenderProbe.end();
-+            }
-         }
-     }
- 
-@@ -217,7 +234,7 @@
++                stack.getItem().getTileEntityItemStackRenderer().renderByItem(stack);
+             }
+             else
+             {
+@@ -217,7 +222,7 @@
                  k |= -16777216;
              }
  
@@ -89,7 +39,7 @@
          }
      }
  
-@@ -239,19 +256,7 @@
+@@ -239,19 +244,7 @@
      public IBakedModel getItemModelWithOverrides(ItemStack stack, @Nullable World worldIn, @Nullable EntityLivingBase entitylivingbaseIn)
      {
          IBakedModel ibakedmodel = this.itemModelMesher.getItemModel(stack);
@@ -110,7 +60,7 @@
      }
  
      public void renderItem(ItemStack stack, EntityLivingBase entitylivingbaseIn, ItemCameraTransforms.TransformType transform, boolean leftHanded)
-@@ -280,13 +285,8 @@
+@@ -280,13 +273,8 @@
                  GlStateManager.DestFactor.ZERO
              );
              GlStateManager.pushMatrix();
@@ -126,7 +76,7 @@
  
              this.renderItem(stack, bakedmodel);
              GlStateManager.cullFace(GlStateManager.CullFace.BACK);
-@@ -320,7 +320,7 @@
+@@ -320,7 +308,7 @@
          GlStateManager.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
          GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
          this.setupGuiTransform(x, y, bakedmodel.isGui3d());
@@ -135,7 +85,7 @@
          this.renderItem(stack, bakedmodel);
          GlStateManager.disableAlpha();
          GlStateManager.disableRescaleNormal();
-@@ -373,6 +373,7 @@
+@@ -373,6 +361,7 @@
                          return String.valueOf(p_184391_2_.getItem());
                      }
                  });
@@ -143,7 +93,7 @@
                  crashreportcategory.addDetail("Item Aux", new ICrashReportDetail<String>()
                  {
                      public String call() throws Exception
-@@ -419,9 +420,12 @@
+@@ -419,9 +408,12 @@
                  fr.drawStringWithShadow(s, xPosition + 19 - 2 - fr.getStringWidth(s), yPosition + 6 + 3, 16777215);
                  GlStateManager.enableLighting();
                  GlStateManager.enableDepth();
@@ -157,7 +107,7 @@
              {
                  GlStateManager.disableLighting();
                  GlStateManager.disableDepth();
-@@ -430,11 +434,10 @@
+@@ -430,11 +422,10 @@
                  GlStateManager.disableBlend();
                  Tessellator tessellator = Tessellator.getInstance();
                  BufferBuilder bufferbuilder = tessellator.getBuffer();
@@ -173,7 +123,7 @@
                  this.draw(bufferbuilder, xPosition + 2, yPosition + 13, 13, 2, 0, 0, 0, 255);
                  this.draw(bufferbuilder, xPosition + 2, yPosition + 13, i, 1, j >> 16 & 0xFF, j >> 8 & 0xFF, j & 0xFF, 255);
                  GlStateManager.enableBlend();
-@@ -1139,6 +1142,7 @@
+@@ -1139,6 +1130,7 @@
          this.registerBlock(Blocks.STRUCTURE_BLOCK, TileEntityStructure.Mode.LOAD.getModeId(), "structure_block");
          this.registerBlock(Blocks.STRUCTURE_BLOCK, TileEntityStructure.Mode.CORNER.getModeId(), "structure_block");
          this.registerBlock(Blocks.STRUCTURE_BLOCK, TileEntityStructure.Mode.DATA.getModeId(), "structure_block");

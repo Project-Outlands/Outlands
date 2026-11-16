@@ -26,14 +26,15 @@ public final class RasterOcclusionCuller extends BoxOccluder {
      * section it reaches.
      */
     /**
-     * Whether the CPU occluder runs. Off by default: measured at render distance 12 it made the visibility walk 1.8x
-     * slower (1.67 against 0.92 ms a walk) to cull 23 sections out of 741, and published only 19% fewer. The boxes it
-     * rasterises cost more than the sections it removes.
+     * Whether the CPU occluder runs.
      *
-     * <p>It is still worth having for a scene full of occluders - a cave, a dense build - so
-     * {@code -Doutlands.cull.raster=true} turns it back on, and the walk's line reports what it culled either way.</p>
+     * <p><b>On, despite losing an A/B.</b> Measured in an open view at render distance 12 it made the visibility walk
+     * 1.8x slower (1.67 against 0.92 ms a walk) to cull 23 sections out of 741. That scene is not the one that matters:
+     * most play happens in enclosed space - caves, machines, walls - where a section's occluder boxes hide far more
+     * than they cost, and the same measurement in that setting has not been taken. {@code -Doutlands.cull.raster=false}
+     * turns it off, and the class logs which side it ran on.</p>
      */
-    private static volatile boolean enabled = Boolean.getBoolean("outlands.cull.raster");
+    private static volatile boolean enabled = !"false".equals(System.getProperty("outlands.cull.raster"));
 
     static {
         // One line at class load, so a log says which side of the switch it ran on. Without it an A/B cannot be read

@@ -266,21 +266,6 @@ public final class DrawState {
      * reason that reaches no GPU.</p>
      */
     public boolean sameAs(DrawState other) {
-        return sameAs(other, true);
-    }
-
-    /**
-     * Whether two draws differ in nothing but the texture they sample.
-     *
-     * <p>This is the question a batched submission asks: a run of draws that share a pipeline and a descriptor set
-     * layout could be one indirect draw if the texture were chosen per draw instead of per bind. It is measured rather
-     * than assumed - see {@code FrameDraws.textureOnlyRuns()}.</p>
-     */
-    public boolean sameAsExceptTexture(DrawState other) {
-        return sameAs(other, false);
-    }
-
-    private boolean sameAs(DrawState other, boolean compareTexture) {
         if (this == other) {
             return true;
         }
@@ -296,7 +281,7 @@ public final class DrawState {
                 && blendDestinationRgb == other.blendDestinationRgb
                 && blendSourceAlpha == other.blendSourceAlpha
                 && blendDestinationAlpha == other.blendDestinationAlpha
-                && (!compareTexture || texture == other.texture)
+                && texture == other.texture
                 && scissorEnabled == other.scissorEnabled
                 && texture2d == other.texture2d
                 && alphaTest == other.alphaTest
