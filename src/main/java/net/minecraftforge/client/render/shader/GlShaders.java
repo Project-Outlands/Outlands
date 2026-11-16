@@ -181,7 +181,17 @@ public final class GlShaders {
             return vertexInputLocations;
         }
 
-        /** The SPIR-V of a stage, or null when the program has no such stage. */
+        /**
+         * The stages this program linked with, by GL type.
+         *
+         * <p><b>A snapshot, not a lookup.</b> GL's rule is that a linked program's executable is fixed at link time:
+         * recompiling an attached shader object changes that object, and the program keeps drawing with what it linked
+         * until it is linked again. Reading the live shader here would let a recompile reach a program that was never
+         * re-linked - with the old uniform table and the new module, which is the kind of mismatch that draws wrong
+         * rather than failing.</p>
+         */
+        private final Map<Integer, Shader> stageModules = new LinkedHashMap<>();
+
         /**
          * Whether the vertex stage reads the push-constant matrix.
          *
@@ -199,21 +209,19 @@ public final class GlShaders {
                 // flipped a second time.
                 return true;
             }
-            for (int stageId : stages) {
-                Shader candidate = SHADERS.get(stageId);
-                if (candidate != null && candidate.fixedFunctionMatrix()) {
+            for (Shader candidate : stageModules.values()) {
+                if (candidate.fixedFunctionMatrix()) {
                     return true;
                 }
             }
             return false;
         }
 
+        /** The SPIR-V of a stage, or null when the program has no such stage. */
         public byte[] stageModule(int glType) {
-            for (int stageId : stages) {
-                Shader candidate = SHADERS.get(stageId);
-                if (candidate != null && candidate.glType() == glType) {
-                    return candidate.spirv();
-                }
+            Shader linked = stageModules.get(glType);
+            if (linked != null) {
+                return linked.spirv();
             }
             // A fragment-only program is legal in GL - the fixed-function pipeline did the vertex processing - so
             // the fixed-function vertex stage stands in for the one the mod never wrote. See FIXED_FUNCTION_VERTEX.
@@ -284,14 +292,30 @@ public final class GlShaders {
         return id;
     }
 
-    /** Replaces a shader's source, the way {@code glShaderSource} does. */
+    /**
+     * Replaces a shader's source, the way {@code glShaderSource} does.
+     *
+     * <p><b>New text has to be compiled again.</b> The module belongs to the text it was compiled from, so replacing the
+     * text drops it and the next {@code glCompileShader} compiles what is there now. Keeping it made a recompile a
+     * silent no-op: CodeChickenLib's dynamic shaders hand a new string to a shader object that has already compiled
+     * once, and every later {@code glCompileShader} returned immediately, so the object kept the first module forever
+     * while reporting a successful compile.</p>
+     *
+     * <p>Setting the same text again is what a resource reload does, and it keeps the module: a precompiled stage beside
+     * the source is still about this text, and dropping it would turn a shipped module into a runtime compile - or into
+     * a failure, for the shaders this project replaces with a hand-written module whose source cannot be compiled at
+     * all.</p>
+     */
     public static void shaderSource(int shader, String source) {
         Shader existing = SHADERS.get(shader);
         if (existing == null) {
             return;
         }
-        SHADERS.put(shader, new Shader(shader, existing.glType(), source == null ? "" : source,
-                existing.spirv(), existing.log(), existing.fixedFunctionMatrix()));
+        String text = source == null ? "" : source;
+        if (text.equals(existing.source())) {
+            return;
+        }
+        SHADERS.put(shader, new Shader(shader, existing.glType(), text, null, "", false));
     }
 
     /**
@@ -444,6 +468,10 @@ public final class GlShaders {
         }
         StringBuilder problems = new StringBuilder();
         List<SpirvReflection.Module> modules = new ArrayList<>();
+        // What this link produces, taken from the stages as they are now: a later recompile of a stage object must not
+        // reach this program (see stageModules), and a re-link must pick the new text up.
+        existing.stageModules.clear();
+        existing.syntheticVertex = null;
         for (int stageId : existing.stages) {
             Shader shader = SHADERS.get(stageId);
             if (shader == null) {
@@ -453,6 +481,7 @@ public final class GlShaders {
                 problems.append("stage ").append(stageId).append(" did not compile\n");
                 continue;
             }
+            existing.stageModules.putIfAbsent(shader.glType(), shader);
             modules.add(SpirvReflection.reflect(shader.spirv()));
         }
         if (!modules.isEmpty() && existing.stageModule(VERTEX_SHADER) == null) {
