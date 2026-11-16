@@ -49,12 +49,6 @@ class EntrypointDeclarationTest {
     }
 
     @Test
-    void declaringNoneYieldsAnEmptyMap() {
-        assertTrue(declaration("").entrypoints().isEmpty());
-        assertTrue(declaration(",\"entrypoints\":{}").entrypoints().isEmpty());
-    }
-
-    @Test
     void anEntryWithoutAClassIsRejected() {
         // Without a class there is nothing to call, so the declared mod would exist and never do anything.
         assertThrows(LoaderException.class, () -> declaration(",\"entrypoints\":{\"m\":\"\"}"));

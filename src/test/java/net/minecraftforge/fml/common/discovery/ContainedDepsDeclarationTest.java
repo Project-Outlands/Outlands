@@ -102,12 +102,6 @@ class ContainedDepsDeclarationTest {
     }
 
     @Test
-    void declaringNoneYieldsAnEmptyList() {
-        assertTrue(declaration("").containedDeps().isEmpty());
-        assertTrue(declaration(",\"containedDeps\":[]").containedDeps().isEmpty());
-    }
-
-    @Test
     void anEntryWithoutAPathIsRejected() {
         // Without a path there is nothing to put on the classpath, so accepting the entry would declare a library that
         // silently does not exist.

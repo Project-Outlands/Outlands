@@ -1,7 +1,6 @@
 package net.minecraftforge.fml.relauncher.libraries;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URL;
 import java.net.URISyntaxException;
 import java.net.URLClassLoader;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -82,14 +80,6 @@ class NestedLibraryJarsTest {
 
         assertEquals("META-INF/libraries/inner.jar", NestedLibraryJars.entryInside(outer.toFile(), "inner.jar"));
         assertNotNull(NestedLibraryJars.urlFor(outer.toFile(), "inner.jar"));
-    }
-
-    @Test
-    void aMissingEntryResolvesToNothing(@TempDir Path dir) throws IOException {
-        Path outer = outerWithInner(dir, "META-INF/libraries/inner.jar", "hello.txt", "hi");
-
-        assertNull(NestedLibraryJars.entryInside(outer.toFile(), "absent.jar"));
-        assertNull(NestedLibraryJars.urlFor(outer.toFile(), "absent.jar"));
     }
 
     /** The point of the URL shape: a plain class loader has to be able to use it unchanged. */

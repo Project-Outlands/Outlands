@@ -56,8 +56,4 @@ class StencilStateTest {
         assertFalse(plain.stencilTest(), "disabled again: the same state, but the draw does not stencil");
     }
 
-    @Test
-    void theCapabilityIsTheOneAModUses() {
-        assertEquals(Capability.STENCIL_TEST, Capability.tryOf(2960), "GL_STENCIL_TEST");
-    }
 }

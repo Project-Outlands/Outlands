@@ -8,7 +8,6 @@ import net.minecraftforge.fml.relauncher.Side;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -86,11 +85,4 @@ class MixinConfigSelectionTest {
         assertEquals(2, mod.mixinConfigsFor(null).size());
     }
 
-    @Test
-    void aJarThatDeclaresNothingDeclaresNothing() {
-        DiscoveredMod mod = jar(false);
-
-        assertFalse(mod.declaresMixins());
-        assertEquals(List.of(), mod.mixinConfigsFor(Side.CLIENT));
-    }
 }

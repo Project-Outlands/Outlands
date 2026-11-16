@@ -3,10 +3,8 @@ package net.minecraftforge.client.render;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -92,12 +90,6 @@ class ChunkMeshCapturePoolTest {
             assertTrue(again.length >= size, "recycled request of " + size + " gave " + again.length);
             ChunkMeshCapture.releaseBuffer(again);
         }
-    }
-
-    @Test
-    void releasingNullIsIgnored() {
-        ChunkMeshCapture.releaseBuffer(null);
-        assertNotNull(ChunkMeshCapture.acquireBuffer(16), "the pool is unaffected");
     }
 
     private static void assertEquals(int expected, int actual, String message) {

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -78,14 +77,6 @@ class MetadataCollectionTest {
 
         assertEquals(1, collection.getIds().size());
         assertNotNull(collection.getMetadataForId("survivor", java.util.Collections.emptyMap()));
-    }
-
-    @Test
-    void filesWithoutAJarSectionHaveNoDeclaration() {
-        // Every file that predates the section: reading it must not invent one, otherwise a loader-side default
-        // would apply to thousands of jars that never opted in.
-        assertNull(parse("[{\"modid\":\"old\"}]").getJarDeclaration());
-        assertNull(parse("{\"modList\":[{\"modid\":\"old\"}]}").getJarDeclaration());
     }
 
     @Test

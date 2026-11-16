@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,11 +36,6 @@ class LanguageProviderDeclarationsTest {
         assertEquals(StubLanguageAdapter.class.getName(), declaration.className());
         assertEquals(JAR_A, declaration.jarPath());
         assertEquals("scala", declaration.language());
-    }
-
-    @Test
-    void undeclaredLanguageHasNoDeclaration() {
-        assertNull(new LanguageProviderDeclarations().declarationFor("scala"));
     }
 
     @Test

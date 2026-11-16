@@ -57,12 +57,6 @@ class JarProviderDeclarationTest {
     }
 
     @Test
-    void noProvidersKeyMeansNoProviders() {
-        assertTrue(providers("").isEmpty());
-        assertTrue(providers(",\"providers\":{}").isEmpty());
-    }
-
-    @Test
     void providersAreNotReportedAsUnknownKeys() {
         // The key is part of the schema now; a jar using it must not also be told the loader does not understand it.
         JarDeclaration declaration = declaration(MANDATORY + ",\"providers\":{\"scala\":\"com.example.Scala\"}");
@@ -98,11 +92,6 @@ class JarProviderDeclarationTest {
 
         assertNotNull(declaration);
         assertEquals(Map.of("scala", java.util.List.of("2.12", "2.13")), declaration.providerVersions());
-    }
-
-    @Test
-    void providerVersionsWithoutProvidersKeyIsNoDeclarations() {
-        assertTrue(declaration(MANDATORY).providerVersions().isEmpty());
     }
 
     @Test

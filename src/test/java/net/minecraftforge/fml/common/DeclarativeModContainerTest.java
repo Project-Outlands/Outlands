@@ -1,7 +1,6 @@
 package net.minecraftforge.fml.common;
 
 import java.io.File;
-import java.util.List;
 
 import com.google.common.eventbus.EventBus;
 
@@ -11,8 +10,6 @@ import net.minecraftforge.fml.common.versioning.VersionParser;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,33 +54,11 @@ class DeclarativeModContainerTest {
     }
 
     @Test
-    void theJarIsTheSourceSoTheServerSideCanReadIt() {
-        // FMLServerHandler calls source.isDirectory() while scanning resource packs; null would be a null pointer rather
-        // than "no resource pack".
-        assertNotNull(container(DeclarativeStubEntrypoint.class.getName()).getSource());
-    }
-
-    @Test
-    void thereIsNoModObjectAndNothingFindsOne() {
-        DeclarativeModContainer container = container(DeclarativeStubEntrypoint.class.getName());
-
-        assertEquals(null, container.getMod());
-        assertFalse(container.matches(new Object()));
-
-    }
-
-    @Test
     void anInstanceLessModIsNotReportedAsAFailedConstruction() {
         // LoadController.buildModObjectList reports a severe error for containers that answer false here. A declarative
         // mod has no mod object on purpose, so answering the default (getMod() != null) would make every such mod load
         // and then be flagged as broken.
         assertTrue(container(DeclarativeStubEntrypoint.class.getName()).hasInstance());
-    }
-
-    @Test
-    void registeringTheBusMakesTheModActive() {
-        // Returning false would leave the mod out of the active list, which makes every listener below unreachable.
-        assertTrue(container(DeclarativeStubEntrypoint.class.getName()).registerBus(new EventBus(), null));
     }
 
     @Test

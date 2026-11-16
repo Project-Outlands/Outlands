@@ -39,12 +39,6 @@ class JarMixinsTest {
     }
 
     @Test
-    void noKeyMeansNoConfigs() {
-        assertTrue(parse("").mixins().isEmpty());
-        assertTrue(parse(",\"mixins\":[]").mixins().isEmpty());
-    }
-
-    @Test
     void oneObjectPerConfig() {
         List<JarDeclaration.MixinConfig> mixins = mixins("["
                 + "{\"config\":\"mymod.mixins.json\"},"

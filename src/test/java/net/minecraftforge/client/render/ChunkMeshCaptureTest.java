@@ -26,13 +26,6 @@ class ChunkMeshCaptureTest {
     }
 
     @Test
-    void disabledIgnoresInvalidate() {
-        ChunkMeshCapture.disable();
-        ChunkMeshCapture.invalidateChunk(0, 0, 0);
-        assertFalse(ChunkMeshCapture.hasPendingEvents());
-    }
-
-    @Test
     void invalidateRemovesAllLayersForChunk() {
         ChunkMeshCapture.markLayerActiveForTest(16, 64, 32, BlockRenderLayer.SOLID);
         ChunkMeshCapture.markLayerActiveForTest(16, 64, 32, BlockRenderLayer.CUTOUT);

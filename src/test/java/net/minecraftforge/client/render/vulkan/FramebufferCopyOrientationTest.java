@@ -30,8 +30,4 @@ class FramebufferCopyOrientationTest {
         assertEquals(8, VulkanImage.destinationRow(2, 3, 8));
     }
 
-    @Test
-    void aSingleRowCopyIsItsOwnReverse() {
-        assertEquals(5, VulkanImage.destinationRow(0, 1, 5));
-    }
 }

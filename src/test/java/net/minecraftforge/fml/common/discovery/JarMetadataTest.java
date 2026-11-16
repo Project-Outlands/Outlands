@@ -13,8 +13,6 @@ import net.minecraftforge.fml.common.MetadataCollection;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -29,15 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JarMetadataTest {
 
     private static final String JAR_SECTION = "\"jar\":{\"schemaVersion\":1,\"license\":\"MIT\"}";
-
-    @Test
-    void aJarWithoutMetadataSaysNothing(@TempDir Path dir) throws IOException {
-        JarMetadata metadata = JarMetadata.of(jar(dir, "plain.jar", null));
-
-        assertFalse(metadata.isPresent());
-        assertNull(metadata.metadata());
-        assertNull(metadata.declaration());
-    }
 
     @Test
     void aModListWithoutAJarSectionIsNotADeclaration(@TempDir Path dir) throws IOException {

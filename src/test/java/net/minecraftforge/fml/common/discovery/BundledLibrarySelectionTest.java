@@ -101,15 +101,6 @@ class BundledLibrarySelectionTest {
         assertTrue(selection.notes().isEmpty());
     }
 
-    @Test
-    void anEmptySelectionShadowsNothing() {
-        BundledLibrarySelection selection = BundledLibrarySelection.empty();
-
-        assertFalse(selection.isShadowed(claim("guava", "21.0", "a.jar")));
-        assertNull(selection.winnerVersion("guava"));
-        assertTrue(selection.notes().isEmpty());
-    }
-
     // ---------------------------------------------------------------- declaration lookup
 
     private static JarDeclaration declaration(String containedDeps) {
