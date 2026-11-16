@@ -187,6 +187,17 @@ public final class DrawState {
         this.scissorEnabled = other.scissorEnabled;
         System.arraycopy(other.scissor, 0, this.scissor, 0, 4);
         System.arraycopy(other.color, 0, this.color, 0, 4);
+        // These six were missing, and the symptom was silence: the pipeline reads all of them at replay
+        // (blendEquation, logicOp and polygonMode build the pipeline; shadeModel decides whether the vertex colours
+        // are flat; blendColor is the constant the GL_CONSTANT_* factors read), so every draw replayed with the
+        // defaults. Measured: glShadeModel(GL_FLAT) - implemented for Immersive Engineering's flat item models -
+        // never reached the vertex converter, because the copy that carries a captured state into a draw dropped it.
+        System.arraycopy(other.blendColor, 0, this.blendColor, 0, 4);
+        this.blendEquation = other.blendEquation;
+        this.logicOp = other.logicOp;
+        this.polygonModeFace = other.polygonModeFace;
+        this.polygonModeMode = other.polygonModeMode;
+        this.shadeModel = other.shadeModel;
         this.texture2d = other.texture2d;
         this.alphaTest = other.alphaTest;
         this.alphaReference = other.alphaReference;
@@ -237,6 +248,87 @@ public final class DrawState {
             this.programSamplers = new int[other.programSamplers.length];
         }
         System.arraycopy(other.programSamplers, 0, this.programSamplers, 0, other.programSamplers.length);
+    }
+
+    /**
+     * Whether two draws would be issued with exactly the same state.
+     *
+     * <p><b>What asks.</b> The recorder folds two adjacent draws into one when nothing about them differs, which is how
+     * a line of text stops being one draw per glyph - see {@link FrameDraws}. A field left out of this comparison would
+     * merge two draws that differ, and the difference would be invisible until it is not.</p>
+     *
+     * <p><b>Everything {@link #captureFrom} writes is compared</b>, including the fields the pipeline only reads for
+     * some draws ({@code shadeModel}, {@code polygonMode}, {@code blendEquation}). {@code lighting} and {@code program}
+     * compare by identity, which is sound because both are immutable snapshots that get replaced rather than mutated.</p>
+     *
+     * <p><b>Conditional arrays are compared only when they are set.</b> A state with no lightmap keeps the last one it
+     * saw in its array - {@code captureFrom} leaves it alone - so comparing stale contents would refuse a merge for a
+     * reason that reaches no GPU.</p>
+     */
+    public boolean sameAs(DrawState other) {
+        if (this == other) {
+            return true;
+        }
+        if (other == null) {
+            return false;
+        }
+        return depthTest == other.depthTest
+                && depthWrite == other.depthWrite
+                && depthFunc == other.depthFunc
+                && blend == other.blend
+                && cull == other.cull
+                && blendSourceRgb == other.blendSourceRgb
+                && blendDestinationRgb == other.blendDestinationRgb
+                && blendSourceAlpha == other.blendSourceAlpha
+                && blendDestinationAlpha == other.blendDestinationAlpha
+                && texture == other.texture
+                && scissorEnabled == other.scissorEnabled
+                && texture2d == other.texture2d
+                && alphaTest == other.alphaTest
+                && Float.compare(alphaReference, other.alphaReference) == 0
+                && alphaComparison == other.alphaComparison
+                && blendEquation == other.blendEquation
+                && logicOp == other.logicOp
+                && polygonModeFace == other.polygonModeFace
+                && polygonModeMode == other.polygonModeMode
+                && shadeModel == other.shadeModel
+                && hasLightmap == other.hasLightmap
+                && lightingEnabled == other.lightingEnabled
+                && hasNormalMatrix == other.hasNormalMatrix
+                && lighting == other.lighting
+                && hasTextureMatrix == other.hasTextureMatrix
+                && fogEnabled == other.fogEnabled
+                && fogMode == other.fogMode
+                && Float.compare(fogStart, other.fogStart) == 0
+                && Float.compare(fogEnd, other.fogEnd) == 0
+                && Float.compare(fogDensity, other.fogDensity) == 0
+                && Float.compare(fogTanX, other.fogTanX) == 0
+                && Float.compare(fogTanY, other.fogTanY) == 0
+                && Float.compare(pointSize, other.pointSize) == 0
+                && Float.compare(lineWidth, other.lineWidth) == 0
+                && stencilTest == other.stencilTest
+                && stencilComparison == other.stencilComparison
+                && stencilReference == other.stencilReference
+                && stencilCompareMask == other.stencilCompareMask
+                && stencilWriteMask == other.stencilWriteMask
+                && stencilFail == other.stencilFail
+                && stencilDepthFail == other.stencilDepthFail
+                && stencilPass == other.stencilPass
+                && overlayMode == other.overlayMode
+                && program == other.program
+                && java.util.Arrays.equals(mvp, other.mvp)
+                && java.util.Arrays.equals(scissor, other.scissor)
+                && java.util.Arrays.equals(color, other.color)
+                && java.util.Arrays.equals(blendColor, other.blendColor)
+                && java.util.Arrays.equals(viewport, other.viewport)
+                && java.util.Arrays.equals(colorMask, other.colorMask)
+                && (!hasLightmap || java.util.Arrays.equals(lightmap, other.lightmap))
+                && (!hasNormalMatrix || java.util.Arrays.equals(normalMatrix, other.normalMatrix))
+                && (!hasTextureMatrix || java.util.Arrays.equals(textureMatrix, other.textureMatrix))
+                && java.util.Arrays.equals(fogColor, other.fogColor)
+                && java.util.Arrays.equals(overlayColor, other.overlayColor)
+                && java.util.Arrays.equals(programBlock, other.programBlock)
+                && java.util.Arrays.equals(programSamplers, other.programSamplers);
     }
 
     public void captureFrom(net.minecraftforge.client.render.state.backend.FrameState state) {

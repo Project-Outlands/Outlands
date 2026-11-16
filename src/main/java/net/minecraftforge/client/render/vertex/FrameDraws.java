@@ -26,6 +26,17 @@ import java.util.List;
  */
 public final class FrameDraws {
 
+    /**
+     * The primitive modes whose vertices concatenate into the same picture: a triangle list, a strip, a quad list.
+     *
+     * <p>Left out on purpose: a fan shares its first vertex with every triangle, a polygon is one outline, a quad
+     * strip's quads share edges, and two line loops joined would be one loop. Those stay separate rather than being
+     * merged into something GL never drew.</p>
+     */
+    private static final int GL_TRIANGLES = 4;
+    private static final int GL_TRIANGLE_STRIP = 5;
+    private static final int GL_QUADS = 7;
+
     /** One thing the frame asked a backend to do, in the order it asked. */
     public sealed interface Operation permits Draw, FramebufferCopy, ReadPixels, TerrainLayer, Clear, TargetBind {}
 
@@ -84,6 +95,69 @@ public final class FrameDraws {
         public int vertexCount() { return vertexCount; }
         public byte[] vertices() { return vertices; }
         public DrawState state() { return state; }
+
+        /**
+         * Whether {@code other} can be folded into this draw.
+         *
+         * <p>Same primitive mode, same vertex layout and the same state - then the two are one draw with more
+         * vertices and the picture is unchanged. This is what turns text from one draw per glyph into one draw per
+         * run of same-state glyphs: {@code FontRenderer} emits every glyph as its own {@code glBegin}/{@code glEnd},
+         * and measured on a text-heavy frame that was 342 of 761 operations.</p>
+         */
+        public boolean mergeableWith(int otherMode, VertexLayout otherLayout, DrawState otherState) {
+            return vertexCount > 0
+                    && otherMode == mode
+                    && (mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP || mode == GL_QUADS)
+                    && layout.equals(otherLayout)
+                    && state.sameAs(otherState);
+        }
+
+        /**
+         * Appends another draw's vertices, with the degenerate vertices a strip needs at the join.
+         *
+         * <p><b>Why a strip needs them and a list does not.</b> A strip's triangles are implied by vertex order, so two
+         * strips butted together would have a real triangle spanning the gap. Duplicating the last vertex of what is
+         * already here and the first vertex of the new segment makes every triangle across the join zero-area, which
+         * rasterises nothing. An odd number of vertices needs one duplicate more, because the winding of a strip
+         * alternates and the new segment has to start on the same parity it would have had as a draw of its own.</p>
+         */
+        public void append(int addedVertices, ByteBuffer data, int stride) {
+            int used = vertexCount * stride;
+            int degenerate = mode == GL_TRIANGLE_STRIP ? ((vertexCount & 1) == 0 ? 2 : 3) : 0;
+            ensureOwned(used + (degenerate + addedVertices) * stride, used);
+
+            int at = used;
+            for (int i = 0; i < degenerate; i++) {
+                if (i == degenerate - 1) {
+                    // The first vertex of the new segment: the join collapses onto it and the segment then starts with
+                    // the winding it would have had on its own.
+                    data.get(0, vertices, at, stride);
+                } else {
+                    System.arraycopy(vertices, used - stride, vertices, at, stride);
+                }
+                at += stride;
+            }
+            data.get(0, vertices, at, addedVertices * stride);
+            vertexCount += degenerate + addedVertices;
+        }
+
+        /**
+         * Grows the owned array to hold {@code needed} bytes, keeping the {@code used} already in it.
+         *
+         * <p>Also takes ownership when the vertices are somebody else's array - the display-list replay records
+         * captured bytes without copying them, and appending to one of those would write into a compiled list.</p>
+         */
+        private void ensureOwned(int needed, int used) {
+            if (vertices != ownedBuffer || ownedBuffer == null || ownedBuffer.length < needed) {
+                int capacity = Math.max(needed, Math.max(256, ownedBuffer == null ? 256 : ownedBuffer.length * 2));
+                byte[] grown = new byte[capacity];
+                if (used > 0) {
+                    System.arraycopy(vertices, 0, grown, 0, used);
+                }
+                ownedBuffer = grown;
+                vertices = grown;
+            }
+        }
     }
 
     /**
@@ -223,6 +297,11 @@ public final class FrameDraws {
     /**
      * Adds one draw.
      *
+     * <p><b>Folded into the previous draw when nothing differs.</b> The fold happens here rather than at replay time
+     * because this list is what every consumer reads: one draw carrying more vertices is cheaper to hold, to walk and
+     * to dump than two that differ in nothing but their bytes. The state comparison is {@link DrawState#sameAs}, so the
+     * fold only ever happens between draws that would configure the pipeline identically.</p>
+     *
      * @return {@code false} when nothing is collecting, which means the caller has no frame to record into
      */
     public static boolean record(VertexLayout layout, int mode, int vertexCount, ByteBuffer data, DrawState state) {
@@ -235,11 +314,31 @@ public final class FrameDraws {
                     + " needs " + bytes + " bytes, the buffer has " + data.limit());
         }
         synchronized (LOCK) {
+            Draw previous = lastRecordedDraw();
+            if (vertexCount > 0 && previous != null && previous.mergeableWith(mode, layout, state)) {
+                previous.append(vertexCount, data, layout.stride());
+                return true;
+            }
             Draw draw = obtainDraw();
             draw.set(layout, mode, vertexCount, data, bytes, state);
             ACTIVE_DRAWS.add(draw);
         }
         return true;
+    }
+
+    /**
+     * The draw at the end of the list, or {@code null} when the last thing recorded was not a draw.
+     *
+     * <p>A copy, a clear or a target switch between two draws is a reason not to fold them: the operation has to stay
+     * between them in the sequence.</p>
+     */
+    private static @Nullable Draw lastRecordedDraw() {
+        int size = ACTIVE_DRAWS.size();
+        if (size == 0) {
+            return null;
+        }
+        Operation last = ACTIVE_DRAWS.get(size - 1);
+        return last instanceof Draw draw ? draw : null;
     }
 
     /**
