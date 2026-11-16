@@ -74,8 +74,14 @@ final class FrameDump {
         out.append("# frame ").append(frames).append(", ").append(ops.size()).append(" operations")
                 .append(requested ? " (requested)" : "").append('\n');
         int index = 0;
+        // Which image a draw lands in is the difference between an outline that never reached its target and one
+        // that got lost inside the chain, and it is not visible from the draw itself.
+        int target = 0;
         for (FrameDraws.Operation op : ops) {
-            index = append(out, index, op);
+            if (op instanceof FrameDraws.TargetBind bind) {
+                target = bind.target();
+            }
+            index = append(out, index, op, target);
         }
         try {
             Files.writeString(Path.of("logs/outlands-frame-dump.txt"), out,
@@ -123,7 +129,7 @@ final class FrameDump {
      * and then composites it can look identical from the draw list alone, and "is the entity-outline chain running at
      * all" is exactly that question: it is three target binds and two full-screen program quads, or it is nothing.</p>
      */
-    private static int append(StringBuilder out, int index, FrameDraws.Operation op) {
+    private static int append(StringBuilder out, int index, FrameDraws.Operation op, int target) {
         if (op instanceof FrameDraws.Draw draw) {
             DrawState state = draw.state();
             VertexLayout layout = draw.layout();
@@ -139,6 +145,9 @@ final class FrameDump {
                     .append(" light=").append(state.lightmap() == null ? "-"
                             : String.format(Locale.ROOT, "(%.3f,%.3f)", state.lightmap()[0], state.lightmap()[1]))
                     .append(" tex=").append(state.texture())
+                    .append(" tgt=").append(target)
+                    .append(" overlay=").append(state.overlayMode())
+                    .append(" proj=").append(projection(state.programBlock()))
                     .append(" v0=").append(firstVertex(draw))
                     .append(String.format(Locale.ROOT, " mvpT=(%.3f,%.3f,%.3f)", mvp[12], mvp[13], mvp[14]))
                     .append('\n');
@@ -163,7 +172,26 @@ final class FrameDump {
                     .append(" chunks=").append(layer.visibleChunks() == null ? 0 : layer.visibleChunks().size());
             default -> out.append(op.getClass().getSimpleName());
         }
+        out.append('\n');
         return index;
+    }
+
+    /**
+     * The four numbers of a program's uniform block that decide whether a post-processing quad covers the screen.
+     *
+     * <p>A pass draws one full-screen quad and computes its clip position as {@code ProjMat * Position}, so the matrix
+     * being zero is a pass that rasterises nothing - with no validation error, no warning and no difference in the
+     * draw list. The block's first member is that matrix in every post-processing stage this project ships, so its
+     * x/y scale and two translations are enough: {@code (2/width, -1, -2/height, 1)} for a 854x480 window.</p>
+     */
+    private static String projection(byte[] block) {
+        if (block == null || block.length < 64) {
+            return "none(" + (block == null ? -1 : block.length) + "B)";
+        }
+        java.nio.FloatBuffer floats =
+                java.nio.ByteBuffer.wrap(block).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+        return String.format(Locale.ROOT, "(%.6f,%.6f,%.6f,%.6f)",
+                floats.get(0), floats.get(3), floats.get(5), floats.get(7));
     }
 
     private static String bounds(FrameDraws.Draw draw) {
