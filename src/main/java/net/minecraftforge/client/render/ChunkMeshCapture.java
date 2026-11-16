@@ -308,9 +308,10 @@ public final class ChunkMeshCapture {
 
             java.nio.ByteBuffer source = buffer.getByteBuffer();
             source.position(0);
-            // Every visible mesh passes through here, so this is where the atlas learns which animated sprites are on
-            // screen. It reads the same bytes the compaction below reads; a sprite nothing marks keeps ticking.
-            net.minecraftforge.client.render.terrain.SpriteAnimationGate.collect(source, quadCount);
+            // Every mesh passes through here once, when it is built: this is where the sprites it samples are recorded.
+            // The per-frame part - which of those chunks is on screen - happens in RenderGlobal.setupTerrain, because a
+            // chunk that is not rebuilt for a minute is still drawn every frame.
+            net.minecraftforge.client.render.terrain.SpriteAnimationGate.collect(source, quadCount, compiled::outlandsAddSprite);
             int byteLength = quadCount * net.minecraftforge.client.render.vulkan.TerrainVertexFormat.COMPACT_QUAD_SIZE;
             byte[] compactVertices = acquireBuffer(byteLength);
             net.minecraftforge.client.render.vulkan.TerrainVertexFormat.compact(source, quadCount, compactVertices);

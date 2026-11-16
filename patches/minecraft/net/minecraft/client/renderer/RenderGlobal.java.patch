@@ -569,7 +569,7 @@
          }
  
          this.mc.profiler.endStartSection("captureFrustum");
-@@ -1002,34 +1290,42 @@
+@@ -1002,34 +1290,52 @@
          }
  
          this.mc.profiler.endStartSection("rebuildNear");
@@ -618,10 +618,20 @@
 -        this.chunksToUpdate.addAll(set);
 +        this.chunksToUpdate.addAll(this.chunksToUpdateTemp);
 +        this.chunksToUpdateTemp.clear();
++
++        // Forge: renderInfos is now this frame's visible set, so this is where the atlas learns which animated sprites
++        // are on screen. Marking here rather than when a mesh is built is what lets an animation advance every frame -
++        // a chunk built once is drawn for as long as it is in view. A chunk nothing collected sprites for (the GL
++        // renderer) marks nothing, so every sprite keeps animating exactly as before.
++        for (RenderGlobal.ContainerLocalRenderInformation info : this.renderInfos)
++        {
++            net.minecraftforge.client.render.terrain.SpriteAnimationGate.mark(info.renderChunk.getCompiledChunk().outlandsSprites());
++        }
++
          this.mc.profiler.endSection();
      }
  
-@@ -1153,24 +1449,36 @@
+@@ -1153,24 +1459,36 @@
  
          this.mc.profiler.startSection("filterempty");
          int l = 0;
@@ -671,7 +681,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1486,18 @@
+@@ -1178,6 +1496,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -690,7 +700,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1511,14 @@
+@@ -1191,7 +1521,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -706,7 +716,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1645,13 @@
+@@ -1318,6 +1655,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -720,7 +730,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1834,21 @@
+@@ -1500,22 +1844,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -751,7 +761,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1878,7 @@
+@@ -1545,6 +1888,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -759,7 +769,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1918,13 @@
+@@ -1584,14 +1928,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -777,7 +787,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2293,8 @@
+@@ -1960,8 +2303,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -788,7 +798,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2328,8 @@
+@@ -1995,8 +2338,8 @@
                  }
              }
  
@@ -799,7 +809,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2383,7 @@
+@@ -2050,7 +2393,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -808,7 +818,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2423,13 @@
+@@ -2090,8 +2433,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -823,7 +833,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2689,11 @@
+@@ -2351,9 +2699,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -838,7 +848,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +3162,7 @@
+@@ -2822,7 +3172,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -847,7 +857,7 @@
                      this.world
                      .playSound(
                          blockPosIn,
-@@ -3038,16 +3378,22 @@
+@@ -3038,16 +3388,22 @@
      @SideOnly(Side.CLIENT)
      class ContainerLocalRenderInformation
      {

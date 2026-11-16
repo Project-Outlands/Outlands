@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -68,8 +69,11 @@ class AnimatedSpriteIndexTest {
             raw.putFloat(vertex * 28 + 20, vs[vertex]);
         }
 
-        SpriteAnimationGate.collect(raw, 1);
+        java.util.List<TextureAtlasSprite> collected = new java.util.ArrayList<>();
+        SpriteAnimationGate.collect(raw, 1, collected::add);
+        assertEquals(java.util.List.of(water), collected, "the quad is attributed to the sprite its corners sample");
 
+        SpriteAnimationGate.mark(collected);
         assertTrue(water.outlandsShouldTick(), "the sprite the quad samples is marked, and ticks once");
         assertFalse(water.outlandsShouldTick(), "and the mark is consumed, so it ticks once per frame");
     }

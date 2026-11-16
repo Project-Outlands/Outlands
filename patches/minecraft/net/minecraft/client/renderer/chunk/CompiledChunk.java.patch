@@ -1,14 +1,22 @@
 --- before/net/minecraft/client/renderer/chunk/CompiledChunk.java
 +++ after/net/minecraft/client/renderer/chunk/CompiledChunk.java
-@@ -36,6 +36,7 @@
+@@ -36,6 +36,15 @@
      private final List<TileEntity> tileEntities = Lists.newArrayList();
      private SetVisibility setVisibility = new SetVisibility();
      private BufferBuilder.State state;
 +    private int[] occluderData;
++    /**
++     * Forge: the animated sprites this chunk's geometry samples.
++     *
++     * <p>Collected while the finished mesh is captured, then replayed every frame for the chunks that are actually
++     * drawn - which is what the atlas needs to decide whether a sprite's animation is worth ticking. Empty on a GL
++     * renderer, where nothing collects them and every sprite keeps animating as before.</p>
++     */
++    private final java.util.Set<net.minecraft.client.renderer.texture.TextureAtlasSprite> outlandsSprites = new java.util.LinkedHashSet<>();
  
      public boolean isEmpty()
      {
-@@ -91,5 +92,15 @@
+@@ -91,5 +100,27 @@
      public void setState(BufferBuilder.State stateIn)
      {
          this.state = stateIn;
@@ -17,6 +25,18 @@
 +    public int[] getOccluderData()
 +    {
 +        return this.occluderData;
++    }
++
++    /** Forge: records a sprite this chunk's geometry samples. */
++    public void outlandsAddSprite(net.minecraft.client.renderer.texture.TextureAtlasSprite sprite)
++    {
++        this.outlandsSprites.add(sprite);
++    }
++
++    /** Forge: the sprites this chunk samples, for the per-frame mark of what is on screen. */
++    public java.util.Set<net.minecraft.client.renderer.texture.TextureAtlasSprite> outlandsSprites()
++    {
++        return this.outlandsSprites;
 +    }
 +
 +    public void setOccluderData(int[] occluderDataIn)

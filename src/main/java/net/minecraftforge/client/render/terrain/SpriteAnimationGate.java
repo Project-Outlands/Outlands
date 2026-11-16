@@ -3,6 +3,7 @@ package net.minecraftforge.client.render.terrain;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 
 import java.nio.ByteBuffer;
+import java.util.function.Consumer;
 
 /**
  * Marks the animated sprites terrain actually draws, so the atlas only ticks what is on screen.
@@ -26,12 +27,29 @@ public final class SpriteAnimationGate {
     private SpriteAnimationGate() {}
 
     /**
-     * Marks every animated sprite the given finished terrain mesh samples.
+     * Marks the sprites of every chunk that is being drawn this frame.
+     *
+     * <p><b>Why per frame and not per build.</b> A mesh is built once and drawn for as long as it is in view, so
+     * marking at capture time only lets an animation advance when the chunk is rebuilt - measured on screen as water
+     * that moves, but many times too slowly. The frame's visible chunk list is the honest answer to "what is on
+     * screen", and it is already computed.</p>
+     *
+     * @param sprites the sprites a drawn chunk's geometry samples, which is empty for a chunk nothing collected
+     */
+    public static void mark(Iterable<TextureAtlasSprite> sprites) {
+        for (TextureAtlasSprite sprite : sprites) {
+            sprite.outlandsMarkActive();
+        }
+    }
+
+    /**
+     * Reports every animated sprite the given finished terrain mesh samples.
      *
      * @param raw       vanilla's {@code DefaultVertexFormats.BLOCK} vertices
      * @param quadCount how many quads the buffer holds
+     * @param sink      receives each sprite the mesh samples, once per quad that samples it
      */
-    public static void collect(ByteBuffer raw, int quadCount) {
+    public static void collect(ByteBuffer raw, int quadCount, Consumer<TextureAtlasSprite> sink) {
         AnimatedSpriteIndex index = AnimatedSpriteIndex.current();
         if (index == null || quadCount <= 0) {
             return;
@@ -49,7 +67,7 @@ public final class SpriteAnimationGate {
             }
             TextureAtlasSprite sprite = index.find(u * 0.25F, v * 0.25F);
             if (sprite != null) {
-                sprite.outlandsMarkActive();
+                sink.accept(sprite);
             }
         }
     }
