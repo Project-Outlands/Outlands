@@ -32,10 +32,11 @@ class TerrainCullProbeTest {
         TerrainCullProbe.end();
 
         String report = TerrainCullProbe.reportAndReset();
-        assertTrue(report.contains("4 sections/frame"), report);
+        assertTrue(report.contains("4 sections/walk"), report);
         assertTrue(report.contains("walk "), report);
         assertTrue(report.contains("setup "), report);
         assertTrue(report.contains("at most 7"), report);
+        assertTrue(report.contains("2 walks in 2 calls"), report);
         assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: none"), "the report resets the totals");
     }
 }

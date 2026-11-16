@@ -21,6 +21,7 @@ public final class TerrainCullProbe {
     private static long walkStartedAt;
     private static long walkNanos;
     private static long walkMaxNanos;
+    private static long walks;
     private static long frames;
     private static long visited;
     private static long visitedThisFrame;
@@ -68,6 +69,7 @@ public final class TerrainCullProbe {
         }
         long elapsed = System.nanoTime() - walkStartedAt;
         walkNanos += elapsed;
+        walks++;
         if (elapsed > walkMaxNanos) {
             walkMaxNanos = elapsed;
         }
@@ -87,15 +89,18 @@ public final class TerrainCullProbe {
             return "terrain cull: none";
         }
         double perFrame = frames;
-        // Two figures on purpose: the whole method includes one-off work (loadRenderers on a settings change, the
-        // cube walk when the camera crosses a chunk boundary), while the walk is the part that runs every frame and
-        // is the only part a background thread could take.
-        String report = "terrain cull: walk " + oneDecimal(walkNanos / 1_000_000.0 / perFrame) + " ms/frame (worst "
-                + oneDecimal(walkMaxNanos / 1_000_000.0) + "), setup " + oneDecimal(nanos / 1_000_000.0 / perFrame)
-                + " ms/frame (worst " + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), "
-                + (long) (visited / perFrame) + " sections/frame (at most " + maxVisitedPerFrame + ")";
+        // Per walk, not per frame. vanilla skips the traversal whenever the camera has not moved or turned, and
+        // setupTerrain itself runs once per render pass - three of those a frame with Forge's two extra passes. A
+        // figure averaged over calls is therefore diluted by calls that did nothing, which is exactly the mistake this
+        // split fixes: two runs of the same scene looked 2.6x apart only because one of them walked on more frames.
+        String report = "terrain cull: walk " + oneDecimal(walkNanos / 1_000_000.0 / Math.max(1, walks))
+                + " ms/walk (worst " + oneDecimal(walkMaxNanos / 1_000_000.0) + ", " + walks + " walks in "
+                + frames + " calls), setup " + oneDecimal(nanos / 1_000_000.0 / perFrame) + " ms/call (worst "
+                + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), "
+                + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + ")";
         walkNanos = 0;
         walkMaxNanos = 0;
+        walks = 0;
         nanos = 0;
         frames = 0;
         visited = 0;
