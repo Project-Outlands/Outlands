@@ -69,6 +69,7 @@ cover. Three buckets, because they need different answers:
 | bucket | meaning |
 |---|---|
 | **uncovered** | a real GL call no rule routes: a mod that makes it takes the process down. Exit status 1. |
+| **behind a capability** | unrouted, but every class that reaches it asks `GLContext.getCapabilities()` about a flag the shim contract declares off, so the mod takes its fallback. Measured: ThaumcraftFix's nine vertex-array calls sit behind `OpenGL33`, and the contract is GL 2.1. |
 | **implementers** | Actinium, Angelica, GTNHLib's VAO/VBO/shader wrappers, `com.mitchej123.glsm`, the LWJGL 3 shim. They *are* an OpenGL backend; under the Vulkan backend they are simply not the code path in use. |
 | **not GL calls** | `Display`, `Drawable`, `GLContext`, `ContextCapabilities`: window and context management, answered by the LWJGL 2 compatibility layer, not by the shim. |
 
@@ -82,5 +83,8 @@ window/context bucket.
 - **Instance fields into inner classes.** `GlStateManager.enableBlend` reads as "delegates" because it sets
   `blendState.blend`, and the hook is in `BooleanState.setState` in another class. Static reading cannot follow that;
   the entries were checked by hand.
+- **Capability gating is a heuristic.** A class that asks about a flag the contract declares off is assumed to take
+  its fallback; two hops out from it are assumed to be its helpers. A mod that asks and then calls anyway would be
+  reported in the wrong bucket - so the gated list is printed in full rather than summarised.
 - **Whether a hook is *correct*.** This finds calls that reach real GL, nothing more. A hooked method that records the
   wrong value is a different bug, and the frame dump is what finds those.

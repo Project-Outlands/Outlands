@@ -116,6 +116,20 @@ def rules(rules_path):
     return covered
 
 
+CAPABILITY = re.compile(r"ContextCapabilities\.(\w+)")
+
+
+def declared(rules_path):
+    """The capability names the shim contract declares on, read from GlAnswers.declareShimContract()."""
+    answers = os.path.join(os.path.dirname(os.path.abspath(rules_path)), "..", "..", "client", "render", "GlAnswers.java")
+    answers = os.path.normpath(answers)
+    if not os.path.exists(answers):
+        return None
+    src = open(answers, encoding="utf-8").read()
+    body = src.split("declareShimContract()", 1)[-1]
+    return set(re.findall(r"caps\.(\w+)\s*=\s*true", body))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("mods")
@@ -127,19 +141,46 @@ def main():
     print(f"the ruleset covers {len(covered)} (owner, name, descriptor) triples", file=sys.stderr)
 
     hits = defaultdict(lambda: defaultdict(set))
+    # Per jar: which capabilities each class asks about, and which classes it references. A call behind a capability
+    # the contract declares off never executes, and reporting it as a gap would be crying wolf - measured: every one
+    # of ThaumcraftFix's nine vertex-array calls sits behind GLContext.getCapabilities().OpenGL33, and the shim
+    # declares 2.1.
+    caps_of = defaultdict(lambda: defaultdict(set))
+    refs_of = defaultdict(lambda: defaultdict(set))
     for jar in sorted(glob.glob(os.path.join(args.mods, "*.jar"))):
+        short = os.path.basename(jar)
         try:
             with zipfile.ZipFile(jar) as z:
                 for name in z.namelist():
                     if not name.endswith(".class"):
                         continue
+                    cls = name[:-6]
                     for owner, method, desc in parse_refs(z.read(name)):
+                        refs_of[short][cls].add(owner)
+                        if owner.endswith("ContextCapabilities"):
+                            caps_of[short][cls].add(method)
                         if owner.startswith("org/lwjgl/opengl/") and not method.startswith("n"):
-                            hits[(owner, method, desc)][os.path.basename(jar)].add(name[:-6])
+                            hits[(owner, method, desc)][short].add(cls)
         except zipfile.BadZipFile:
             continue
 
-    missing, not_gl, implementers = [], [], []
+    on = declared(args.rules)
+    gated = {}
+    for short, by_class in caps_of.items():
+        # A class that asks about a capability the contract declares off takes its fallback path. Two hops *out* from
+        # those classes - to the classes they reference - covers the helper they would have called, which is where the
+        # calls usually are: ThaumcraftFix's mixin asks about OpenGL33 and its calls are in RiftData.
+        gated_caps = {cls: {n for n in names if on is None or n not in on} for cls, names in by_class.items()}
+        gated_caps = {cls: caps for cls, caps in gated_caps.items() if caps}
+        for _ in range(2):
+            for cls, caps in list(gated_caps.items()):
+                for ref in refs_of[short].get(cls, ()):
+                    if ref in refs_of[short] and ref not in gated_caps:
+                        gated_caps[ref] = caps
+        for cls, caps in gated_caps.items():
+            gated[(short, cls)] = sorted(caps)
+
+    missing, not_gl, implementers, behind = [], [], [], []
     for key, jars in hits.items():
         if key in covered:
             continue
@@ -149,6 +190,9 @@ def main():
             not_gl.append((count, key, sites))
         elif any(site.startswith(GL_IMPLEMENTERS) for site in sites):
             implementers.append((count, key, sites))
+        elif all((short, site) in gated for short, v in jars.items() for site in v):
+            caps = sorted({c for short, v in jars.items() for site in v for c in gated[(short, site)]})
+            behind.append((count, key, sites, caps))
         else:
             missing.append((count, key, sites))
 
@@ -156,6 +200,10 @@ def main():
     print(f"\ndistinct raw GL calls in the pack: {len(hits)}    uncovered: {len(missing)}")
     for count, (owner, name, desc), sites in missing:
         print(f"  {count:5d}  {owner.split('/')[-1]:20s} {name:28s} {desc[:40]:40s} {sites[0] if sites else ''}")
+    if behind:
+        print(f"\nbehind a capability the contract declares off (never executes): {len(behind)}")
+        for count, (owner, name, desc), sites, caps in sorted(behind, key=lambda x: -x[0])[:8]:
+            print(f"  {count:5d}  {owner.split('/')[-1]:20s} {name:28s} {sites[0] if sites else '':44s} {','.join(caps)}")
     print(f"\nOpenGL backends implemented by mods (supposed to call real GL): {len(implementers)}")
     for count, (owner, name, desc), sites in sorted(implementers, key=lambda x: -x[0])[:5]:
         print(f"  {count:5d}  {owner.split('/')[-1]:20s} {name:28s} {sites[0] if sites else ''}")
