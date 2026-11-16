@@ -545,6 +545,8 @@ final class VulkanSwapchain {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
+        // The frame that was just built is over: fold its item count into the peak before the next one starts.
+        net.minecraftforge.client.render.probe.ItemRenderProbe.endFrame();
         RenderInstance.resetOpened();
         int copiesBefore = VulkanImage.copyCount();
         int binds = 0;

@@ -25,6 +25,8 @@ public final class ItemRenderProbe {
     private static long renders;
     private static long nanos;
     private static long draws;
+    private static long rendersThisFrame;
+    private static long maxRendersPerFrame;
 
     private ItemRenderProbe() {}
 
@@ -46,12 +48,28 @@ public final class ItemRenderProbe {
         if (depth > 0 && --depth == 0) {
             nanos += System.nanoTime() - startedAt;
             renders++;
+            rendersThisFrame++;
         }
     }
 
     /** Whether the calling thread is inside an item render, i.e. whether a draw belongs to one. */
     public static boolean active() {
         return depth > 0;
+    }
+
+    /**
+     * Ends the frame's accounting, keeping the worst frame's item count.
+     *
+     * <p><b>Why the peak and not just the average.</b> The cost of item rendering is per item, so what decides whether a
+     * cache is worth building is the busiest screen, not the mean: a hotbar average hides the one JEI page that fills
+     * the window with models. The average answers "what does a normal frame cost", the peak answers "how bad can it
+     * get", and the second one is the question.</p>
+     */
+    public static void endFrame() {
+        if (rendersThisFrame > maxRendersPerFrame) {
+            maxRendersPerFrame = rendersThisFrame;
+        }
+        rendersThisFrame = 0;
     }
 
     /** Records one draw that was emitted from inside an item render. */
@@ -71,9 +89,11 @@ public final class ItemRenderProbe {
         long reportRenders = renders;
         long reportNanos = nanos;
         long reportDraws = draws;
+        long reportPeak = maxRendersPerFrame;
         renders = 0;
         nanos = 0;
         draws = 0;
+        maxRendersPerFrame = 0;
         if (reportRenders == 0 && reportDraws == 0) {
             return "item rendering: none";
         }
@@ -83,7 +103,8 @@ public final class ItemRenderProbe {
                 + ", " + oneDecimal(reportNanos / 1_000_000.0) + " ms"
                 + (frames > 0 ? " (" + oneDecimal(reportNanos / 1_000_000.0 / perFrame) + " ms/frame)" : "")
                 + ", " + reportDraws + " draws"
-                + (frames > 0 ? " (" + oneDecimal(reportDraws / perFrame) + "/frame)" : "");
+                + (frames > 0 ? " (" + oneDecimal(reportDraws / perFrame) + "/frame)" : "")
+                + ", at most " + reportPeak + " in one frame";
     }
 
     private static String oneDecimal(double value) {

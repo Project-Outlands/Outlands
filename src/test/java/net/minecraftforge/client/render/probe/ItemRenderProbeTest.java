@@ -43,6 +43,23 @@ class ItemRenderProbeTest {
     }
 
     @Test
+    void thePeakIsTheBusiestFrameNotTheAverage() {
+        // The number the decision rests on: a hotbar average hides the one JEI page that fills the window.
+        ItemRenderProbe.endFrame(); // flush whatever an earlier test left in the current frame
+        ItemRenderProbe.begin();
+        ItemRenderProbe.end();
+        ItemRenderProbe.endFrame();
+        ItemRenderProbe.begin();
+        ItemRenderProbe.end();
+        ItemRenderProbe.begin();
+        ItemRenderProbe.end();
+        ItemRenderProbe.endFrame();
+
+        String report = ItemRenderProbe.reportAndReset(2);
+        assertTrue(report.contains("at most 2 in one frame"), report);
+    }
+
+    @Test
     void anUnbalancedEndDoesNotLeaveTheProbeOpen() {
         // A renderer that throws without a finally would otherwise leave every later draw attributed to items.
         ItemRenderProbe.end();
