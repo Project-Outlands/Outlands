@@ -18,6 +18,9 @@ public final class TerrainCullProbe {
 
     private static long startedAt;
     private static long nanos;
+    private static long walkStartedAt;
+    private static long walkNanos;
+    private static long walkMaxNanos;
     private static long frames;
     private static long visited;
     private static long visitedThisFrame;
@@ -51,6 +54,25 @@ public final class TerrainCullProbe {
         visitedThisFrame = 0;
     }
 
+    /** Starts timing the traversal loop itself, which is the part Sodium moves off the render thread. */
+    public static void beginWalk() {
+        if (ENABLED) {
+            walkStartedAt = System.nanoTime();
+        }
+    }
+
+    /** Ends the traversal loop's timing. */
+    public static void endWalk() {
+        if (!ENABLED) {
+            return;
+        }
+        long elapsed = System.nanoTime() - walkStartedAt;
+        walkNanos += elapsed;
+        if (elapsed > walkMaxNanos) {
+            walkMaxNanos = elapsed;
+        }
+    }
+
     /** Records one section the traversal looked at. */
     public static void visited() {
         visitedThisFrame++;
@@ -65,9 +87,15 @@ public final class TerrainCullProbe {
             return "terrain cull: none";
         }
         double perFrame = frames;
-        String report = "terrain cull: " + oneDecimal(nanos / 1_000_000.0 / perFrame) + " ms/frame (worst "
-                + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), " + (long) (visited / perFrame) + " sections/frame"
-                + " (at most " + maxVisitedPerFrame + ")";
+        // Two figures on purpose: the whole method includes one-off work (loadRenderers on a settings change, the
+        // cube walk when the camera crosses a chunk boundary), while the walk is the part that runs every frame and
+        // is the only part a background thread could take.
+        String report = "terrain cull: walk " + oneDecimal(walkNanos / 1_000_000.0 / perFrame) + " ms/frame (worst "
+                + oneDecimal(walkMaxNanos / 1_000_000.0) + "), setup " + oneDecimal(nanos / 1_000_000.0 / perFrame)
+                + " ms/frame (worst " + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), "
+                + (long) (visited / perFrame) + " sections/frame (at most " + maxVisitedPerFrame + ")";
+        walkNanos = 0;
+        walkMaxNanos = 0;
         nanos = 0;
         frames = 0;
         visited = 0;

@@ -18,17 +18,23 @@ class TerrainCullProbeTest {
         TerrainCullProbe.reportAndReset(); // start from a known state
 
         TerrainCullProbe.begin();
+        TerrainCullProbe.beginWalk();
         TerrainCullProbe.visited();
+        TerrainCullProbe.endWalk();
         TerrainCullProbe.end();
 
         TerrainCullProbe.begin();
+        TerrainCullProbe.beginWalk();
         for (int i = 0; i < 7; i++) {
             TerrainCullProbe.visited();
         }
+        TerrainCullProbe.endWalk();
         TerrainCullProbe.end();
 
         String report = TerrainCullProbe.reportAndReset();
         assertTrue(report.contains("4 sections/frame"), report);
+        assertTrue(report.contains("walk "), report);
+        assertTrue(report.contains("setup "), report);
         assertTrue(report.contains("at most 7"), report);
         assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: none"), "the report resets the totals");
     }
