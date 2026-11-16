@@ -356,6 +356,17 @@ final class VulkanImage implements AutoCloseable {
      *
      * @param staging host-visible memory of at least {@code copy.width() * copy.height() * 4} bytes
      */
+    /**
+     * Where source row {@code row} of a framebuffer copy lands in the destination image.
+     *
+     * <p>GL maps the source rectangle's lower-left corner to texel row {@code yOffset}, and the staging buffer holds
+     * the rectangle top row first, so the mapping reverses. Split out because a sign error here is a picture that is
+     * upside down and nothing else - the turret camera showed exactly that.</p>
+     */
+    static int destinationRow(int row, int height, int yOffset) {
+        return yOffset + height - 1 - row;
+    }
+
     void copyFromFramebuffer(VkCommandBuffer commandBuffer, FrameDraws.FramebufferCopy copy,
                              FrameRenderTarget target, long staging) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -419,21 +430,36 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-            // Straight through, no row reversal.
+            // Rows reversed, which is what the GL call means.
             //
-            // GL's glCopyTexSubImage2D puts the framebuffer's bottom row at the destination's texel row 0, but this
-            // framebuffer's row 0 is the top of the screen, and the quad sampling the copy puts v = 0 at the top of
-            // the screen as well - so a straight copy reproduces the picture the sharp panorama already showed.
-            // Reversing the rows to imitate GL's wording instead produced an upside-down background, which is how
-            // this was decided: the observable behaviour of the original, not its description.
+            // glCopyTexImage2D and glCopyTexSubImage2D map the *lower* left corner of the source rectangle to texel
+            // row yOffset, so the framebuffer's bottom row lands on the destination's row 0. This framebuffer's row 0
+            // is the top of the screen and this image's row 0 is the row a sampler reads at v = 0, so a straight copy
+            // puts the picture in upside down: measured on TurretMod's turret camera, whose own draw rotates the
+            // texture 180 degrees (it compensates for GL's flip) and therefore showed the ground above the sky.
+            //
+            // The straight copy this replaces was decided on the main menu's blur, which draws the copy back with a
+            // rotated quad - and those draws are skipped by the stream (see VulkanStream's twelve-vertex rule), so the
+            // evidence for it was gone and what remained was the wrong orientation for every other caller.
+            //
+            // Reversing costs one copy command per row, because neither vkCmdCopyBufferToImage nor a blit can turn
+            // rows around. The turret camera copies 48 of them once a second; the main menu copies 256 three times a
+            // frame, which is the price of a correct orientation and is bounded by that screen.
+            int rowBytes = copy.width() * 4;
             VkBufferImageCopy.Buffer toImage = VkBufferImageCopy.calloc(1, stack);
-            toImage.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
-            toImage.get(0).imageOffset().x(copy.xOffset()).y(copy.yOffset()).z(0);
-            toImage.get(0).imageExtent().width(copy.width()).height(copy.height()).depth(1);
+            toImage.get(0).bufferRowLength(0).bufferImageHeight(0);
+            toImage.get(0).imageExtent().width(copy.width()).height(1).depth(1);
             toImage.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(copy.level()).baseArrayLayer(0).layerCount(1);
-            org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
-                    org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
+            for (int row = 0; row < copy.height(); row++)
+            {
+                // Source row 0 is the rectangle's top, so it has to land on the destination's last row.
+                toImage.get(0).bufferOffset((long) row * rowBytes);
+                toImage.get(0).imageOffset().x(copy.xOffset())
+                        .y(destinationRow(row, copy.height(), copy.yOffset())).z(0);
+                org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
+                        org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, toImage);
+            }
 
             transition(commandBuffer, stack,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
