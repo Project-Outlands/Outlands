@@ -538,7 +538,9 @@ final class VulkanSwapchain {
                 + net.minecraftforge.client.render.vertex.FrameDraws.batchingStats() + ", "
                 // And the one behind the item display-list question: what item rendering costs on the screen the
                 // player is on right now. Reset per line, so the figure is "since the last report".
-                + net.minecraftforge.client.render.probe.ItemRenderProbe.reportAndReset(itemFrames);
+                + net.minecraftforge.client.render.probe.ItemRenderProbe.reportAndReset(itemFrames) + ", "
+                // And the last piece of the section-graph question: what the visibility walk itself costs.
+                + net.minecraftforge.client.render.probe.TerrainCullProbe.reportAndReset();
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {

@@ -1,0 +1,35 @@
+package net.minecraftforge.client.render.probe;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The traversal probe's bookkeeping.
+ *
+ * <p>Two numbers decide whether the visibility walk moves off the render thread: its cost per frame and how many
+ * sections it looked at. Both are pinned here only in the way they could be silently wrong - a frame that reports no
+ * sections because the counter was reset at the wrong time, and a worst-frame figure that is really the last frame.</p>
+ */
+class TerrainCullProbeTest {
+
+    @Test
+    void aFrameReportsItsOwnSectionsAndKeepsTheBusiest() {
+        TerrainCullProbe.reportAndReset(); // start from a known state
+
+        TerrainCullProbe.begin();
+        TerrainCullProbe.visited();
+        TerrainCullProbe.end();
+
+        TerrainCullProbe.begin();
+        for (int i = 0; i < 7; i++) {
+            TerrainCullProbe.visited();
+        }
+        TerrainCullProbe.end();
+
+        String report = TerrainCullProbe.reportAndReset();
+        assertTrue(report.contains("4 sections/frame"), report);
+        assertTrue(report.contains("at most 7"), report);
+        assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: none"), "the report resets the totals");
+    }
+}
