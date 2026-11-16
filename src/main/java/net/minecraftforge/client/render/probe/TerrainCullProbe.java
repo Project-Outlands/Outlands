@@ -23,6 +23,15 @@ public final class TerrainCullProbe {
     private static long walkMaxNanos;
     private static long walks;
     private static long frames;
+    private static long visibleThisWalk;
+    private static long traversableThisWalk;
+    private static long hiddenThisWalk;
+    private static long visible;
+    private static long traversable;
+    private static long hidden;
+    private static long resultSize;
+    private static long published;
+    private static long maxResultSize;
     private static long visited;
     private static long visitedThisFrame;
     private static long maxVisitedPerFrame;
@@ -49,6 +58,17 @@ public final class TerrainCullProbe {
             maxNanosPerFrame = elapsed;
         }
         visited += visitedThisFrame;
+        visible += visibleThisWalk;
+        traversable += traversableThisWalk;
+        hidden += hiddenThisWalk;
+        visibleThisWalk = 0;
+        traversableThisWalk = 0;
+        hiddenThisWalk = 0;
+        published += resultSize;
+        if (resultSize > maxResultSize) {
+            maxResultSize = resultSize;
+        }
+        resultSize = 0;
         if (visitedThisFrame > maxVisitedPerFrame) {
             maxVisitedPerFrame = visitedThisFrame;
         }
@@ -80,6 +100,33 @@ public final class TerrainCullProbe {
         visitedThisFrame++;
     }
 
+    /**
+     * Records the verdict a section got: drawn, walked through but not drawn, or cut.
+     *
+     * <p>The three counts are what makes two runs comparable at all: with different scenes, "the walk took 4 ms" says
+     * nothing, while "it culled 62% of what it reached" is the same statement in any scene.</p>
+     */
+    public static void verdict(boolean rendered, boolean traversed) {
+        if (!ENABLED) {
+            return;
+        }
+        if (!traversed) {
+            hiddenThisWalk++;
+        } else if (rendered) {
+            visibleThisWalk++;
+        } else {
+            traversableThisWalk++;
+        }
+    }
+
+    /** Records how many sections the walk ended up publishing. */
+    public static void result(int size) {
+        if (!ENABLED) {
+            return;
+        }
+        resultSize = size;
+    }
+
     /** The totals since the last call, formatted for the renderer's line, and reset. */
     public static String reportAndReset() {
         if (!ENABLED) {
@@ -97,7 +144,11 @@ public final class TerrainCullProbe {
                 + " ms/walk (worst " + oneDecimal(walkMaxNanos / 1_000_000.0) + ", " + walks + " walks in "
                 + frames + " calls), setup " + oneDecimal(nanos / 1_000_000.0 / perFrame) + " ms/call (worst "
                 + oneDecimal(maxNanosPerFrame / 1_000_000.0) + "), "
-                + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + ")";
+                + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + "),"
+                + " visible " + (long) (visible / Math.max(1, walks))
+                + " traversable " + (long) (traversable / Math.max(1, walks))
+                + " hidden " + (long) (hidden / Math.max(1, walks))
+                + ", published " + (long) (published / Math.max(1, walks)) + " (at most " + maxResultSize + ")";
         walkNanos = 0;
         walkMaxNanos = 0;
         walks = 0;
@@ -105,6 +156,11 @@ public final class TerrainCullProbe {
         frames = 0;
         visited = 0;
         maxVisitedPerFrame = 0;
+        visible = 0;
+        traversable = 0;
+        hidden = 0;
+        published = 0;
+        maxResultSize = 0;
         maxNanosPerFrame = 0;
         return report;
     }

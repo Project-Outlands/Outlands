@@ -20,6 +20,10 @@ class TerrainCullProbeTest {
         TerrainCullProbe.begin();
         TerrainCullProbe.beginWalk();
         TerrainCullProbe.visited();
+        TerrainCullProbe.verdict(true, true);
+        TerrainCullProbe.verdict(false, true);
+        TerrainCullProbe.verdict(false, false);
+        TerrainCullProbe.result(120);
         TerrainCullProbe.endWalk();
         TerrainCullProbe.end();
 
@@ -28,6 +32,7 @@ class TerrainCullProbeTest {
         for (int i = 0; i < 7; i++) {
             TerrainCullProbe.visited();
         }
+        TerrainCullProbe.result(80);
         TerrainCullProbe.endWalk();
         TerrainCullProbe.end();
 
@@ -37,6 +42,8 @@ class TerrainCullProbeTest {
         assertTrue(report.contains("setup "), report);
         assertTrue(report.contains("at most 7"), report);
         assertTrue(report.contains("2 walks in 2 calls"), report);
+        assertTrue(report.contains("visible 0 traversable 0 hidden 0"), report);
+        assertTrue(report.contains("published 100"), report);
         assertTrue(TerrainCullProbe.reportAndReset().equals("terrain cull: none"), "the report resets the totals");
     }
 }
