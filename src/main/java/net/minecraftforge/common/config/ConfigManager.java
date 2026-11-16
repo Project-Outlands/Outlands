@@ -68,7 +68,9 @@ public class ConfigManager
         @Override
         protected Field[] computeValue(Class<?> type) {
             return Arrays.stream(type.getDeclaredFields())
-                    .filter(field -> Modifier.isPublic(field.getModifiers())).toArray(Field[]::new);
+                .filter(field -> Modifier.isPublic(field.getModifiers()))
+                .peek(field -> field.setAccessible(true))
+                .toArray(Field[]::new);
         }
     };
 
