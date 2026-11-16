@@ -114,23 +114,30 @@
          int i = OpenGlHelper.glCheckFramebufferStatus(OpenGlHelper.GL_FRAMEBUFFER);
  
          if (i != OpenGlHelper.GL_FRAMEBUFFER_COMPLETE)
-@@ -171,6 +226,7 @@
+@@ -171,7 +226,11 @@
  
      public void bindFramebufferTexture()
      {
+-        if (OpenGlHelper.isFramebufferEnabled())
++        // Forge: the window's target has no texture of its own, so its backend answers and there is nothing to bind.
++        // An offscreen target does have one, and the binding is how the draw that follows samples it - which is why the
++        // condition below is the backend, not the GL answer. See framebufferRenderExt.
 +        if (this.backend != null && this.backend.isWindow()) { this.backend.bindTexture(); return; }
-         if (OpenGlHelper.isFramebufferEnabled())
++        if (this.backend != null || OpenGlHelper.isFramebufferEnabled())
          {
              GlStateManager.bindTexture(this.framebufferTexture);
-@@ -179,6 +235,7 @@
+         }
+@@ -179,7 +238,8 @@
  
      public void unbindFramebufferTexture()
      {
+-        if (OpenGlHelper.isFramebufferEnabled())
 +        if (this.backend != null && this.backend.isWindow()) { this.backend.unbindTexture(); return; }
-         if (OpenGlHelper.isFramebufferEnabled())
++        if (this.backend != null || OpenGlHelper.isFramebufferEnabled())
          {
              GlStateManager.bindTexture(0);
-@@ -187,6 +244,20 @@
+         }
+@@ -187,6 +247,20 @@
  
      public void bindFramebuffer(boolean p_147610_1_)
      {
@@ -151,7 +158,7 @@
          if (OpenGlHelper.isFramebufferEnabled())
          {
              OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, this.framebufferObject);
-@@ -200,6 +271,7 @@
+@@ -200,6 +274,7 @@
  
      public void unbindFramebuffer()
      {
@@ -159,18 +166,24 @@
          if (OpenGlHelper.isFramebufferEnabled())
          {
              OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, 0);
-@@ -221,6 +293,10 @@
+@@ -221,7 +296,15 @@
  
      public void framebufferRenderExt(int width, int height, boolean p_178038_3_)
      {
+-        if (OpenGlHelper.isFramebufferEnabled())
 +        // Forge: the window's composite is the identity - the image being drawn *is* the window - while a target with
 +        // an image of its own goes through the body below: bind its handle, ortho, one textured quad. Every call in it
 +        // already routes through the shim, so the composite is an ordinary streamed draw.
 +        if (this.backend != null && this.backend.isWindow()) { this.backend.render(width, height, p_178038_3_); return; }
-         if (OpenGlHelper.isFramebufferEnabled())
++        // Forge: an offscreen target's composite is the body below, and the backend is what decides that - not
++        // OpenGlHelper.isFramebufferEnabled(), which answers false on a non-GL backend because a *mod's* raw framebuffer
++        // has nowhere to go. Reading that answer here skipped the composite of every shader-group target: the entity
++        // outline's four passes ran, the silhouette was drawn into the target, and nothing ever reached the window.
++        if (this.backend != null || OpenGlHelper.isFramebufferEnabled())
          {
              GlStateManager.colorMask(true, true, true, false);
-@@ -265,6 +341,9 @@
+             GlStateManager.disableDepth();
+@@ -265,6 +348,9 @@
  
      public void framebufferClear()
      {
@@ -180,7 +193,7 @@
          this.bindFramebuffer(true);
          GlStateManager.clearColor(this.framebufferColor[0], this.framebufferColor[1], this.framebufferColor[2], this.framebufferColor[3]);
          int i = 16384;
-@@ -278,4 +357,46 @@
+@@ -278,4 +364,46 @@
          GlStateManager.clear(i);
          this.unbindFramebuffer();
      }

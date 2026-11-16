@@ -233,7 +233,8 @@ class FramebufferVkTest {
     }
 
     /** A target that records what was asked of it. */
-    private static final class FakeTarget implements RenderTarget {
+    /** Shared with {@link FramebufferCompositeTest}, which needs a device to composite a target's image. */
+    static final class FakeTarget implements RenderTarget {
         private final int id;
         private int width;
         private int height;

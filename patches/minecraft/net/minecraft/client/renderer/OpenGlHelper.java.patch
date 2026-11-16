@@ -419,9 +419,7 @@
      }
  
      public static boolean useVbo()
-@@ -628,8 +654,18 @@
-         return vboSupported && Minecraft.getMinecraft().gameSettings.useVbo;
-     }
+@@ -630,6 +656,16 @@
  
      public static void glBindFramebuffer(int target, int framebufferIn)
      {
@@ -438,9 +436,7 @@
          if (framebufferSupported)
          {
              switch (framebufferType)
-@@ -682,8 +718,14 @@
-         }
-     }
+@@ -684,6 +720,12 @@
  
      public static void glDeleteFramebuffers(int framebufferIn)
      {
@@ -453,9 +449,7 @@
          if (framebufferSupported)
          {
              switch (framebufferType)
-@@ -700,8 +742,18 @@
-         }
-     }
+@@ -702,6 +744,16 @@
  
      public static int glGenFramebuffers()
      {
@@ -472,9 +466,7 @@
          if (!framebufferSupported)
          {
              return -1;
-@@ -780,8 +832,14 @@
-         }
-     }
+@@ -782,6 +834,12 @@
  
      public static int glCheckFramebufferStatus(int target)
      {
@@ -487,9 +479,7 @@
          if (!framebufferSupported)
          {
              return -1;
-@@ -802,8 +860,13 @@
-         }
-     }
+@@ -804,6 +862,11 @@
  
      public static void glFramebufferTexture2D(int target, int attachment, int textarget, int texture, int level)
      {
@@ -501,9 +491,7 @@
          if (framebufferSupported)
          {
              switch (framebufferType)
-@@ -820,8 +883,16 @@
-         }
-     }
+@@ -822,6 +885,14 @@
  
      public static void setActiveTexture(int texture)
      {
@@ -559,9 +547,7 @@
          if (openGL14)
          {
              if (extBlendFuncSeparate)
-@@ -875,8 +962,14 @@
-         }
-     }
+@@ -877,6 +964,12 @@
  
      public static boolean isFramebufferEnabled()
      {
