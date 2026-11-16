@@ -53,8 +53,8 @@ public final class FrameDraws {
         private byte[] vertices;
         private byte[] ownedBuffer;
         private final DrawState state;
-        /** Whether this draw started a run of draws that differ only by texture; cleared when the draw is recycled. */
-        boolean textureOnlyRun;
+        /** Whether this draw continues a run of draws that differ only by texture; cleared when the draw is recycled. */
+        boolean textureOnlyContinues;
 
         public Draw() {
             this.state = new DrawState();
@@ -75,11 +75,11 @@ public final class FrameDraws {
             this.vertexCount = vertexCount;
             this.vertices = vertices;
             this.state.copyFrom(stateSource);
-            this.textureOnlyRun = false;
+            this.textureOnlyContinues = false;
         }
 
         public void set(VertexLayout layout, int mode, int vertexCount, ByteBuffer data, int bytes, DrawState stateSource) {
-            this.textureOnlyRun = false;
+            this.textureOnlyContinues = false;
             this.layout = layout;
             this.mode = mode;
             this.vertexCount = vertexCount;
@@ -344,15 +344,20 @@ public final class FrameDraws {
             // is what turns "batching would help" into a number: it is the set of draws one indirect submission could
             // replace if the texture were selected per draw rather than per bind.
             recordedDraws++;
-            if (previous != null && previous.state().sameAsExceptTexture(state)) {
+            // The flag goes on the *new* draw: a run is "this one continues the previous one", so the count of runs is
+            // the number of draws whose predecessor was not itself continuing. Marking the previous draw instead made
+            // every draw of a run look like the start of one, which is why the first measurement printed as many runs
+            // as draws.
+            boolean textureOnly = previous != null && previous.state().sameAsExceptTexture(state);
+            if (textureOnly) {
                 textureOnlyDraws++;
-                if (!previous.textureOnlyRun) {
-                    previous.textureOnlyRun = true;
+                if (!previous.textureOnlyContinues) {
                     textureOnlyRuns++;
                 }
             }
             Draw draw = obtainDraw();
             draw.set(layout, mode, vertexCount, data, bytes, state);
+            draw.textureOnlyContinues = textureOnly;
             ACTIVE_DRAWS.add(draw);
         }
         return true;
