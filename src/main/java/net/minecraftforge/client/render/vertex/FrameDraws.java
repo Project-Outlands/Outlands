@@ -53,6 +53,8 @@ public final class FrameDraws {
         private byte[] vertices;
         private byte[] ownedBuffer;
         private final DrawState state;
+        /** Whether this draw started a run of draws that differ only by texture; cleared when the draw is recycled. */
+        boolean textureOnlyRun;
 
         public Draw() {
             this.state = new DrawState();
@@ -73,9 +75,11 @@ public final class FrameDraws {
             this.vertexCount = vertexCount;
             this.vertices = vertices;
             this.state.copyFrom(stateSource);
+            this.textureOnlyRun = false;
         }
 
         public void set(VertexLayout layout, int mode, int vertexCount, ByteBuffer data, int bytes, DrawState stateSource) {
+            this.textureOnlyRun = false;
             this.layout = layout;
             this.mode = mode;
             this.vertexCount = vertexCount;
@@ -247,6 +251,23 @@ public final class FrameDraws {
     }
 
     private static final Object LOCK = new Object();
+
+    /** Consecutive draws that differ in nothing but their texture: the upper bound for a batched submission. */
+    private static long textureOnlyDraws;
+    private static long textureOnlyRuns;
+    private static long recordedDraws;
+
+    /**
+     * What a batched submission would collapse, as measured on the frames actually recorded.
+     *
+     * <p>Read by the renderer's periodic line so the answer to "is B4 worth building" comes from a running game rather
+     * than from a guess. A run is counted from its second draw, so {@code runs} is the number of submissions the
+     * batch would need where there are {@code draws} now.</p>
+     */
+    public static String batchingStats() {
+        return "draws " + recordedDraws + ", " + textureOnlyDraws + " of them differ from the previous draw in"
+                + " nothing but their texture (" + textureOnlyRuns + " runs)";
+    }
     private static final List<Operation> ACTIVE_DRAWS = new ArrayList<>(1024);
 
     /** The target the recorded operations currently draw into; {@code 0} is the window's image. */
@@ -318,6 +339,17 @@ public final class FrameDraws {
             if (vertexCount > 0 && previous != null && previous.mergeableWith(mode, layout, state)) {
                 previous.append(vertexCount, data, layout.stride());
                 return true;
+            }
+            // A draw that did not fold is either a real state change or only a different texture. Counting the second
+            // is what turns "batching would help" into a number: it is the set of draws one indirect submission could
+            // replace if the texture were selected per draw rather than per bind.
+            recordedDraws++;
+            if (previous != null && previous.state().sameAsExceptTexture(state)) {
+                textureOnlyDraws++;
+                if (!previous.textureOnlyRun) {
+                    previous.textureOnlyRun = true;
+                    textureOnlyRuns++;
+                }
             }
             Draw draw = obtainDraw();
             draw.set(layout, mode, vertexCount, data, bytes, state);

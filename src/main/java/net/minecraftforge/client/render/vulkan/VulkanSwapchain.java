@@ -527,7 +527,10 @@ final class VulkanSwapchain {
                 + copyOverBudget + " times, images " + VulkanImage.createdCount() + " created / "
                 + VulkanImage.destroyedCount() + " destroyed ("
                 + (VulkanImage.createdCount() - VulkanImage.destroyedCount()) + " live), "
-                + VulkanRenderTargets.stats();
+                + VulkanRenderTargets.stats() + ", "
+                // The measurement behind the batched-submission question: how much of what this session drew could be
+                // one indirect draw per run if the texture were chosen per draw instead of per bind.
+                + net.minecraftforge.client.render.vertex.FrameDraws.batchingStats();
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {
