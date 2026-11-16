@@ -49,15 +49,21 @@
              this.boundingBox = new AxisAlignedBB(x, y, z, x + 16, y + 16, z + 16);
  
              for (EnumFacing enumfacing : EnumFacing.values())
-@@ -154,6 +180,7 @@
+@@ -152,8 +178,13 @@
+             generator.getLock().unlock();
+         }
  
++        // Forge: the biome colours this build asks for are all inside this section, so they are computed once each
++        // instead of once per tinted quad. Cleared at the start of every build, which is the only time they can change.
++        net.minecraftforge.client.render.terrain.BiomeColorCache.beginBuild(this.worldView, blockpos.getX(), blockpos.getY(), blockpos.getZ());
++
          VisGraph lvt_9_1_ = new VisGraph();
          HashSet lvt_10_1_ = Sets.newHashSet();
 +        net.minecraftforge.client.render.culling.geometry.RenderableBounds renderableBounds = new net.minecraftforge.client.render.culling.geometry.RenderableBounds();
  
          if (!this.worldView.isEmpty())
          {
-@@ -171,27 +198,30 @@
+@@ -171,27 +202,30 @@
                      lvt_9_1_.setOpaqueCube(blockpos$mutableblockpos);
                  }
  
@@ -91,7 +97,7 @@
                  int j = blockrenderlayer1.ordinal();
  
                  if (block.getDefaultState().getRenderType() != EnumBlockRenderType.INVISIBLE)
-@@ -204,8 +234,14 @@
+@@ -204,8 +238,14 @@
                          this.preRenderBlocks(bufferbuilder, blockpos);
                      }
  
@@ -108,7 +114,7 @@
              }
  
              for (BlockRenderLayer blockrenderlayer : BlockRenderLayer.values())
-@@ -224,6 +260,30 @@
+@@ -224,7 +264,32 @@
              }
          }
  
@@ -137,9 +143,11 @@
 +        }
 +
          compiledchunk.setVisibility(lvt_9_1_.computeVisibility());
++        net.minecraftforge.client.render.terrain.BiomeColorCache.endBuild();
          this.lockCompileTask.lock();
  
-@@ -269,38 +329,40 @@
+         try
+@@ -269,38 +334,40 @@
      public ChunkCompileTaskGenerator makeCompileTaskChunk()
      {
          this.lockCompileTask.lock();
@@ -187,7 +195,7 @@
              {
                  if (this.compileTask != null && this.compileTask.getStatus() != ChunkCompileTaskGenerator.Status.DONE)
                  {
-@@ -312,11 +374,15 @@
+@@ -312,11 +379,15 @@
                  this.compileTask.setCompiledChunk(this.compiledChunk);
                  return this.compileTask;
              }
@@ -203,7 +211,7 @@
      }
  
      protected double getDistanceSq()
-@@ -393,6 +459,7 @@
+@@ -393,6 +464,7 @@
      {
          this.stopCompileTask();
          this.world = null;
@@ -211,7 +219,7 @@
  
          for (int i = 0; i < BlockRenderLayer.values().length; i++)
          {
-@@ -408,6 +475,26 @@
+@@ -408,6 +480,26 @@
          return this.position;
      }
  
@@ -238,7 +246,7 @@
      public void setNeedsUpdate(boolean immediate)
      {
          if (this.needsUpdate)
-@@ -434,6 +521,26 @@
+@@ -434,6 +526,26 @@
      {
          return this.needsUpdate && this.needsImmediateUpdate;
      }

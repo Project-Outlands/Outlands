@@ -181,10 +181,13 @@
              {
                  String s = textureatlassprite1.getIconName();
                  map.remove(s);
-@@ -197,31 +272,40 @@
+@@ -197,31 +272,43 @@
          {
              textureatlassprite2.copyFrom(this.missingImage);
          }
++        // Forge: the animated sprites are now final, so the index that maps a terrain quad back to its sprite can be
++        // built once for this atlas instead of per frame.
++        net.minecraftforge.client.render.terrain.AnimatedSpriteIndex.rebuild(this.listAnimatedSprites);
 +        net.minecraftforge.client.ForgeHooksClient.onTextureStitchedPost(this);
 +        net.minecraftforge.fml.common.ProgressManager.pop(bar);
      }
@@ -240,7 +243,21 @@
          }
  
          try
-@@ -295,7 +379,7 @@
+@@ -283,6 +370,13 @@
+ 
+         for (TextureAtlasSprite textureatlassprite : this.listAnimatedSprites)
+         {
++            // Forge: a sprite no visible terrain mesh sampled is not ticked. Sprites terrain never sampled answer
++            // true, so item models, particles and tile entity renderers are unaffected.
++            if (!textureatlassprite.outlandsShouldTick())
++            {
++                continue;
++            }
++
+             textureatlassprite.updateAnimation();
+         }
+     }
+@@ -295,7 +389,7 @@
          }
          else
          {
@@ -249,7 +266,7 @@
  
              if (textureatlassprite == null)
              {
-@@ -321,5 +405,53 @@
+@@ -321,5 +415,53 @@
      public TextureAtlasSprite getMissingSprite()
      {
          return this.missingImage;

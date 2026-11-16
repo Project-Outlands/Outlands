@@ -1,0 +1,38 @@
+--- before/net/minecraft/world/biome/BiomeColorHelper.java
++++ after/net/minecraft/world/biome/BiomeColorHelper.java
+@@ -35,19 +35,10 @@
+ 
+     private static int getColorAtPos(IBlockAccess blockAccess, BlockPos pos, BiomeColorHelper.ColorResolver colorResolver)
+     {
+-        int i = 0;
+-        int j = 0;
+-        int k = 0;
+-
+-        for (BlockPos.MutableBlockPos blockpos$mutableblockpos : BlockPos.getAllInBoxMutable(pos.add(-1, 0, -1), pos.add(1, 0, 1)))
+-        {
+-            int l = colorResolver.getColorAtPos(blockAccess.getBiome(blockpos$mutableblockpos), blockpos$mutableblockpos);
+-            i += (l & 0xFF0000) >> 16;
+-            j += (l & 0xFF00) >> 8;
+-            k += l & 0xFF;
+-        }
+-
+-        return (i / 9 & 0xFF) << 16 | (j / 9 & 0xFF) << 8 | k / 9 & 0xFF;
++        // Forge: a chunk build asks this once per tinted quad, and every call repeats the same nine biome samples for
++        // the same position. BiomeColorCache keeps one section's answers for the length of that build and computes
++        // outside it, so the answer is vanilla's arithmetic with the repeats removed.
++        return net.minecraftforge.client.render.terrain.BiomeColorCache.colorAtPos(blockAccess, pos, colorResolver);
+     }
+ 
+     public static int getGrassColorAtPos(IBlockAccess blockAccess, BlockPos pos)
+@@ -65,8 +56,10 @@
+         return getColorAtPos(blockAccess, pos, WATER_COLOR);
+     }
+ 
++    // Forge: widened from package-private so the per-section colour table can take one. Widening access cannot break
++    // a caller, and the alternative - keeping the cache in this package - would put renderer state inside vanilla's.
+     @SideOnly(Side.CLIENT)
+-    interface ColorResolver
++    public interface ColorResolver
+     {
+         int getColorAtPos(Biome biome, BlockPos blockPosition);
+     }

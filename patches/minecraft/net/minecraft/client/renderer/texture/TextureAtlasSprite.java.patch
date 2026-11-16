@@ -1,6 +1,23 @@
 --- before/net/minecraft/client/renderer/texture/TextureAtlasSprite.java
 +++ after/net/minecraft/client/renderer/texture/TextureAtlasSprite.java
-@@ -49,12 +49,10 @@
+@@ -18,6 +18,16 @@
+ @SideOnly(Side.CLIENT)
+ public class TextureAtlasSprite
+ {
++    /**
++     * Forge: whether a terrain mesh sampled this sprite since the last tick, and whether it ever has.
++     *
++     * <p>Two bits rather than a frame stamp because the answers are different: "seen recently" gates the tick, and
++     * "never seen at all" means this code has no opinion and vanilla's behaviour applies. See
++     * {@code net.minecraftforge.client.render.terrain.SpriteAnimationGate}.</p>
++     */
++    private boolean outlandsSpriteActive;
++    private boolean outlandsSpriteEverMarked;
++
+     private final String iconName;
+     protected List<int[][]> framesTextureData = Lists.newArrayList();
+     protected int[][] interpolatedFrameData;
+@@ -49,12 +59,10 @@
          this.originX = originInX;
          this.originY = originInY;
          this.rotated = rotatedIn;
@@ -17,10 +34,11 @@
      }
  
      public void copyFrom(TextureAtlasSprite atlasSpirit)
-@@ -421,4 +419,39 @@
+@@ -420,5 +428,64 @@
+                + ", v1="
                 + this.maxV
                 + '}';
-     }
++    }
 +
 +    /*===================================== FORGE START =====================================*/
 +    /**
@@ -56,4 +74,28 @@
 +    }
 +
 +    /*===================================== FORGE END ======================================*/
++
++    /** Forge: records that terrain drew this sprite. */
++    public void outlandsMarkActive()
++    {
++        this.outlandsSpriteActive = true;
++        this.outlandsSpriteEverMarked = true;
++    }
++
++    /**
++     * Forge: whether this sprite should be ticked now, consuming the mark.
++     *
++     * <p>A sprite nothing has ever marked is answered true, so every renderer that is not terrain keeps animating
++     * exactly as it did before.</p>
++     */
++    public boolean outlandsShouldTick()
++    {
++        if (this.outlandsSpriteActive)
++        {
++            this.outlandsSpriteActive = false;
++            return true;
++        }
++
++        return !this.outlandsSpriteEverMarked;
+     }
  }
