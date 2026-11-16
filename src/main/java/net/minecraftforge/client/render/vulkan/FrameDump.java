@@ -36,24 +36,68 @@ final class FrameDump {
 
     private FrameDump() {}
 
+    /**
+     * A file the user creates to dump the very next frame, whatever it contains and whenever it happens.
+     *
+     * <p>The automatic selection exists to find artifacts nobody knows how to reproduce; a question that already has a
+     * moment ("shoot the mob, then look") needs the opposite, and waiting for frame 120 to come round again is how a
+     * dump ends up showing the wrong second.</p>
+     */
+    private static final Path FORCE_FILE = Path.of("logs", "dump-now");
+    private static final int MAX_FORCED = 8;
+    private static int forced;
+
     static void maybeDump(List<FrameDraws.Operation> ops) {
         if (!ENABLED) {
             return;
         }
         frames++;
-        if (dumps >= MAX_DUMPS || frames % EVERY_FRAMES != 0) {
+        boolean requested = false;
+        if (Files.exists(FORCE_FILE) && forced < MAX_FORCED) {
+            requested = true;
+            forced++;
+            try {
+                Files.deleteIfExists(FORCE_FILE);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        } else if (dumps >= MAX_DUMPS || frames % EVERY_FRAMES != 0) {
             return;
         }
-        // Either a frame with a mod program in it (the model case), or one with a wide draw above the horizon (the
-        // floating black box case): both are artifacts that cannot be chased without knowing which draw made them.
-        boolean interesting = false;
+        if (!requested && !interesting(ops)) {
+            return;
+        }
+        if (!requested) {
+            dumps++;
+        }
+        StringBuilder out = new StringBuilder(1 << 16);
+        out.append("# frame ").append(frames).append(", ").append(ops.size()).append(" operations")
+                .append(requested ? " (requested)" : "").append('\n');
+        int index = 0;
+        for (FrameDraws.Operation op : ops) {
+            index = append(out, index, op);
+        }
+        try {
+            Files.writeString(Path.of("logs/outlands-frame-dump.txt"), out,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Whether a frame is worth dumping on its own.
+     *
+     * <p>Either a frame with a mod program in it (the model case), or one with a wide draw above the horizon (the
+     * floating black box case): both are artifacts that cannot be chased without knowing which draw made them.</p>
+     */
+    private static boolean interesting(List<FrameDraws.Operation> ops) {
         for (FrameDraws.Operation op : ops) {
             if (!(op instanceof FrameDraws.Draw draw)) {
                 continue;
             }
             if (draw.state().program() != null) {
-                interesting = true;
-                break;
+                return true;
             }
             float[] rect = rect(draw);
             if (rect == null) {
@@ -61,27 +105,26 @@ final class FrameDump {
             }
             // A wide flat thing above the horizon: the floating black box, which is a model part.
             if (rect[1] - rect[0] > 0.25F && rect[2] > 0.05F && rect[3] - rect[2] < 0.6F) {
-                interesting = true;
-                break;
+                return true;
             }
             // A small thing near the top left of the screen: the icon that sits at the same place in every screenshot,
             // which means it is drawn in screen space and something is placing it there.
             if (rect[0] > -0.45F && rect[1] < -0.15F && rect[2] > 0.7F && rect[3] < 1.0F) {
-                interesting = true;
-                break;
+                return true;
             }
         }
-        if (!interesting) {
-            return;
-        }
-        dumps++;
-        StringBuilder out = new StringBuilder(1 << 16);
-        out.append("# frame ").append(frames).append(", ").append(ops.size()).append(" operations\n");
-        int index = 0;
-        for (FrameDraws.Operation op : ops) {
-            if (!(op instanceof FrameDraws.Draw draw)) {
-                continue;
-            }
+        return false;
+    }
+
+    /**
+     * One line per operation: a draw in full, and everything else by what it does to the frame.
+     *
+     * <p><b>The non-draw lines are the point.</b> A frame that draws nothing into a target and one that draws into it
+     * and then composites it can look identical from the draw list alone, and "is the entity-outline chain running at
+     * all" is exactly that question: it is three target binds and two full-screen program quads, or it is nothing.</p>
+     */
+    private static int append(StringBuilder out, int index, FrameDraws.Operation op) {
+        if (op instanceof FrameDraws.Draw draw) {
             DrawState state = draw.state();
             VertexLayout layout = draw.layout();
             float[] mvp = state.mvp();
@@ -99,13 +142,28 @@ final class FrameDump {
                     .append(" v0=").append(firstVertex(draw))
                     .append(String.format(Locale.ROOT, " mvpT=(%.3f,%.3f,%.3f)", mvp[12], mvp[13], mvp[14]))
                     .append('\n');
+            return index;
         }
-        try {
-            Files.writeString(Path.of("logs/outlands-frame-dump.txt"), out,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        out.append(index++).append(' ');
+        switch (op) {
+            case FrameDraws.TargetBind bind -> out.append("bind target=").append(bind.target())
+                    .append(' ').append(bind.width()).append('x').append(bind.height())
+                    .append(bind.setViewport() ? " +viewport" : "");
+            case FrameDraws.Clear clear -> out.append("clear mask=0x").append(Integer.toHexString(clear.mask()))
+                    .append(String.format(Locale.ROOT, " color=(%.2f,%.2f,%.2f,%.2f) depth=%.3f stencil=%d",
+                            clear.color()[0], clear.color()[1], clear.color()[2], clear.color()[3],
+                            clear.depth(), clear.stencil()));
+            case FrameDraws.FramebufferCopy copy -> out.append("copy tex=").append(copy.texture())
+                    .append(" src=(").append(copy.x()).append(',').append(copy.y()).append(')')
+                    .append(' ').append(copy.width()).append('x').append(copy.height())
+                    .append(" dst=(").append(copy.xOffset()).append(',').append(copy.yOffset()).append(')');
+            case FrameDraws.ReadPixels read -> out.append("readpixels ").append(read.width()).append('x')
+                    .append(read.height()).append(" at (").append(read.x()).append(',').append(read.y()).append(')');
+            case FrameDraws.TerrainLayer layer -> out.append("terrain layer=").append(layer.layer())
+                    .append(" chunks=").append(layer.visibleChunks() == null ? 0 : layer.visibleChunks().size());
+            default -> out.append(op.getClass().getSimpleName());
         }
+        return index;
     }
 
     private static String bounds(FrameDraws.Draw draw) {
