@@ -35,6 +35,17 @@ class RasterOcclusionCullerTest {
 
     @Test
     void testPerspectiveOcclusionCulling() {
+        // The culler is off by default (measured to cost more than it culls), so the test has to turn it on: what it
+        // exercises is the culling, not the switch.
+        RasterOcclusionCuller.forceForTests(true);
+        try {
+            assertCulling();
+        } finally {
+            RasterOcclusionCuller.forceForTests(false);
+        }
+    }
+
+    private static void assertCulling() {
         RasterOcclusionCuller culler = new RasterOcclusionCuller();
 
         // Standard perspective projection matrix: 70 deg FOV, 1.0 aspect, 0.05 near, 500 far
