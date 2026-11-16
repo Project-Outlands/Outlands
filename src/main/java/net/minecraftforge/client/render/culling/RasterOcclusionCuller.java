@@ -25,7 +25,15 @@ public final class RasterOcclusionCuller extends BoxOccluder {
      * Switch for bisecting a rendering hole: when false, nothing is reported hidden, so the traversal submits every
      * section it reaches.
      */
-    private static final boolean ENABLED = !"false".equals(System.getProperty("outlands.cull.raster"));
+    /**
+     * Whether the CPU occluder runs. Off by default: measured at render distance 12 it made the visibility walk 1.8x
+     * slower (1.67 against 0.92 ms a walk) to cull 23 sections out of 741, and published only 19% fewer. The boxes it
+     * rasterises cost more than the sections it removes.
+     *
+     * <p>It is still worth having for a scene full of occluders - a cave, a dense build - so
+     * {@code -Doutlands.cull.raster=true} turns it back on, and the walk's line reports what it culled either way.</p>
+     */
+    private static final boolean ENABLED = Boolean.getBoolean("outlands.cull.raster");
 
     static {
         // One line at class load, so a log says which side of the switch it ran on. Without it an A/B cannot be read
