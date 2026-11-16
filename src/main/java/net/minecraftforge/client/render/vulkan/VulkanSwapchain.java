@@ -519,7 +519,12 @@ final class VulkanSwapchain {
      *
      * <p>Deliberately not behind a property. The numbers are four counters and the line is printed once.</p>
      */
+    /** The frame count the item probe's last report covered, so its figures can be per frame. */
+    private static long lastItemReportFrames;
+
     static String report() {
+        long itemFrames = framesRecorded - lastItemReportFrames;
+        lastItemReportFrames = framesRecorded;
         return "renderer: " + framesRecorded + " frames, at most " + maxInstances
                 + " rendering instances in a frame (" + maxBinds + " binds at most, " + maxSwitches
                 + " of them into a target),"
@@ -530,7 +535,10 @@ final class VulkanSwapchain {
                 + VulkanRenderTargets.stats() + ", "
                 // The measurement behind the batched-submission question: how much of what this session drew could be
                 // one indirect draw per run if the texture were chosen per draw instead of per bind.
-                + net.minecraftforge.client.render.vertex.FrameDraws.batchingStats();
+                + net.minecraftforge.client.render.vertex.FrameDraws.batchingStats() + ", "
+                // And the one behind the item display-list question: what item rendering costs on the screen the
+                // player is on right now. Reset per line, so the figure is "since the last report".
+                + net.minecraftforge.client.render.probe.ItemRenderProbe.reportAndReset(itemFrames);
     }
 
     private void record(VkCommandBuffer commandBuffer, int imageIndex, int slot, MemoryStack stack) {

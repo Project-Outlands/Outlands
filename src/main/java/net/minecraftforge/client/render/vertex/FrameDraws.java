@@ -355,6 +355,9 @@ public final class FrameDraws {
                     textureOnlyRuns++;
                 }
             }
+            if (net.minecraftforge.client.render.probe.ItemRenderProbe.active()) {
+                net.minecraftforge.client.render.probe.ItemRenderProbe.countDraw();
+            }
             Draw draw = obtainDraw();
             draw.set(layout, mode, vertexCount, data, bytes, state);
             draw.textureOnlyContinues = textureOnly;
