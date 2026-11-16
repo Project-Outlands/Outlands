@@ -10,3 +10,24 @@
      private final Map < Class<?>, List<T >> map = Maps.newHashMap();
      private final Set < Class<? >> knownKeys = Sets.newIdentityHashSet();
      private final Class<T> baseClass;
+@@ -145,6 +146,20 @@
+     public Iterator<T> iterator()
+     {
+         return this.values.isEmpty() ? Collections.emptyIterator() : Iterators.unmodifiableIterator(this.values.iterator());
++    }
++
++    /**
++     * Forge: walks the backing list instead of going through {@link #iterator()}.
++     *
++     * <p>Inherited from {@code AbstractSet}, this allocated three objects per call - the set's iterator, the
++     * unmodifiable wrapper and the list's iterator - and a chunk's entity list is walked several times a frame by
++     * {@code getEntitiesWithinAABB} and the entity renderer. The list's own {@code forEach} walks the same elements in
++     * the same order and fails the same way on concurrent modification, so nothing observable changes.</p>
++     */
++    @Override
++    public void forEach(java.util.function.Consumer<? super T> action)
++    {
++        this.values.forEach(action);
+     }
+ 
+     @Override

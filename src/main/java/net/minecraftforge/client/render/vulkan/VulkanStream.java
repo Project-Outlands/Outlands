@@ -138,8 +138,6 @@ final class VulkanStream implements AutoCloseable {
     private VulkanPipeline.PipelineState cachedPipelineState;
     private VulkanPipeline cachedPipeline;
 
-    private ByteBuffer hostVboStaging;
-    private java.nio.IntBuffer hostIboStaging;
     private final float[] lastPushedMvp = new float[16];
     private float lastPushedAlphaRef = -1.0F;
     private float lastPushedAlphaTest = -1.0F;
@@ -299,33 +297,23 @@ final class VulkanStream implements AutoCloseable {
         int totalVertexBytes = totalVertices * VertexConverter.STRIDE;
         int totalIndexBytes = totalIndices * Integer.BYTES;
 
+        // The geometry is written straight into the buffers the draws read from. They are host-visible and coherent
+        // (VulkanBuffer refuses any memory type that is not), so a write here is visible to the device at submit and
+        // there is nothing to flush. Writing through a scratch buffer first would copy every vertex byte twice for
+        // nothing - the staging pass this replaced did exactly that, and it was measurable at a few hundred kilobytes
+        // per frame. The views are taken after ensureCapacity because that may reallocate and move the mapping.
+        ByteBuffer targetVbo = null;
+        java.nio.IntBuffer targetIbo = null;
         if (totalVertexBytes > 0) {
             vertexBuffers[slot].ensureCapacity(totalVertexBytes);
-            if (hostVboStaging == null || hostVboStaging.capacity() < totalVertexBytes) {
-                if (hostVboStaging != null) {
-                    org.lwjgl.system.MemoryUtil.memFree(hostVboStaging);
-                }
-                int newCap = Math.max(totalVertexBytes, 1024 * 1024);
-                hostVboStaging = org.lwjgl.system.MemoryUtil.memAlloc(newCap).order(java.nio.ByteOrder.nativeOrder());
-            }
-            hostVboStaging.position(0);
-            hostVboStaging.limit(totalVertexBytes);
+            targetVbo = org.lwjgl.system.MemoryUtil.memByteBuffer(
+                    vertexBuffers[slot].mappedAddress(), (int) vertexBuffers[slot].size());
         }
         if (totalIndexBytes > 0) {
             indexBuffers[slot].ensureCapacity(totalIndexBytes);
-            if (hostIboStaging == null || hostIboStaging.capacity() < totalIndices) {
-                if (hostIboStaging != null) {
-                    org.lwjgl.system.MemoryUtil.memFree(hostIboStaging);
-                }
-                int newCap = Math.max(totalIndices, 256 * 1024);
-                hostIboStaging = org.lwjgl.system.MemoryUtil.memAllocInt(newCap);
-            }
-            hostIboStaging.position(0);
-            hostIboStaging.limit(totalIndices);
+            targetIbo = org.lwjgl.system.MemoryUtil.memIntBuffer(
+                    indexBuffers[slot].mappedAddress(), (int) (indexBuffers[slot].size() / Integer.BYTES));
         }
-
-        ByteBuffer targetVbo = hostVboStaging;
-        java.nio.IntBuffer targetIbo = hostIboStaging;
 
         int currentVertexOffset = 0;
         int currentIndexOffset = 0;
@@ -340,6 +328,12 @@ final class VulkanStream implements AutoCloseable {
         for (int i = 0; i < draws.size(); i++) {
             FrameDraws.Draw draw = draws.get(i);
             offsets[i] = currentVertexOffset;
+            if (draw.vertexCount() <= 0) {
+                // A draw the game issued with nothing in it: there is no geometry to convert and the buffer views
+                // below are only created when some draw has vertices. Issuing it is still correct - a draw of zero
+                // vertices is legal and does nothing - so only the conversion is skipped.
+                continue;
+            }
             DrawState ds = draw.state();
             VertexConverter.convert(draw.vertices(),
                     draw.layout(), draw.vertexCount(), ds.colorArgb(), ds.lightmap(),
@@ -363,21 +357,6 @@ final class VulkanStream implements AutoCloseable {
                     currentIndexOffset += shape.indexCount(draw.vertexCount());
                 }
             }
-        }
-
-        if (totalVertexBytes > 0) {
-            hostVboStaging.position(0);
-            org.lwjgl.system.MemoryUtil.memCopy(
-                    org.lwjgl.system.MemoryUtil.memAddress0(hostVboStaging),
-                    vertexBuffers[slot].mappedAddress(),
-                    totalVertexBytes);
-        }
-        if (totalIndexBytes > 0) {
-            hostIboStaging.position(0);
-            org.lwjgl.system.MemoryUtil.memCopy(
-                    org.lwjgl.system.MemoryUtil.memAddress0(hostIboStaging),
-                    indexBuffers[slot].mappedAddress(),
-                    totalIndexBytes);
         }
 
         for (int i = 0; i < draws.size(); i++) {
@@ -1078,14 +1057,6 @@ final class VulkanStream implements AutoCloseable {
 
     @Override
     public void close() {
-        if (hostVboStaging != null) {
-            org.lwjgl.system.MemoryUtil.memFree(hostVboStaging);
-            hostVboStaging = null;
-        }
-        if (hostIboStaging != null) {
-            org.lwjgl.system.MemoryUtil.memFree(hostIboStaging);
-            hostIboStaging = null;
-        }
         if (staticQuadIndexBuffer != null) {
             staticQuadIndexBuffer.close();
         }
