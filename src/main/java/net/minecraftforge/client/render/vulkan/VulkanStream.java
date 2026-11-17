@@ -277,6 +277,7 @@ final class VulkanStream implements AutoCloseable {
 
     void replay(VkCommandBuffer commandBuffer, List<FrameDraws.Operation> ops, int slot, int viewportWidth,
                 int viewportHeight, FrameRenderTarget windowTarget) {
+        replays++;
         draws.clear();
         for (int i = 0; i < ops.size(); i++) {
             if (ops.get(i) instanceof FrameDraws.Draw d) {
@@ -319,6 +320,11 @@ final class VulkanStream implements AutoCloseable {
             targetIbo = org.lwjgl.system.MemoryUtil.memIntBuffer(
                     indexBuffers[slot].mappedAddress(), (int) (indexBuffers[slot].size() / Integer.BYTES));
         }
+
+        // Temporary: the replay's per-vertex work, timed apart from the per-draw commands. One of the two is where
+        // a frame full of entities goes, and which one decides what to do about it.
+        long convertStartedAt = System.nanoTime();
+        convertedVertices += totalVertices;
 
         int currentVertexOffset = 0;
         int currentIndexOffset = 0;
@@ -364,6 +370,8 @@ final class VulkanStream implements AutoCloseable {
             }
         }
 
+        convertNanos += System.nanoTime() - convertStartedAt;
+
         for (int i = 0; i < draws.size(); i++) {
             DrawState state = draws.get(i).state();
             // A draw with texturing disabled samples nothing: GL replaces the sample with white and takes the colour
@@ -374,6 +382,7 @@ final class VulkanStream implements AutoCloseable {
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             if (totalVertexBytes > 0) {
+                callsVertexBind++;
                 vkCmdBindVertexBuffers(commandBuffer, 0, stack.longs(vertexBuffers[slot].handle()), stack.longs(0L));
             }
 
@@ -664,6 +673,7 @@ final class VulkanStream implements AutoCloseable {
                 if (textureSets[indexOfOp] != boundSet || streamSetsStale) {
                     // Both of the stream's sets, together: set 1 is the lightmap and a program draw may have replaced
                     // it since this was last bound.
+                    callsDescriptor++;
                     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0,
                             stack.longs(textureSets[indexOfOp], descriptors.lightmapSet(slot)), null);
                     boundSet = textureSets[indexOfOp];
@@ -687,13 +697,16 @@ final class VulkanStream implements AutoCloseable {
             boolean staticQuad = isStaticQuad(shape, draw.vertexCount());
             long neededIndexBuffer = staticQuad ? staticQuadIndexBuffer.handle() : indexBuffers[slot].handle();
             if (boundIndexBuffer != neededIndexBuffer) {
+                callsIndexBind++;
                 vkCmdBindIndexBuffer(commandBuffer, neededIndexBuffer, 0L,
                         org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT32);
                 boundIndexBuffer = neededIndexBuffer;
             }
+            callsDraw++;
             vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffset,
                     vertexOffset / VertexConverter.STRIDE, firstInstance);
         } else {
+            callsDraw++;
             vkCmdDraw(commandBuffer, draw.vertexCount(), 1, vertexOffset / VertexConverter.STRIDE, firstInstance);
         }
     }
@@ -855,6 +868,7 @@ final class VulkanStream implements AutoCloseable {
         packConstants(constants, 0, push, state);
         constants.position(0);
         constants.limit(VulkanPipeline.PUSH_CONSTANT_BYTES);
+        callsPush++;
         vkCmdPushConstants(commandBuffer, layout,
                 org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT
                         | org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -934,14 +948,74 @@ final class VulkanStream implements AutoCloseable {
     }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {
+        // Temporary: a new state means a new shader compile and a new pipeline object, and both are the kind of cost
+        // that shows up as "the first seconds of a world are slow". Counted so it can be ruled in or out.
         VulkanPipeline existing = pipelines.get(state);
         if (existing != null) {
             return existing;
         }
+        long startedAt = System.nanoTime();
         VulkanPipeline created = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
                 descriptors.pipelineLayout(), descriptors.layout(), state);
+        pipelineNanos += System.nanoTime() - startedAt;
+        pipelineCreations++;
         pipelines.put(state, created);
         return created;
+    }
+
+    private static long pipelineNanos;
+    private static int pipelineCreations;
+
+    /**
+     * Temporary: the native calls one replay makes, per kind.
+     *
+     * <p>The replay costs 3-4 us a draw and only a couple of those calls are per draw, so the question is which ones
+     * and how many. Push constants is the suspect: every entity part has its own model-view matrix, so the elision
+     * that skips an unchanged push never fires for them.</p>
+     */
+    private static int replays;
+    private static int callsPush;
+    private static int callsDescriptor;
+    private static int callsIndexBind;
+    private static int callsVertexBind;
+    private static int callsDraw;
+    private static long convertNanos;
+    private static long convertedVertices;
+
+    /** The native calls the replay makes per frame, by kind. */
+    public static String callReport() {
+        int n = Math.max(1, replays);
+        String report = String.format(java.util.Locale.ROOT,
+                "%d push, %d descriptor, %d vertex bind, %d index bind, %d draw a frame",
+                callsPush / n, callsDescriptor / n, callsVertexBind / n, callsIndexBind / n, callsDraw / n);
+        replays = 0;
+        callsPush = 0;
+        callsDescriptor = 0;
+        callsVertexBind = 0;
+        callsIndexBind = 0;
+        callsDraw = 0;
+        return report;
+    }
+
+    /** How long the replay spent converting vertices, and how many it converted. */
+    public static String convertReport() {
+        String report = String.format(java.util.Locale.ROOT, "%.2f", convertNanos / 1_000_000.0)
+                + " ms for " + convertedVertices + " vertices";
+        if (convertedVertices > 0) {
+            report += String.format(java.util.Locale.ROOT, " (%.0f ns each)", convertNanos / (double) convertedVertices);
+        }
+        convertNanos = 0;
+        convertedVertices = 0;
+        return report;
+    }
+
+    /** How many pipelines the frame path has built, and how long that took. */
+    public static String pipelineReport() {
+        String report = pipelineCreations + " created in "
+                + String.format(java.util.Locale.ROOT, "%.1f", pipelineNanos / 1_000_000.0) + " ms";
+        pipelineCreations = 0;
+        pipelineNanos = 0;
+        return report;
     }
 
     /** The lightmap image the shared set 1 currently points at per slot. */

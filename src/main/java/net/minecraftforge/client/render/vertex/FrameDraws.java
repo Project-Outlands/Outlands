@@ -308,6 +308,35 @@ public final class FrameDraws {
         if (!collecting) {
             return false;
         }
+        // Temporary: this half runs inside the game's frame, not inside the renderer's recording, so nothing else
+        // measures it. It copies every vertex byte the game produced into the draw list, which is why it is worth a
+        // number before anything is moved to another thread.
+        long startedAt = System.nanoTime();
+        try {
+            return recordDraw(layout, mode, vertexCount, data, state);
+        } finally {
+            collectNanos += System.nanoTime() - startedAt;
+            collectBytes += (long) vertexCount * layout.stride();
+            collectDraws++;
+        }
+    }
+
+    private static long collectNanos;
+    private static long collectBytes;
+    private static int collectDraws;
+
+    /** What collecting the frame's draws cost, and how many bytes it copied. */
+    public static String collectReport() {
+        String report = String.format(java.util.Locale.ROOT, "%.2f ms for %d KB in %d draws",
+                collectNanos / 1_000_000.0, collectBytes >> 10, collectDraws);
+        collectNanos = 0;
+        collectBytes = 0;
+        collectDraws = 0;
+        return report;
+    }
+
+    private static boolean recordDraw(VertexLayout layout, int mode, int vertexCount, ByteBuffer data,
+                                      DrawState state) {
         int bytes = vertexCount * layout.stride();
         if (data.limit() < bytes) {
             throw new IllegalArgumentException("a draw of " + vertexCount + " vertices at stride " + layout.stride()

@@ -327,6 +327,7 @@ final class VulkanSwapchain {
     }
 
     void drawFrame(long window) {
+        FrameTiming.begin();
         if (!outOfDate && windowSizeChanged()) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
             // window is compared against the swapchain rather than waiting for the driver to complain.
@@ -342,6 +343,7 @@ final class VulkanSwapchain {
 
         final int frame = frameIndex;
         VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
+        FrameTiming.afterWait();
         // This slot's work has finished, so the staging buffers its recorded texture copies read from are free.
         // Released here rather than inside the stream's replay because the graph's nodes run before it and upload
         // through the same cache: freeing them at replay time would free the copy the node recorded moments earlier.
@@ -351,6 +353,7 @@ final class VulkanSwapchain {
         if (stream != null) {
             stream.prepareFrame(frame);
         }
+        FrameTiming.afterPrepare();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer imageIndexOut = stack.mallocInt(1);
@@ -364,6 +367,7 @@ final class VulkanSwapchain {
                 throw new VkCheck.VulkanException("vkAcquireNextImageKHR returned " + acquire);
             }
             final int imageIndex = imageIndexOut.get(0);
+            FrameTiming.afterAcquire();
             if (acquire == VK_SUBOPTIMAL_KHR) {
                 // Presentable, but stretched or otherwise not matching the surface. Rebuild after this frame.
                 outOfDate = true;
@@ -371,6 +375,7 @@ final class VulkanSwapchain {
 
             VkCheck.check(vkResetFences(device, fences[frame]), "vkResetFences");
             record(commandBuffers[frame], imageIndex, frame, stack);
+            FrameTiming.afterRecord();
             submit(frame, imageIndex, stack);
             present(imageIndex, stack);
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
@@ -379,6 +384,7 @@ final class VulkanSwapchain {
             finishReads(frame);
         }
 
+        FrameTiming.end();
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
     }
 
@@ -531,6 +537,25 @@ final class VulkanSwapchain {
     }
 
     /**
+     * Where a frame's time goes, on one line so it is one line to delete.
+     *
+     * <p>CPU time per frame in segments (whether the CPU has headroom at all, and whether the GPU is making it wait),
+     * the replay's per-vertex conversion against the rest of it, pipeline creation, and what the chunk-mesh capture
+     * costs on the render thread.</p>
+     */
+    private static String probeReport() {
+        return "probe: cpu " + FrameTiming.reportAndReset()
+                + ", replay " + net.minecraftforge.client.render.vulkan.VulkanStream.convertReport()
+                + ", calls " + net.minecraftforge.client.render.vulkan.VulkanStream.callReport()
+                + ", collect " + net.minecraftforge.client.render.vertex.FrameDraws.collectReport()
+                + ", pipelines " + net.minecraftforge.client.render.vulkan.VulkanStream.pipelineReport()
+                + ", chunk capture " + net.minecraftforge.client.render.ChunkMeshCapture.captureReport()
+                // A figure taken through the validation layer is a figure about the layer, so the line says which
+                // mode it was taken in.
+                + ", validation " + (VulkanContext.validationActive() ? "ON (figures are about the layer)" : "off");
+    }
+
+    /**
      * The visibility walk's figures, but only when its probe is switched on.
      *
      * <p>Every question this renderer answered was measured the same way and the answer written down; the line keeps
@@ -551,6 +576,7 @@ final class VulkanSwapchain {
         int binds = 0;
         int switches = 0;
         int copyOps = 0;
+        FrameTiming.draws(pendingDraws.size());
         for (net.minecraftforge.client.render.vertex.FrameDraws.Operation op : pendingDraws) {
             if (op instanceof net.minecraftforge.client.render.vertex.FrameDraws.TargetBind bind) {
                 binds++;
@@ -583,6 +609,7 @@ final class VulkanSwapchain {
                 node.bindTextures(stream.descriptorSetOf(node.requestedTexture()));
             }
         }
+        FrameTiming.afterTextures();
 
         // Both attachments start undefined: nothing from a previous frame is needed, so the barriers only move
         // layouts and do not have to make anything available.
@@ -687,9 +714,15 @@ final class VulkanSwapchain {
         // often. A run that is killed rather than closed still reports, and a budget that starts being exceeded is
         // visible while the session is still going.
         long now = System.nanoTime();
+        if (lastReportAt == 0L) {
+            // The first report is due fifteen seconds after the first frame, not immediately: a report on frame one
+            // covers nothing and prints a line of zeroes that reads like a measurement.
+            lastReportAt = now;
+        }
         if (now - lastReportAt >= 15_000_000_000L) {
             lastReportAt = now;
             LOGGER.info("{}", report());
+            LOGGER.info("{}", probeReport());
         }
     }
 

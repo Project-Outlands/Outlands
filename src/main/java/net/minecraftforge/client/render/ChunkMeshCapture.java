@@ -63,6 +63,11 @@ public final class ChunkMeshCapture {
     /** Incremental capture event queue consumed by the render thread. */
     private static final Queue<CaptureEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<>();
 
+    /** Temporary: what the capture costs on the thread that runs it, and how much of it there is. */
+    private static long captureNanos;
+    private static long captureQuads;
+    private static int captureCount;
+
     private static final AtomicLong captured = new AtomicLong();
     private static final AtomicLong dropped = new AtomicLong();
 
@@ -291,8 +296,34 @@ public final class ChunkMeshCapture {
         if (!enabled) {
             return false;
         }
+        // Temporary: this runs on the render thread, from updateChunks, while the tessellation that produced the
+        // buffer already ran on a chunk worker. The figure says whether moving the rest is worth anything.
+        long startedAt = System.nanoTime();
+        boolean result = captureMesh(layer, buffer, chunk, compiled);
+        captureNanos += System.nanoTime() - startedAt;
+        return result;
+    }
+
+    /** The capture's figures since the last report, and a reset. */
+    public static String captureReport() {
+        if (captureCount == 0) {
+            return "no meshes";
+        }
+        String report = captureCount + " meshes, " + captureQuads + " quads, "
+                + String.format(java.util.Locale.ROOT, "%.2f", captureNanos / 1_000_000.0)
+                + " ms on the render thread";
+        captureNanos = 0;
+        captureQuads = 0;
+        captureCount = 0;
+        return report;
+    }
+
+    private static boolean captureMesh(BlockRenderLayer layer, BufferBuilder buffer, RenderChunk chunk,
+                                       CompiledChunk compiled) {
         try {
             int quadCount = buffer.getVertexCount() / 4;
+            captureCount++;
+            captureQuads += quadCount;
             int chunkX = chunk.getPosition().getX();
             int chunkY = chunk.getPosition().getY();
             int chunkZ = chunk.getPosition().getZ();
