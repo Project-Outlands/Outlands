@@ -21,11 +21,23 @@ public final class TerrainCullProbe {
      */
     private static volatile boolean enabled = Boolean.getBoolean("outlands.probe.cull");
 
+    /**
+     * Forced-walk mode, for a measurement that cannot be taken while moving.
+     *
+     * <p><b>Why it is needed.</b> The walk runs only when vanilla's dirty flag says the camera moved or turned, and
+     * the walk clears that flag itself. An interval report taken while flying therefore averages over a different
+     * pose in every sample, so two runs of the same build can disagree by a factor and two different builds can never
+     * be compared at the same one. Forcing the flag makes a still camera walk once a frame: the same sections, from
+     * the same position, over and over, which is what turns the figure into a measurement.</p>
+     */
+    private static final boolean FORCE = Boolean.getBoolean("outlands.probe.cull.force");
+
     private static long startedAt;
     private static long nanos;
     private static long walkStartedAt;
     private static long walkNanos;
     private static long walkMaxNanos;
+    private static long seedNanos;
     private static long walks;
     private static long frames;
     private static long resultSize;
@@ -77,7 +89,17 @@ public final class TerrainCullProbe {
     public static void beginWalk() {
         if (enabled) {
             walkStartedAt = System.nanoTime();
+            // Everything before the loop is the seed, and the seed is where the fixed cost lives: vanilla searched
+            // the camera's whole section for it, so it was paid once a walk regardless of how much there was to walk.
+            // Kept apart from the loop's figure because a per-section average divides a fixed cost by an unrelated
+            // number.
+            seedNanos += walkStartedAt - startedAt;
         }
+    }
+
+    /** Whether the walk should be forced every call, so it can be measured without moving. */
+    public static boolean forceWalk() {
+        return enabled && FORCE;
     }
 
     /** Ends the traversal loop's timing. */
@@ -122,10 +144,15 @@ public final class TerrainCullProbe {
         String report = "terrain cull: walk " + oneDecimal(walkNanos / 1_000_000.0 / Math.max(1, walks))
                 + " ms/walk (worst " + oneDecimal(walkMaxNanos / 1_000_000.0) + ", " + walks + " walks in "
                 + frames + " calls), "
-                + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + "),"
-                + " published " + (long) (published / Math.max(1, walks)) + " (at most " + maxResultSize + ")";
+                // The two halves, because they scale with different things and the seed is a fixed cost: comparing
+                // runs at different section counts is what a single ms/walk figure cannot do.
+                + oneDecimal(walkNanos / 1000.0 / Math.max(1, visited)) + " us/section on "
+                + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + "), "
+                + "seed " + oneDecimal(seedNanos / 1000.0 / Math.max(1, walks)) + " us/walk"
+                + ", published " + (long) (published / Math.max(1, walks)) + " (at most " + maxResultSize + ")";
         walkNanos = 0;
         walkMaxNanos = 0;
+        seedNanos = 0;
         walks = 0;
         nanos = 0;
         frames = 0;

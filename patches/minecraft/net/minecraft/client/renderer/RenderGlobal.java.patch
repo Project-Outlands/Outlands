@@ -216,18 +216,20 @@
 +                for (int eIdx = 0; eIdx < entityCount; eIdx++)
                  {
 -                    for (Entity entity2 : classinheritancemultimap)
+-                    {
+-                        boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
+-
+-                        if (flag)
 +                    Entity entity2 = list.get(eIdx);
 +                    if (!entity2.shouldRenderInPass(pass)) continue;
 +                    boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
 +
 +                    if (flag)
-                     {
--                        boolean flag = this.renderManager.shouldRender(entity2, camera, d0, d1, d2) || entity2.isRidingOrBeingRiddenBy(this.mc.player);
++                    {
 +                        boolean flag1 = this.mc.getRenderViewEntity() instanceof EntityLivingBase
 +                                        ? ((EntityLivingBase)this.mc.getRenderViewEntity()).isPlayerSleeping()
 +                                        : false;
- 
--                        if (flag)
++
 +                        if ((entity2 != this.mc.getRenderViewEntity() || this.mc.gameSettings.thirdPersonView != 0 || flag1)
 +                                && (
 +                                    !(entity2.posY >= 0.0)
@@ -256,13 +258,12 @@
 -                                    list1.add(entity2);
 +                                    continue;
                                  }
--
--                                if (this.renderManager.isRenderMultipass(entity2))
 +                            }
 +
 +                            this.countEntitiesRendered++;
 +                            this.renderManager.renderEntityStatic(entity2, partialTicks, false);
-+
+ 
+-                                if (this.renderManager.isRenderMultipass(entity2))
 +                            if (this.isOutlineActive(entity2, entity, camera))
 +                            {
 +                                list1.add(entity2);
@@ -389,7 +390,20 @@
          if (this.mc.gameSettings.renderDistanceChunks != this.renderDistanceChunks)
          {
              this.loadRenderers();
-@@ -903,15 +1087,19 @@
+@@ -891,7 +1075,11 @@
+                               || viewEntity.posY != this.lastViewEntityY
+                               || viewEntity.posZ != this.lastViewEntityZ
+                               || viewEntity.rotationPitch != this.lastViewEntityPitch
+-                              || viewEntity.rotationYaw != this.lastViewEntityYaw;
++                              || viewEntity.rotationYaw != this.lastViewEntityYaw
++                              // Forge: the walk normally needs the camera to move, which means an interval report
++                              // averages over a different pose every sample. Forced, a still camera walks once a
++                              // frame, so the probe measures one pose instead of a flight path.
++                              || net.minecraftforge.client.render.probe.TerrainCullProbe.forceWalk();
+         this.lastViewEntityX = viewEntity.posX;
+         this.lastViewEntityY = viewEntity.posY;
+         this.lastViewEntityZ = viewEntity.posZ;
+@@ -903,15 +1091,19 @@
          if (!flag && this.displayListEntitiesDirty)
          {
              this.displayListEntitiesDirty = false;
@@ -412,7 +426,7 @@
                      renderchunk, null, 0
                  );
                  Set<EnumFacing> set1 = this.getVisibleFacings(blockpos1);
-@@ -946,51 +1134,82 @@
+@@ -946,51 +1138,82 @@
              else
              {
                  int i = blockpos1.getY() > 0 ? 248 : 8;
@@ -473,13 +487,14 @@
 -                            && renderchunk2 != null
 -                            && renderchunk2.setFrameIndex(frameCount)
 -                            && camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
-+                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1)))
-                     {
+-                    {
 -                        RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = new RenderGlobal.ContainerLocalRenderInformation(
 -                            renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
 -                        );
 -                        renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
 -                        queue.add(renderglobal$containerlocalrenderinformation);
++                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1)))
++                    {
 +                        RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
 +
 +                        if (renderchunk2 != null && renderchunk2.setFrameIndex(frameCount))
@@ -511,7 +526,7 @@
          }
  
          this.mc.profiler.endStartSection("captureFrustum");
-@@ -1002,35 +1221,58 @@
+@@ -1002,35 +1225,58 @@
          }
  
          this.mc.profiler.endStartSection("rebuildNear");
@@ -579,7 +594,7 @@
      }
  
      private Set<EnumFacing> getVisibleFacings(BlockPos pos)
-@@ -1153,24 +1395,36 @@
+@@ -1153,24 +1399,36 @@
  
          this.mc.profiler.startSection("filterempty");
          int l = 0;
@@ -589,13 +604,10 @@
 -        int j1 = flag ? -1 : 1;
 -
 -        for (int j = i1; j != i; j += j1)
--        {
--            RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
--
--            if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
 +        it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks = null;
 +        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
-+        {
+         {
+-            RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
 +            visibleChunks = net.minecraftforge.client.render.state.backend.FrameStates.getLayerChunkList(blockLayerIn.ordinal());
 +            l = visibleChunks != null ? visibleChunks.size() : 0;
 +        }
@@ -605,7 +617,8 @@
 +            int i1 = flag ? this.renderInfos.size() - 1 : 0;
 +            int i = flag ? -1 : this.renderInfos.size();
 +            int j1 = flag ? -1 : 1;
-+
+ 
+-            if (!renderchunk.getCompiledChunk().isLayerEmpty(blockLayerIn))
 +            for (int j = i1; j != i; j += j1)
              {
 -                l++;
@@ -629,7 +642,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1432,18 @@
+@@ -1178,6 +1436,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -648,7 +661,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1457,14 @@
+@@ -1191,7 +1461,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -664,7 +677,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1591,13 @@
+@@ -1318,6 +1595,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -678,7 +691,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1780,21 @@
+@@ -1500,22 +1784,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -709,7 +722,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1824,7 @@
+@@ -1545,6 +1828,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -717,7 +730,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1864,13 @@
+@@ -1584,14 +1868,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -735,7 +748,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2239,8 @@
+@@ -1960,8 +2243,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -746,7 +759,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2274,8 @@
+@@ -1995,8 +2278,8 @@
                  }
              }
  
@@ -757,7 +770,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2329,7 @@
+@@ -2050,7 +2333,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -766,7 +779,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2369,13 @@
+@@ -2090,8 +2373,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -781,7 +794,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2635,11 @@
+@@ -2351,9 +2639,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -796,7 +809,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +3108,7 @@
+@@ -2822,7 +3112,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -805,7 +818,7 @@
                      this.world
                      .playSound(
                          blockPosIn,
-@@ -3038,16 +3324,22 @@
+@@ -3038,16 +3328,22 @@
      @SideOnly(Side.CLIENT)
      class ContainerLocalRenderInformation
      {
