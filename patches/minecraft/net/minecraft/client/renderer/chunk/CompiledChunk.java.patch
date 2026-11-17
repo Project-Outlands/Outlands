@@ -15,10 +15,21 @@
  
      public boolean isEmpty()
      {
-@@ -91,5 +99,17 @@
-     public void setState(BufferBuilder.State stateIn)
+@@ -92,4 +100,28 @@
      {
          this.state = stateIn;
+     }
++
++    /** Forge: the faces reachable when entered through {@code from}, as {@link net.minecraft.util.EnumFacing} ordinal bits. */
++    public int outlandsVisibleOutOf(int from)
++    {
++        return this.setVisibility.outlandsVisibleOutOf(from);
++    }
++
++    /** Forge: every face that any air region in this section touches, as ordinal bits. */
++    public int outlandsVisibleFromAnyFace()
++    {
++        return this.setVisibility.outlandsVisibleFromAnyFace();
 +    }
 +
 +    /** Forge: records a sprite this chunk's geometry samples. */
@@ -31,5 +42,5 @@
 +    public java.util.Set<net.minecraft.client.renderer.texture.TextureAtlasSprite> outlandsSprites()
 +    {
 +        return this.outlandsSprites;
-     }
++    }
  }

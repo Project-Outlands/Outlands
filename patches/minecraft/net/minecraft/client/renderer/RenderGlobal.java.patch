@@ -1,6 +1,14 @@
 --- before/net/minecraft/client/renderer/RenderGlobal.java
 +++ after/net/minecraft/client/renderer/RenderGlobal.java
-@@ -105,6 +105,111 @@
+@@ -33,7 +33,6 @@
+ import net.minecraft.client.renderer.chunk.ListChunkFactory;
+ import net.minecraft.client.renderer.chunk.RenderChunk;
+ import net.minecraft.client.renderer.chunk.VboChunkFactory;
+-import net.minecraft.client.renderer.chunk.VisGraph;
+ import net.minecraft.client.renderer.culling.ClippingHelper;
+ import net.minecraft.client.renderer.culling.ClippingHelperImpl;
+ import net.minecraft.client.renderer.culling.Frustum;
+@@ -105,6 +104,112 @@
      private WorldClient world;
      private Set<RenderChunk> chunksToUpdate = Sets.newLinkedHashSet();
      private List<RenderGlobal.ContainerLocalRenderInformation> renderInfos = Lists.newArrayListWithCapacity(69696);
@@ -60,6 +68,7 @@
 +    private final List<Entity> multipassEntityList = Lists.newArrayList();
 +    private final BlockPos.MutableBlockPos entityCheckPos = new BlockPos.MutableBlockPos();
 +    private final BlockPos.MutableBlockPos chunkCheckPos = new BlockPos.MutableBlockPos();
++    private final BlockPos.MutableBlockPos chunkOffsetPos = new BlockPos.MutableBlockPos();
 +    private final Set<RenderChunk> chunksToUpdateTemp = Sets.newLinkedHashSet();
 +    private final net.minecraftforge.client.render.culling.RegionCullCache regionCullCache = new net.minecraftforge.client.render.culling.RegionCullCache();
 +
@@ -262,8 +271,7 @@
 +
 +                            this.countEntitiesRendered++;
 +                            this.renderManager.renderEntityStatic(entity2, partialTicks, false);
- 
--                                if (this.renderManager.isRenderMultipass(entity2))
++
 +                            if (this.isOutlineActive(entity2, entity, camera))
 +                            {
 +                                list1.add(entity2);
@@ -288,7 +296,8 @@
 +                            .getPosition()
 +                            .getY()
 +                            / 16];
-+
+ 
+-                                if (this.renderManager.isRenderMultipass(entity2))
 +                    if (!classinheritancemultimap.isEmpty())
 +                    {
 +                        for (Entity entity2 : classinheritancemultimap)
@@ -403,7 +412,7 @@
          this.lastViewEntityX = viewEntity.posX;
          this.lastViewEntityY = viewEntity.posY;
          this.lastViewEntityZ = viewEntity.posZ;
-@@ -903,15 +1091,19 @@
+@@ -903,27 +1091,31 @@
          if (!flag && this.displayListEntitiesDirty)
          {
              this.displayListEntitiesDirty = false;
@@ -425,8 +434,24 @@
 +                RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation3 = this.allocateRenderInfo(
                      renderchunk, null, 0
                  );
-                 Set<EnumFacing> set1 = this.getVisibleFacings(blockpos1);
-@@ -946,51 +1138,82 @@
+-                Set<EnumFacing> set1 = this.getVisibleFacings(blockpos1);
++                int visibleFaces = this.visibleFacesOf(renderchunk);
+ 
+-                if (set1.size() == 1)
++                if (Integer.bitCount(visibleFaces) == 1)
+                 {
+                     Vector3f vector3f = this.getViewVector(viewEntity, partialTicks);
+                     EnumFacing enumfacing = EnumFacing.getFacingFromVector(vector3f.x, vector3f.y, vector3f.z).getOpposite();
+-                    set1.remove(enumfacing);
++                    visibleFaces &= ~(1 << enumfacing.ordinal());
+                 }
+ 
+-                if (set1.isEmpty())
++                if (visibleFaces == 0)
+                 {
+                     flag2 = true;
+                 }
+@@ -946,51 +1138,99 @@
              else
              {
                  int i = blockpos1.getY() > 0 ? 248 : 8;
@@ -478,41 +503,55 @@
                  this.renderInfos.add(renderglobal$containerlocalrenderinformation1);
  
 -                for (EnumFacing enumfacing1 : EnumFacing.values())
-+                for (EnumFacing enumfacing1 : EnumFacing.VALUES)
++                // Forge: which of the six faces this section may be expanded into, decided once. Vanilla tested two
++                // conditions per face and then paid for a neighbour lookup on all six either way, which is where the
++                // walk's time went: the lookup builds a position, checks the render distance and searches the
++                // frustum's chunk array, and on a typical section four of the six are refused.
++                int directions;
++
++                if (flag1)
++                {
++                    int enteredFrom = enumfacing2 == null ? -1 : enumfacing2.getOpposite().ordinal();
++                    int outOfEntered = enteredFrom < 0 ? net.minecraftforge.client.render.culling.SectionFaces.ALL
++                            : renderchunk3.getCompiledChunk().outlandsVisibleOutOf(enteredFrom);
++                    directions = net.minecraftforge.client.render.culling.SectionFaces.expandable(
++                        renderglobal$containerlocalrenderinformation1.setFacing, enteredFrom, outOfEntered
++                    );
++                }
++                else
++                {
++                    directions = net.minecraftforge.client.render.culling.SectionFaces.ALL;
++                }
++
++                for (int remaining = directions; remaining != 0; remaining &= remaining - 1)
                  {
--                    RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
--
-                     if ((!flag1 || !renderglobal$containerlocalrenderinformation1.hasDirection(enumfacing1.getOpposite()))
++                    EnumFacing enumfacing1 = EnumFacing.VALUES[Integer.numberOfTrailingZeros(remaining)];
+                     RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
+ 
+-                    if ((!flag1 || !renderglobal$containerlocalrenderinformation1.hasDirection(enumfacing1.getOpposite()))
 -                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1))
 -                            && renderchunk2 != null
 -                            && renderchunk2.setFrameIndex(frameCount)
 -                            && camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
--                    {
++                    if (renderchunk2 != null && renderchunk2.setFrameIndex(frameCount))
+                     {
 -                        RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = new RenderGlobal.ContainerLocalRenderInformation(
 -                            renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
--                        );
++                        int regionState = this.regionCullCache.classify(
++                            renderchunk2.getRegionX(), renderchunk2.getRegionY(), renderchunk2.getRegionZ(), camera
+                         );
 -                        renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
 -                        queue.add(renderglobal$containerlocalrenderinformation);
-+                            && (!flag1 || enumfacing2 == null || renderchunk3.getCompiledChunk().isVisible(enumfacing2.getOpposite(), enumfacing1)))
-+                    {
-+                        RenderChunk renderchunk2 = this.getRenderChunkOffset(blockpos, renderchunk3, enumfacing1);
-+
-+                        if (renderchunk2 != null && renderchunk2.setFrameIndex(frameCount))
++                        if (regionState != net.minecraftforge.client.render.culling.RegionCullCache.OUTSIDE)
 +                        {
-+                            int regionState = this.regionCullCache.classify(
-+                                renderchunk2.getRegionX(), renderchunk2.getRegionY(), renderchunk2.getRegionZ(), camera
-+                            );
-+                            if (regionState != net.minecraftforge.client.render.culling.RegionCullCache.OUTSIDE)
++                            if (regionState == net.minecraftforge.client.render.culling.RegionCullCache.FULLY_INSIDE
++                                    || camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
 +                            {
-+                                if (regionState == net.minecraftforge.client.render.culling.RegionCullCache.FULLY_INSIDE
-+                                        || camera.isBoundingBoxInFrustum(renderchunk2.boundingBox))
-+                                {
-+                                    RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = this.allocateRenderInfo(
-+                                        renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
-+                                    );
-+                                    renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
-+                                    queue.add(renderglobal$containerlocalrenderinformation);
-+                                }
++                                RenderGlobal.ContainerLocalRenderInformation renderglobal$containerlocalrenderinformation = this.allocateRenderInfo(
++                                    renderchunk2, enumfacing1, renderglobal$containerlocalrenderinformation1.counter + 1
++                                );
++                                renderglobal$containerlocalrenderinformation.setDirection(renderglobal$containerlocalrenderinformation1.setFacing, enumfacing1);
++                                queue.add(renderglobal$containerlocalrenderinformation);
 +                            }
 +                        }
                      }
@@ -526,7 +565,7 @@
          }
  
          this.mc.profiler.endStartSection("captureFrustum");
-@@ -1002,35 +1225,58 @@
+@@ -1002,58 +1242,94 @@
          }
  
          this.mc.profiler.endStartSection("rebuildNear");
@@ -573,9 +612,16 @@
          }
  
 -        this.chunksToUpdate.addAll(set);
+-        this.mc.profiler.endSection();
+-    }
 +        this.chunksToUpdate.addAll(this.chunksToUpdateTemp);
 +        this.chunksToUpdateTemp.clear();
-+
+ 
+-    private Set<EnumFacing> getVisibleFacings(BlockPos pos)
+-    {
+-        VisGraph visgraph = new VisGraph();
+-        BlockPos blockpos = new BlockPos(pos.getX() >> 4 << 4, pos.getY() >> 4 << 4, pos.getZ() >> 4 << 4);
+-        Chunk chunk = this.world.getChunk(blockpos);
 +        // Forge: renderInfos is now this frame's visible set, so this is where the atlas learns which animated sprites
 +        // are on screen. Marking here rather than when a mesh is built is what lets an animation advance every frame -
 +        // a chunk built once is drawn for as long as it is in view. A chunk nothing collected sprites for (the GL
@@ -584,17 +630,60 @@
 +        {
 +            net.minecraftforge.client.render.terrain.SpriteAnimationGate.mark(info.renderChunk.getCompiledChunk().outlandsSprites());
 +        }
-+
-         this.mc.profiler.endSection();
+ 
+-        for (BlockPos.MutableBlockPos blockpos$mutableblockpos : BlockPos.getAllInBoxMutable(blockpos, blockpos.add(15, 15, 15)))
++        this.mc.profiler.endSection();
 +        }
 +        finally
-+        {
+         {
+-            if (chunk.getBlockState(blockpos$mutableblockpos).isOpaqueCube())
+-            {
+-                visgraph.setOpaqueCube(blockpos$mutableblockpos);
+-            }
 +            net.minecraftforge.client.render.probe.TerrainCullProbe.end();
-+        }
+         }
++    }
++
++    /**
++     * Forge: the faces the camera's own section can see out of, from the geometry it has already compiled.
++     *
++     * <p>Vanilla answered this by building a fresh {@code VisGraph} for the camera's chunk - every block state in
++     * the section read back, 4096 of them, and a flood fill - to ask what one corner could see. The answer is used
++     * for two things only: whether the camera is sealed in, and whether there is exactly one way out. The chunk
++     * computed the same matrix when it was built, so the scan is a lookup now. It was the largest single cost of a
++     * walk.</p>
++     *
++     * <p>A section with nothing compiled reads as wide open rather than sealed. An empty section is air, and a
++     * section this side of its first rebuild has no answer at all; reading either as sealed draws the camera's own
++     * section and nothing else, which is the picture of a world that has disappeared.</p>
++     */
++    private int visibleFacesOf(RenderChunk chunk)
++    {
++        CompiledChunk compiled = chunk.getCompiledChunk();
+ 
+-        return visgraph.getVisibleFacings(pos);
++        return compiled.isEmpty() ? net.minecraftforge.client.render.culling.SectionFaces.ALL
++                : compiled.outlandsVisibleFromAnyFace();
      }
  
-     private Set<EnumFacing> getVisibleFacings(BlockPos pos)
-@@ -1153,24 +1399,36 @@
+     @Nullable
+     private RenderChunk getRenderChunkOffset(BlockPos playerPos, RenderChunk renderChunkBase, EnumFacing facing)
+     {
+-        BlockPos blockpos = renderChunkBase.getBlockPosOffset16(facing);
++        // Forge: the neighbouring position is reused rather than allocated. Vanilla builds a BlockPos per face per
++        // section, which is six allocations a section on the walk's hottest path, and the frustum reads the
++        // coordinates and keeps nothing.
++        BlockPos base = renderChunkBase.getPosition();
++        this.chunkOffsetPos.setPos(
++            base.getX() + facing.getXOffset() * 16,
++            base.getY() + facing.getYOffset() * 16,
++            base.getZ() + facing.getZOffset() * 16
++        );
++        BlockPos blockpos = this.chunkOffsetPos;
+ 
+         if (MathHelper.abs(playerPos.getX() - blockpos.getX()) > this.renderDistanceChunks * 16)
+         {
+@@ -1153,24 +1429,36 @@
  
          this.mc.profiler.startSection("filterempty");
          int l = 0;
@@ -606,13 +695,13 @@
 -        for (int j = i1; j != i; j += j1)
 +        it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks = null;
 +        if (!net.minecraftforge.client.render.RenderBackendSelection.glPath())
-         {
--            RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
++        {
 +            visibleChunks = net.minecraftforge.client.render.state.backend.FrameStates.getLayerChunkList(blockLayerIn.ordinal());
 +            l = visibleChunks != null ? visibleChunks.size() : 0;
 +        }
 +        else
-+        {
+         {
+-            RenderChunk renderchunk = this.renderInfos.get(j).renderChunk;
 +            boolean flag = blockLayerIn == BlockRenderLayer.TRANSLUCENT;
 +            int i1 = flag ? this.renderInfos.size() - 1 : 0;
 +            int i = flag ? -1 : this.renderInfos.size();
@@ -642,7 +731,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1436,18 @@
+@@ -1178,6 +1466,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -661,7 +750,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1461,14 @@
+@@ -1191,7 +1491,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -677,7 +766,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1595,13 @@
+@@ -1318,6 +1625,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -691,7 +780,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1784,21 @@
+@@ -1500,22 +1814,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -722,7 +811,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1828,7 @@
+@@ -1545,6 +1858,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -730,7 +819,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1868,13 @@
+@@ -1584,14 +1898,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -748,7 +837,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2243,8 @@
+@@ -1960,8 +2273,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -759,7 +848,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2278,8 @@
+@@ -1995,8 +2308,8 @@
                  }
              }
  
@@ -770,7 +859,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2333,7 @@
+@@ -2050,7 +2363,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -779,7 +868,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2373,13 @@
+@@ -2090,8 +2403,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -794,7 +883,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2351,9 +2639,11 @@
+@@ -2351,9 +2669,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -809,7 +898,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +3112,7 @@
+@@ -2822,7 +3142,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -818,7 +907,7 @@
                      this.world
                      .playSound(
                          blockPosIn,
-@@ -3038,16 +3328,22 @@
+@@ -3038,16 +3358,22 @@
      @SideOnly(Side.CLIENT)
      class ContainerLocalRenderInformation
      {

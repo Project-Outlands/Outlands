@@ -1,0 +1,77 @@
+--- before/net/minecraft/client/renderer/chunk/SetVisibility.java
++++ after/net/minecraft/client/renderer/chunk/SetVisibility.java
+@@ -12,6 +12,19 @@
+     private static final int COUNT_FACES = EnumFacing.values().length;
+     private final BitSet bitSet = new BitSet(COUNT_FACES * COUNT_FACES);
+ 
++    /** Forge: every pair, as the packed matrix below holds it. */
++    private static final long EVERYTHING = (1L << (COUNT_FACES * COUNT_FACES)) - 1L;
++
++    /**
++     * Forge: the same matrix, packed so a whole row is a shift and a mask.
++     *
++     * <p>The terrain walk asks one question per section per frame - which faces may be entered from the face it came
++     * through - and asked it by calling {@link #isVisible} once per face, each a bounds-checked {@link BitSet} read.
++     * The answer is one row of this matrix, so it is kept as one: bit {@code from * 6 + to}. The matrix is symmetric,
++     * so this is the same data the bit set holds, arranged for its reader.</p>
++     */
++    private long outlandsPacked;
++
+     public void setManyVisible(Set<EnumFacing> facing)
+     {
+         for (EnumFacing enumfacing : facing)
+@@ -27,11 +40,54 @@
+     {
+         this.bitSet.set(facing.ordinal() + facing2.ordinal() * COUNT_FACES, p_178619_3_);
+         this.bitSet.set(facing2.ordinal() + facing.ordinal() * COUNT_FACES, p_178619_3_);
++        int from = facing.ordinal() * COUNT_FACES + facing2.ordinal();
++        int to = facing2.ordinal() * COUNT_FACES + facing.ordinal();
++
++        if (p_178619_3_)
++        {
++            this.outlandsPacked |= (1L << from) | (1L << to);
++        }
++        else
++        {
++            this.outlandsPacked &= ~((1L << from) | (1L << to));
++        }
+     }
+ 
+     public void setAllVisible(boolean visible)
+     {
+         this.bitSet.set(0, this.bitSet.size(), visible);
++        this.outlandsPacked = visible ? EVERYTHING : 0L;
++    }
++
++    /**
++     * Forge: the faces reachable when entered through {@code from}, as {@link EnumFacing} ordinal bits.
++     *
++     * <p>Vanilla's {@code isVisible(from, to)}, with all six {@code to} answered at once.</p>
++     */
++    public int outlandsVisibleOutOf(int from)
++    {
++        return (int)(this.outlandsPacked >>> (from * COUNT_FACES)) & 0x3F;
++    }
++
++    /**
++     * Forge: every face that any air region in this section touches, as ordinal bits.
++     *
++     * <p>An empty answer means nothing in this section reaches any of its own faces - it is sealed - which is what
++     * vanilla worked out by scanning all 4096 of its blocks and flooding from the camera's corner.</p>
++     */
++    public int outlandsVisibleFromAnyFace()
++    {
++        int faces = 0;
++
++        for (int from = 0; from < COUNT_FACES; from++)
++        {
++            if (((this.outlandsPacked >>> (from * COUNT_FACES)) & 0x3F) != 0)
++            {
++                faces |= 1 << from;
++            }
++        }
++
++        return faces;
+     }
+ 
+     public boolean isVisible(EnumFacing facing, EnumFacing facing2)
