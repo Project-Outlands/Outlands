@@ -139,6 +139,22 @@ public final class VertexConverter {
             return;
         }
 
+        convertGeneral(source, sourceOffset, layout, vertexCount, fallbackColor, fallbackLightmap, lightingEnabled,
+                normalMatrix, lighting, textureMatrix, target, targetOffset);
+    }
+
+    /**
+     * The loop for every format without a specialised one of its own.
+     *
+     * <p>Package-private because it is the answer the specialised loops have to agree with: a test converts the same
+     * bytes through both and compares them, which is the only way to be sure an offset in a hand-written loop is
+     * right without reading it twice.</p>
+     */
+    static void convertGeneral(byte[] source, int sourceOffset, VertexLayout layout, int vertexCount,
+                               int fallbackColor, float[] fallbackLightmap, boolean lightingEnabled,
+                               float[] normalMatrix, LightingModel lighting, float[] textureMatrix,
+                               ByteBuffer target, int targetOffset) {
+        int inStride = layout.stride();
         // Every attribute is resolved once, before the loop. The switch this replaced ran per vertex per attribute,
         // and for the formats that reach here it was most of what the method did.
         int positionAt = -1;
@@ -201,12 +217,7 @@ public final class VertexConverter {
             }
         }
 
-        int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
-        if (fallbackLightmap != null) {
-            int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
-            int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
-            fallbackLight = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
-        }
+        int fallbackLight = fallbackLight(fallbackLightmap);
 
         int fbR = (fallbackColor >>> 16) & 0xFF;
         int fbG = (fallbackColor >>> 8) & 0xFF;
@@ -214,6 +225,23 @@ public final class VertexConverter {
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
         boolean lit = normalAt >= 0 && lightingEnabled && normalMatrix != null && lighting != null;
+
+        // Two layouts are most of a frame - the old-model one at 48% of the vertices and 79% of the draws, and the one
+        // a frame's clouds and batched quads use at 28% of the vertices - and each has a loop that knows its own
+        // layout. Matched on the resolved attributes rather than on the format object, so a mod that builds an equal
+        // format of its own gets the same loop. See convertOldModelLit.
+        if (lit && inStride == 24 && positionAt == 0 && positionCount == 3 && uvAt == 12 && lightmapAt < 0
+                && colorKind == COLOR_NONE && normalAt == 20 && normalKind == NORMAL_BYTE) {
+            convertOldModelLit(source, sourceOffset, vertexCount, fallbackColor, fallbackLight,
+                    normalMatrix, lighting, textureMatrix, target, targetOffset);
+            return;
+        }
+        if (inStride == 24 && positionAt == 0 && positionCount == 3 && uvAt == 12 && lightmapAt < 0
+                && normalAt < 0 && colorKind == COLOR_UBYTE4 && colorAt == 20) {
+            convertPositionTexColor(source, sourceOffset, vertexCount, fallbackColor, fallbackLight,
+                    textureMatrix, target, targetOffset);
+            return;
+        }
         float[] cachedVertex = lit ? new float[] {1.0F, 1.0F, 1.0F} : null;
         float[] cachedConstant = lit ? new float[] {0.0F, 0.0F, 0.0F} : null;
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
@@ -332,6 +360,136 @@ public final class VertexConverter {
         }
     }
 
+    /** The light a format without a lightmap attribute gets, from the fallback the caller supplied. */
+    private static int fallbackLight(float[] fallbackLightmap) {
+        int light = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
+        if (fallbackLightmap != null) {
+            int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
+            int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
+            light = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
+        }
+        return light;
+    }
+
+    /**
+     * {@code OLDMODEL_POSITION_TEX_NORMAL}, lit: position at 0, texture at 12, normal at 20, 24 bytes a vertex.
+     *
+     * <p><b>Why a method of its own.</b> The general loop asks a question per vertex that this format answers the same
+     * way every time: is there a lightmap, a colour, how many position components, which kind of colour, which kind of
+     * normal. Those questions are cheap, and they were never the problem - the trouble is that the compiler only knows
+     * their answer from its profile. A draw of a different format arrives, a branch the profile recorded as never
+     * taken is taken, and HotSpot discards the whole compiled method as an uncommon trap; execution falls back to the
+     * interpreter until a new version is compiled. One session's log had three such traps for the general method, one
+     * of them after every couple of seconds of play, and a run that converted at 16 ns a vertex spent a whole
+     * fifteen-second window at 327.</p>
+     *
+     * <p>Here there is nothing to guess: the method is only reached by a draw whose format is exactly this one, so the
+     * per-vertex work is five reads, three writes and the lighting the normals ask for.</p>
+     */
+    static void convertOldModelLit(byte[] source, int sourceOffset, int vertexCount, int fallbackColor,
+                                   int fallbackLight, float[] normalMatrix, LightingModel lighting,
+                                   float[] textureMatrix, ByteBuffer target, int targetOffset) {
+        // Position at 0, texture at 12, normal at 20: the caller has just matched the layout against exactly that.
+        int inStride = 24;
+        int fbR = (fallbackColor >>> 16) & 0xFF;
+        int fbG = (fallbackColor >>> 8) & 0xFF;
+        int fbB = fallbackColor & 0xFF;
+        int fbA = (fallbackColor >>> 24) & 0xFF;
+
+        // The lighting is a function of the normal alone, so it is recomputed only where the normal changes - which,
+        // for a model, is once a face rather than once a vertex.
+        float[] cachedVertex = {1.0F, 1.0F, 1.0F};
+        float[] cachedConstant = {0.0F, 0.0F, 0.0F};
+        float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
+
+        long address = target.isDirect() ? MemoryUtil.memAddress(target) : 0L;
+        boolean transformed = textureMatrix != null;
+
+        for (int vertex = 0; vertex < vertexCount; vertex++) {
+            int base = targetOffset + vertex * STRIDE;
+            int at = sourceOffset + vertex * inStride;
+
+            putFloat(address, target, base + POSITION_OFFSET, (float) FLOAT_VIEW.get(source, at));
+            putFloat(address, target, base + POSITION_OFFSET + 4, (float) FLOAT_VIEW.get(source, at + 4));
+            putFloat(address, target, base + POSITION_OFFSET + 8, (float) FLOAT_VIEW.get(source, at + 8));
+
+            float u = (float) FLOAT_VIEW.get(source, at + 12);
+            float v = (float) FLOAT_VIEW.get(source, at + 16);
+            if (transformed) {
+                putFloat(address, target, base + UV_OFFSET,
+                        textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12]);
+                putFloat(address, target, base + UV_OFFSET + 4,
+                        textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13]);
+            } else {
+                putFloat(address, target, base + UV_OFFSET, u);
+                putFloat(address, target, base + UV_OFFSET + 4, v);
+            }
+
+            // The format carries no lightmap, so every vertex gets the caller's fallback - full brightness unless the
+            // game asked for something else.
+            putInt(address, target, base + LIGHTMAP_OFFSET, fallbackLight);
+
+            float nx = source[at + 20];
+            float ny = source[at + 21];
+            float nz = source[at + 22];
+            if (nx != lastNx || ny != lastNy || nz != lastNz) {
+                lastNx = nx;
+                lastNy = ny;
+                lastNz = nz;
+                computeLightingFactor(nx, ny, nz, VertexFormatElement.EnumType.BYTE, normalMatrix, lighting,
+                        cachedVertex, cachedConstant);
+            }
+
+            int r = clampByte(Math.round(fbR * cachedVertex[0] + 255.0F * cachedConstant[0]));
+            int g = clampByte(Math.round(fbG * cachedVertex[1] + 255.0F * cachedConstant[1]));
+            int b = clampByte(Math.round(fbB * cachedVertex[2] + 255.0F * cachedConstant[2]));
+            putInt(address, target, base + COLOR_OFFSET, (fbA << 24) | (b << 16) | (g << 8) | r);
+        }
+    }
+
+    /**
+     * {@code POSITION_TEX_COLOR}: position at 0, texture at 12, colour at 20 as four unsigned bytes, 24 bytes a vertex.
+     *
+     * <p>Split out for the same reason as {@link #convertOldModelLit}, and this is the format a frame's particles and
+     * its batched quads arrive in - few draws, thousands of vertices each, so the loop is entered rarely and runs
+     * long, which is the worst shape for a branch that is not in the profile.</p>
+     */
+    static void convertPositionTexColor(byte[] source, int sourceOffset, int vertexCount, int fallbackColor,
+                                        int fallbackLight, float[] textureMatrix, ByteBuffer target,
+                                        int targetOffset) {
+        // Position at 0, texture at 12, four colour bytes at 20: matched by the caller, like the loop above.
+        int inStride = 24;
+
+        long address = target.isDirect() ? MemoryUtil.memAddress(target) : 0L;
+        boolean transformed = textureMatrix != null;
+
+        for (int vertex = 0; vertex < vertexCount; vertex++) {
+            int base = targetOffset + vertex * STRIDE;
+            int at = sourceOffset + vertex * inStride;
+
+            putFloat(address, target, base + POSITION_OFFSET, (float) FLOAT_VIEW.get(source, at));
+            putFloat(address, target, base + POSITION_OFFSET + 4, (float) FLOAT_VIEW.get(source, at + 4));
+            putFloat(address, target, base + POSITION_OFFSET + 8, (float) FLOAT_VIEW.get(source, at + 8));
+
+            float u = (float) FLOAT_VIEW.get(source, at + 12);
+            float v = (float) FLOAT_VIEW.get(source, at + 16);
+            if (transformed) {
+                putFloat(address, target, base + UV_OFFSET,
+                        textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12]);
+                putFloat(address, target, base + UV_OFFSET + 4,
+                        textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13]);
+            } else {
+                putFloat(address, target, base + UV_OFFSET, u);
+                putFloat(address, target, base + UV_OFFSET + 4, v);
+            }
+
+            putInt(address, target, base + LIGHTMAP_OFFSET, fallbackLight);
+            putInt(address, target, base + COLOR_OFFSET,
+                    ((source[at + 23] & 0xFF) << 24) | ((source[at + 22] & 0xFF) << 16)
+                            | ((source[at + 21] & 0xFF) << 8) | (source[at + 20] & 0xFF));
+        }
+    }
+
     /** Copies a byte range into the target, whichever kind of buffer it is. */
     private static void copyRange(byte[] source, int sourceOffset, ByteBuffer target, int targetOffset, int length) {
         if (target.isDirect()) {
@@ -403,12 +561,7 @@ public final class VertexConverter {
         // Vanilla's constant lightmap coordinate, in the same unsigned-short encoding the attribute uses (0..240
         // for block light in low 16 bits, sky light in high 16 bits). A format without one therefore gets the
         // brightness the game asked for rather than a made-up full bright: that difference is a mob in a cave looking lit.
-        int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
-        if (fallbackLightmap != null) {
-            int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
-            int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
-            fallbackLight = (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
-        }
+        int fallbackLight = fallbackLight(fallbackLightmap);
 
         // Fallback colour packed into native byte order (R8G8B8A8).
         // fallbackColor arrives as 0xAARRGGBB.

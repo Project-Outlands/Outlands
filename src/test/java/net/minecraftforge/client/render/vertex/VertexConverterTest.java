@@ -87,16 +87,125 @@ class VertexConverterTest {
         fast.duplicate().get(fastOut);
         assertEquals(new String(source), new String(fastOut), "BLOCK from an array is a straight copy");
 
-        VertexFormat sameLayout = new VertexFormat();
-        for (int i = 0; i < block.getElementCount(); i++) {
-            sameLayout.addElement(block.getElement(i));
-        }
+        // The general loop directly: VertexLayout caches by structural equality, so an equal copy of the format would
+        // share the cached layout and take the same shortcut - a comparison of the fast path with itself.
         ByteBuffer general = direct(3 * VertexConverter.STRIDE);
-        VertexConverter.convert(source, 0, VertexLayout.of(sameLayout), 3, 0xFFFFFFFF, null, false, null, null,
+        VertexConverter.convertGeneral(source, 0, VertexLayout.of(block), 3, 0xFFFFFFFF, null, false, null, null,
                 null, general, 0);
         byte[] generalOut = new byte[3 * VertexConverter.STRIDE];
         general.duplicate().get(generalOut);
         assertEquals(new String(fastOut), new String(generalOut), "the shortcut and the general path agree");
+    }
+
+    private static void assertSameBytes(ByteBuffer expected, ByteBuffer actual, String what) {
+        assertEquals(expected.capacity(), actual.capacity(), what + ": same length");
+        for (int i = 0; i < expected.capacity(); i++) {
+            if (expected.get(i) != actual.get(i)) {
+                throw new AssertionError(what + ": byte " + i + " differs (" + expected.get(i) + " against "
+                        + actual.get(i) + ")");
+            }
+        }
+    }
+
+    /**
+     * The two formats the converter now has a loop of its own for must produce, byte for byte, what the general loop
+     * produces for the same input.
+     *
+     * <p>The dispatch is on the format <em>constant</em>, so an equal copy of the format takes the general path - which
+     * is what makes this comparison possible at all: the same input through both, and any disagreement is an offset,
+     * a component order or a fallback that the specialised loop got wrong.</p>
+     */
+    @Test
+    void theOldModelLitLoopAgreesWithTheGeneralLoop() {
+        VertexFormat format = DefaultVertexFormats.OLDMODEL_POSITION_TEX_NORMAL;
+        int stride = format.getSize();
+        int count = 8;
+        byte[] source = new byte[stride * count];
+        for (int vertex = 0; vertex < count; vertex++) {
+            int at = vertex * stride;
+            putFloat(source, at, vertex * 1.5F);
+            putFloat(source, at + 4, vertex * 2.5F);
+            putFloat(source, at + 8, -vertex * 0.5F);
+            putFloat(source, at + 12, vertex * 0.125F);
+            putFloat(source, at + 16, 1.0F - vertex * 0.125F);
+            // Four vertices share the top face's normal, then four share the bottom face's: the lighting cache has to
+            // recompute exactly once in the middle, and the general loop caches the same way.
+            source[at + 20] = 0;
+            source[at + 21] = (byte) (vertex < 4 ? 127 : -127);
+            source[at + 22] = 0;
+        }
+
+        float[] normalMatrix = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+        LightingModel lighting = standardItemLighting();
+        float[] fallbackLightmap = {120.0F, 200.0F};
+        ByteBuffer specialised = direct(count * VertexConverter.STRIDE);
+        ByteBuffer general = direct(count * VertexConverter.STRIDE);
+
+        VertexConverter.convertOldModelLit(source, 0, count, 0xFF80C040, fallbackLight(fallbackLightmap),
+                normalMatrix, lighting, null, specialised, 0);
+        VertexConverter.convertGeneral(source, 0, VertexLayout.of(format), count, 0xFF80C040, fallbackLightmap, true,
+                normalMatrix, lighting, null, general, 0);
+
+        assertSameBytes(general, specialised, "old model, lit");
+
+        // And again with a texture matrix, which is the other branch the specialised loop has.
+        float[] textureMatrix = {2.0F, 0.0F, 0.0F, 0.0F, 0.0F, 2.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 4.0F, 8.0F, 0.0F, 1.0F};
+        ByteBuffer specialisedUv = direct(count * VertexConverter.STRIDE);
+        ByteBuffer generalUv = direct(count * VertexConverter.STRIDE);
+        VertexConverter.convertOldModelLit(source, 0, count, 0xFF80C040, fallbackLight(fallbackLightmap),
+                normalMatrix, lighting, textureMatrix, specialisedUv, 0);
+        VertexConverter.convertGeneral(source, 0, VertexLayout.of(format), count, 0xFF80C040, fallbackLightmap, true,
+                normalMatrix, lighting, textureMatrix, generalUv, 0);
+
+        assertSameBytes(generalUv, specialisedUv, "old model, lit, textured");
+    }
+
+    @Test
+    void thePositionTexColorLoopAgreesWithTheGeneralLoop() {
+        VertexFormat format = DefaultVertexFormats.POSITION_TEX_COLOR;
+        int stride = format.getSize();
+        int count = 6;
+        byte[] source = new byte[stride * count];
+        for (int vertex = 0; vertex < count; vertex++) {
+            int at = vertex * stride;
+            putFloat(source, at, vertex * 0.75F);
+            putFloat(source, at + 4, 3.0F - vertex);
+            putFloat(source, at + 8, vertex * 16.0F);
+            putFloat(source, at + 12, vertex * 0.0625F);
+            putFloat(source, at + 16, 0.5F);
+            // Unsigned bytes, including the extremes, so a signed read would show up as a difference.
+            source[at + 20] = (byte) (vertex == 0 ? 255 : 17 * vertex);
+            source[at + 21] = 0;
+            source[at + 22] = (byte) (vertex == 1 ? 255 : 200 - 7 * vertex);
+            source[at + 23] = (byte) (vertex == 2 ? 0 : 255);
+        }
+
+        float[] fallbackLightmap = {240.0F, 0.0F};
+        ByteBuffer specialised = direct(count * VertexConverter.STRIDE);
+        ByteBuffer general = direct(count * VertexConverter.STRIDE);
+
+        VertexConverter.convertPositionTexColor(source, 0, count, 0xFF102030, fallbackLight(fallbackLightmap), null,
+                specialised, 0);
+        VertexConverter.convertGeneral(source, 0, VertexLayout.of(format), count, 0xFF102030, fallbackLightmap, false,
+                null, null, null, general, 0);
+
+        assertSameBytes(general, specialised, "position, texture, colour");
+    }
+
+    /** The same light the converter computes from a fallback, so a specialised call can be given it directly. */
+    private static int fallbackLight(float[] fallbackLightmap) {
+        int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
+        int sky = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[1])));
+        return (block & 0xFFFF) | ((sky & 0xFFFF) << 16);
+    }
+
+    /** Writes a native-order float into a byte array, which is what the converter reads. */
+    private static void putFloat(byte[] target, int offset, float value) {
+        int bits = Float.floatToRawIntBits(value);
+        target[offset] = (byte) bits;
+        target[offset + 1] = (byte) (bits >>> 8);
+        target[offset + 2] = (byte) (bits >>> 16);
+        target[offset + 3] = (byte) (bits >>> 24);
     }
 
     @Test
