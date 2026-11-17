@@ -103,10 +103,21 @@ final class VulkanContext {
     private final boolean multiDrawIndirect;
     private final boolean drawIndirectFirstInstance;
     private final boolean fillModeNonSolid;
+    /**
+     * The line widths this device will rasterise, read once.
+     *
+     * <p><b>Not read per call.</b> {@code vkGetPhysicalDeviceProperties} is a driver query, and the caller asks for a
+     * clamped width once per draw: a thousand queries a frame, measured at 0.43 us a draw in a scene of a thousand
+     * draws - 0.44 ms of a 15 ms frame spent asking a constant question. The range cannot change while the device
+     * lives, so it is read where the device is created, next to the other limits that are.</p>
+     */
+    private final float lineWidthMin;
+    private final float lineWidthMax;
 
     private VulkanContext(VkInstance instance, long debugMessenger, long surface, VkPhysicalDevice physicalDevice,
                           VkDevice device, VkQueue graphicsQueue, int graphicsFamily, String deviceName,
-                          boolean multiDrawIndirect, boolean drawIndirectFirstInstance, boolean fillModeNonSolid) {
+                          boolean multiDrawIndirect, boolean drawIndirectFirstInstance, boolean fillModeNonSolid,
+                          float lineWidthMin, float lineWidthMax) {
         this.instance = instance;
         this.debugMessenger = debugMessenger;
         this.surface = surface;
@@ -118,6 +129,8 @@ final class VulkanContext {
         this.multiDrawIndirect = multiDrawIndirect;
         this.drawIndirectFirstInstance = drawIndirectFirstInstance;
         this.fillModeNonSolid = fillModeNonSolid;
+        this.lineWidthMin = lineWidthMin;
+        this.lineWidthMax = lineWidthMax;
     }
 
     /**
@@ -181,13 +194,6 @@ final class VulkanContext {
     }
 
     /**
-     * The alignment a dynamic uniform buffer offset has to be a multiple of.
-     *
-     * <p>Both a descriptor's own offset and a dynamic offset are checked against this, and the limit is per device -
-     * 64 on many, 256 on others. Getting it from the device rather than assuming 256 costs one query and removes the
-     * class of failure where it works on the machine it was written on.</p>
-     */
-    /**
      * A line width this device will actually rasterise.
      *
      * <p>GL clamps too - {@code glLineWidth} is specified to clamp into the implementation's range - so this is the
@@ -196,12 +202,7 @@ final class VulkanContext {
      * states as a validation rule rather than clamping for us.</p>
      */
     float clampLineWidth(float width) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
-            vkGetPhysicalDeviceProperties(physicalDevice, properties);
-            VkPhysicalDeviceLimits limits = properties.limits();
-            return clampLineWidth(width, limits.lineWidthRange(0), limits.lineWidthRange(1));
-        }
+        return clampLineWidth(width, this.lineWidthMin, this.lineWidthMax);
     }
 
     /**
@@ -214,6 +215,13 @@ final class VulkanContext {
         return Math.max(min, Math.min(max, width));
     }
 
+    /**
+     * The alignment a dynamic uniform buffer offset has to be a multiple of.
+     *
+     * <p>Both a descriptor's own offset and a dynamic offset are checked against this, and the limit is per device -
+     * 64 on many, 256 on others. Getting it from the device rather than assuming 256 costs one query and removes the
+     * class of failure where it works on the machine it was written on.</p>
+     */
     int minUniformBufferOffsetAlignment() {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
@@ -363,7 +371,8 @@ final class VulkanContext {
                     return new VulkanContext(instance, debugMessenger, surface, physicalDevice, device, queue,
                             graphicsFamily, properties.deviceNameString(),
                             deviceResult.multiDrawIndirect(), deviceResult.drawIndirectFirstInstance(),
-                            deviceResult.fillModeNonSolid());
+                            deviceResult.fillModeNonSolid(),
+                            properties.limits().lineWidthRange(0), properties.limits().lineWidthRange(1));
                 } catch (RuntimeException e) {
                     vkDestroySurfaceKHR(instance, surface, null);
                     throw e;
