@@ -172,9 +172,14 @@ public interface TextureBackend {
     int levelParameter(int id, int level, int glTarget, int glPname);
 
     /**
-     * One sub-rectangle of level 0 that was updated since last drained.
+     * One sub-rectangle of one mip level that was updated since last drained.
+     *
+     * <p>Level 0 is the common case and the only one the atlas needs while it loads, but an animated sprite
+     * re-uploads a rectangle of <i>every</i> level on its timer - {@code TextureAtlasSprite.updateAnimation} hands
+     * the whole chain to {@code TextureUtil.uploadTextureMipmap} - so the level is part of the update, not a
+     * constant of the list.</p>
      */
-    record SubUpdate(int xOffset, int yOffset, int width, int height) {}
+    record SubUpdate(int level, int xOffset, int yOffset, int width, int height) {}
 
     /**
      * Drains and returns all sub-rectangle updates recorded for a texture since the last drain.

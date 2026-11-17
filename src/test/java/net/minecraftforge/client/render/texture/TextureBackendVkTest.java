@@ -7,6 +7,7 @@ import java.nio.IntBuffer;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The texture registry's behaviour, including the one idiom that is easy to break.
@@ -140,6 +141,7 @@ class TextureBackendVkTest {
         backend.subUpload(id, 0, 2, 3, 4, 5, pixels(20));
         java.util.List<TextureBackend.SubUpdate> updates = backend.drainSubUpdates(id);
         assertEquals(1, updates.size());
+        assertEquals(0, updates.get(0).level());
         assertEquals(2, updates.get(0).xOffset());
         assertEquals(3, updates.get(0).yOffset());
         assertEquals(4, updates.get(0).width());
@@ -182,5 +184,114 @@ class TextureBackendVkTest {
         assertEquals(0xCCCCCCCC, argb[2]);
         assertEquals(0xDDDDDDDD, argb[3]);
         assertEquals(0x11111111, argb[1 * 4 + 1]); // Previous subUpload still intact
+    }
+
+    @Test
+    void theMipChainIsTheLevelsTheGameAllocated() {
+        // TextureUtil.allocateTextureImpl's shape: every level allocated with a null pointer, then filled by
+        // glTexSubImage2D. A backend that reported only level 0 sampled aliased textures at distance while the
+        // chain it should have read sat in its own memory.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        for (int level = 0; level < 4; level++) {
+            backend.upload(id, level, Math.max(1, 8 >> level), Math.max(1, 8 >> level), null);
+        }
+        for (int level = 0; level < 4; level++) {
+            int size = Math.max(1, 8 >> level);
+            IntBuffer data = IntBuffer.allocate(size * size);
+            for (int i = 0; i < size * size; i++) {
+                // The level number in the high byte of the colour, so a chain that reported level 0 four times would
+                // be caught rather than passing on a size check alone.
+                data.put(0xFF000000 | (level << 16) | i);
+            }
+            data.flip();
+            backend.subUpload(id, level, 0, 0, size, size, data);
+        }
+
+        TextureImage image = backend.image(id);
+        assertEquals(4, image.levelCount());
+        assertEquals(8, image.width());
+        assertEquals(8, image.levelWidth(0));
+        assertEquals(4, image.levelWidth(1));
+        assertEquals(2, image.levelHeight(2));
+        assertEquals(1, image.levelWidth(3));
+        // Every level's own pixels, not level 0's reused four times.
+        assertEquals(0xFF000000, image.level(0)[0]);
+        assertEquals(0xFF010000, image.level(1)[0]);
+        assertEquals(0xFF020000, image.level(2)[0]);
+        assertEquals(0xFF030000, image.level(3)[0]);
+        assertEquals(1, image.level(3).length);
+    }
+
+    @Test
+    void aChainStopsWhereALevelIsMissingOrDoesNotHalve() {
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 8, 8, null);
+        // Level 1 skipped; a Vulkan image cannot have a hole, so the chain is level 0 alone.
+        backend.upload(id, 2, 2, 2, null);
+        assertEquals(1, backend.image(id).levelCount());
+
+        // A level that is not half of the one above it is equally unusable: GL allowed any size per level, a
+        // device image does not.
+        int other = backend.create();
+        backend.upload(other, 0, 8, 8, null);
+        backend.upload(other, 1, 8, 4, null);
+        assertEquals(1, backend.image(other).levelCount());
+    }
+
+    @Test
+    void anAnimatedSpriteRecordsEveryLevelItRewrites() {
+        // TextureAtlasSprite.updateAnimation hands the whole chain to TextureUtil.uploadTextureMipmap, so a level
+        // whose update went unrecorded would force the whole texture to be re-uploaded from level 0 - 32 MB of atlas
+        // per animation tick.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 8, 8, null);
+        backend.upload(id, 1, 4, 4, null);
+        backend.drainSubUpdates(id);
+
+        backend.subUpload(id, 1, 1, 1, 2, 2, pixels(4));
+        java.util.List<TextureBackend.SubUpdate> updates = backend.drainSubUpdates(id);
+        assertEquals(1, updates.size());
+        assertEquals(1, updates.get(0).level());
+    }
+
+    @Test
+    void theSameRectangleWrittenTwiceIsOneUpload() {
+        // An animated sprite rewrites its own rectangle of every level on each animation tick. The pixels are read
+        // from this texture's copy at drain time, so only the fact that the rectangle is dirty matters - not how
+        // often it was written. A list grew with the tick count instead: the block atlas is off screen while a world
+        // loads, and enough ticks made the drain ask for an array of tens of thousands of regions.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 16, 16, null);
+
+        for (int tick = 0; tick < 1000; tick++) {
+            backend.subUpload(id, 0, 4, 4, 8, 8, pixels(64));
+        }
+
+        java.util.List<TextureBackend.SubUpdate> updates = backend.drainSubUpdates(id);
+        assertEquals(1, updates.size(), "the same rectangle a thousand times is one dirty rectangle");
+        assertEquals(4, updates.get(0).xOffset());
+    }
+
+    @Test
+    void tooManyDistinctRectanglesBecomeAFullUpload() {
+        // A mod may write a different place every frame, which no deduplication can collapse. Past the bound the
+        // answer is the full upload: an empty drain is how the caller is told to send the whole chain instead.
+        TextureBackend backend = new TextureBackendVk();
+        int id = backend.create();
+        backend.upload(id, 0, 128, 128, null);
+        for (int i = 0; i < 5000; i++) {
+            backend.subUpload(id, 0, i % 126, (i / 126) % 126, 1, 1, pixels(1));
+        }
+
+        assertTrue(backend.drainSubUpdates(id).isEmpty(),
+                "past the rectangle bound the answer is 'upload everything', which an empty drain means");
+
+        // And the flag is spent, so the next writes are collected again rather than silently dropped.
+        backend.subUpload(id, 0, 1, 1, 2, 2, pixels(4));
+        assertEquals(1, backend.drainSubUpdates(id).size());
     }
 }

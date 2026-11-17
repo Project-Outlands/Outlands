@@ -29,6 +29,16 @@ import java.nio.IntBuffer;
 final class TextureBackendVk implements TextureBackend {
 
     /**
+     * Whether the mip chain is handed to the device, or only level 0.
+     *
+     * <p>A switch rather than a constant because mips change how every minified texel in the game is filtered, and the
+     * one way to see what that costs or breaks is to render the same frame without them:
+     * {@code -Doutlands.mipmaps=false}. It truncates the chain here rather than in the renderer so the image, its
+     * sampler and every upload follow one decision.</p>
+     */
+    private static final boolean MIPMAPS = !"false".equals(System.getProperty("outlands.mipmaps"));
+
+    /**
      * One mip level: its size, its pixels, and whether anything was ever written into them.
      *
      * <p>{@code hasData} is tracked separately from the array being empty because GL distinguishes "allocated with
@@ -53,7 +63,36 @@ final class TextureBackendVk implements TextureBackend {
         final Int2ObjectMap<Level> levels = new Int2ObjectOpenHashMap<>();
         final Int2IntMap intParameters = new Int2IntOpenHashMap();
         final Int2FloatMap floatParameters = new Int2FloatOpenHashMap();
-        final java.util.List<SubUpdate> pendingSubUpdates = new java.util.ArrayList<>();
+        /**
+         * The rectangles written since the last drain, as a set: an animation tick rewrites the same rectangle of
+         * the same level every tick, and the pixels are read from this texture's own copy at drain time, so a
+         * thousand identical updates are one upload.
+         *
+         * <p>A set rather than a list because a texture that is not sampled for a while keeps collecting: the block
+         * atlas is not on screen while a world loads, and every animated sprite in it rewrites its own rectangle five
+         * times a tick (once a mip level). A list grew without a bound there, and the drain then asked the renderer
+         * for an array that size.</p>
+         */
+        final java.util.LinkedHashSet<SubUpdate> pendingSubUpdates = new java.util.LinkedHashSet<>();
+
+        /**
+         * Set when the pending set was too large to keep, meaning "upload the whole chain, not these rectangles".
+         *
+         * <p>The set is bounded rather than trusted: a mod is free to write a texture in a different place every
+         * frame, which no deduplication can collapse. Beyond the bound the cheaper answer is the full upload, which
+         * this texture's copy can produce in one copy command.</p>
+         */
+        boolean pendingFullUpload;
+        /**
+         * The last answer {@link #image} gave, rebuilt on the next read after any write.
+         *
+         * <p>A texture's image is asked for once a draw - it is how the renderer decides whether its device copy is
+         * stale - so building the answer there (a record and an array of the level references) would be an
+         * allocation per draw for a value that changes only when the game uploads. Nulling it on each write keeps
+         * that to one build per upload.</p>
+         */
+        TextureImage cachedImage;
+
         /**
          * Bumped on every write, so a device-side cache can tell an unchanged texture from a same-handle one.
          *
@@ -127,11 +166,16 @@ final class TextureBackendVk implements TextureBackend {
     }
 
     /**
-     * Level 0 as a device image would need it, or {@code null} when the handle has no allocated level 0 at all.
+     * The whole mip chain as a device image would need it, or {@code null} when the handle has no allocated level 0.
      *
      * <p>The sampler parameters are reported as recorded, with {@link TextureImage#UNSET} where the game never set
      * one, so the mapping to Vulkan's enums stays in the renderer that has to make it rather than being guessed
      * here.</p>
+     *
+     * <p>The chain stops at the first level that is missing <i>or does not halve</i>. Both are possible because the
+     * levels arrive one {@code glTexImage2D} at a time and GL let a level be any size it liked; a Vulkan image can
+     * only hold the halved chain, so a level that does not halve is left to level 0's neighbours rather than making
+     * the image invalid.</p>
      */
     @Override
     public TextureImage image(int id) {
@@ -139,19 +183,37 @@ final class TextureBackendVk implements TextureBackend {
         if (texture == null) {
             return null;
         }
+        if (texture.cachedImage != null) {
+            return texture.cachedImage;
+        }
         Level level = texture.levels.get(0);
         if (level == null) {
             return null;
+        }
+        int levelCount = 1;
+        while (MIPMAPS) {
+            Level next = texture.levels.get(levelCount);
+            if (next == null
+                    || next.width != Math.max(1, level.width >> levelCount)
+                    || next.height != Math.max(1, level.height >> levelCount)) {
+                break;
+            }
+            levelCount++;
+        }
+        int[][] levels = new int[levelCount][];
+        for (int i = 0; i < levelCount; i++) {
+            levels[i] = texture.levels.get(i).pixels;
         }
         // An allocated level counts even when nothing was written into it. That is not a corner case: the main
         // menu's blur texture is allocated and then filled by a framebuffer copy, never by glTexSubImage2D. Treating
         // "allocated, unwritten" as "no image" left that texture with no device image for the copy to land in, which
         // surfaced as "framebuffer copy into texture 9 that was never resolved for this frame". Zero content is the
         // right interpretation - it is what GL considers undefined-but-present, and the copy replaces it wholesale.
-        return new TextureImage(id, level.width, level.height, level.pixels,
+        texture.cachedImage = new TextureImage(id, level.width, level.height, levels,
                 parameter(texture, 10241), parameter(texture, 10240),
                 parameter(texture, 10242), parameter(texture, 10243),
                 texture.version);
+        return texture.cachedImage;
     }
 
     private static int parameter(Texture texture, int pname) {
@@ -237,10 +299,15 @@ final class TextureBackendVk implements TextureBackend {
         return framebufferTargets.contains(id);
     }
 
+    /** How many distinct rectangles one texture may accumulate before a full upload is cheaper. */
+    private static final int MAX_PENDING_RECTANGLES = 4096;
+
     @Override
     public void upload(int id, int level, int width, int height, IntBuffer pixels) {
         Texture texture = texture(id);
+        texture.cachedImage = null;
         texture.pendingSubUpdates.clear();
+        texture.pendingFullUpload = false;
         if (pixels == null) {
             // Allocation without data: undefined contents of the right size, filled later by subUpload.
             texture.levels.put(level, new Level(width, height, new int[width * height]));
@@ -263,6 +330,7 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public void subUpload(int id, int level, int xOffset, int yOffset, int width, int height, IntBuffer pixels) {
         Texture texture = texture(id);
+        texture.cachedImage = null;
         Level target = texture.levels.get(level);
         if (target == null) {
             throw new IllegalStateException("subUpload into texture " + id + " level " + level
@@ -293,8 +361,15 @@ final class TextureBackendVk implements TextureBackend {
             }
         }
         target.hasData = true;
-        if (level == 0) {
-            texture.pendingSubUpdates.add(new SubUpdate(xOffset, yOffset, width, height));
+        // Every level, not just level 0: an animated sprite rewrites a rectangle of each level on its timer, and a
+        // level whose update is not recorded forces the whole texture to be re-uploaded from level 0 - which for the
+        // block atlas would be a 32 MB copy per animation tick.
+        if (!texture.pendingFullUpload) {
+            texture.pendingSubUpdates.add(new SubUpdate(level, xOffset, yOffset, width, height));
+            if (texture.pendingSubUpdates.size() > MAX_PENDING_RECTANGLES) {
+                texture.pendingSubUpdates.clear();
+                texture.pendingFullUpload = true;
+            }
         }
         texture.version++;
     }
@@ -302,7 +377,16 @@ final class TextureBackendVk implements TextureBackend {
     @Override
     public java.util.List<SubUpdate> drainSubUpdates(int id) {
         Texture texture = textures.get(id);
-        if (texture == null || texture.pendingSubUpdates.isEmpty()) {
+        if (texture == null) {
+            return java.util.List.of();
+        }
+        if (texture.pendingFullUpload) {
+            // "Too many rectangles" is answered by uploading the chain: an empty list is how the caller is told.
+            texture.pendingFullUpload = false;
+            texture.pendingSubUpdates.clear();
+            return java.util.List.of();
+        }
+        if (texture.pendingSubUpdates.isEmpty()) {
             return java.util.List.of();
         }
         java.util.List<SubUpdate> updates = new java.util.ArrayList<>(texture.pendingSubUpdates);
@@ -312,7 +396,9 @@ final class TextureBackendVk implements TextureBackend {
 
     @Override
     public void parameter(int id, int pname, int value) {
-        texture(id).intParameters.put(pname, value);
+        Texture texture = texture(id);
+        texture.intParameters.put(pname, value);
+        texture.cachedImage = null;
     }
 
     @Override
