@@ -148,9 +148,17 @@ final class FrameDump {
                     .append(" tgt=").append(target)
                     .append(" overlay=").append(state.overlayMode())
                     .append(" proj=").append(projection(state.programBlock()))
+                    .append(" depth=").append(state.depthTest() ? "on" : "off")
+                    .append('/').append(state.depthWrite() ? "w" : "-")
+                    .append('/').append(state.depthFunc())
+                    .append(" blend=").append(state.blend() ? "on" : "off")
+                    .append(" cull=").append(state.cull() ? "on" : "off")
                     .append(" v0=").append(firstVertex(draw))
                     .append(String.format(Locale.ROOT, " mvpT=(%.3f,%.3f,%.3f)", mvp[12], mvp[13], mvp[14]))
                     .append('\n');
+            if (draw.vertexCount() <= ALL_VERTICES_UP_TO) {
+                appendAllVertices(out, draw, index - 1);
+            }
             return index;
         }
         out.append(index++).append(' ');
@@ -209,6 +217,46 @@ final class FrameDump {
      * still renders black means the sampling is wrong, and a vertex with a zero colour or a zero uv means the geometry
      * was recorded wrong.</p>
      */
+    /** Draws up to this many vertices get every one of them listed, not just the first. */
+    private static final int ALL_VERTICES_UP_TO = 32;
+
+    /**
+     * Writes every vertex of a small draw, one per line.
+     *
+     * <p>A line primitive is where "the shape is wrong" is a question about vertex order rather than about any state:
+     * an eighteen-vertex strip that draws a diagonal across a block has to be read vertex by vertex to tell a wrong
+     * order from a vertex that is simply in the wrong place.</p>
+     */
+    private static void appendAllVertices(StringBuilder out, FrameDraws.Draw draw, int index) {
+        VertexLayout layout = draw.layout();
+        byte[] data = draw.vertices();
+        if (layout == null || data == null) {
+            return;
+        }
+        ByteBuffer view = ByteBuffer.wrap(data).order(ByteOrder.nativeOrder());
+        for (int v = 0; v < draw.vertexCount(); v++) {
+            int base = v * layout.stride();
+            out.append("    ").append(index).append('.').append(v);
+            for (VertexLayout.Attribute attribute : layout.attributes()) {
+                if (!attribute.isAttribute() || attribute.offset() >= layout.stride()) {
+                    continue;
+                }
+                int at = base + attribute.offset();
+                switch (attribute.usage()) {
+                    case POSITION -> out.append(String.format(Locale.ROOT, " p(%.3f,%.3f,%.3f)",
+                            view.getFloat(at), view.getFloat(at + 4), view.getFloat(at + 8)));
+                    case COLOR -> out.append(String.format(Locale.ROOT, " c(%d,%d,%d,%d)",
+                            view.get(at) & 0xFF, view.get(at + 1) & 0xFF, view.get(at + 2) & 0xFF,
+                            view.get(at + 3) & 0xFF));
+                    case UV -> out.append(String.format(Locale.ROOT, " uv(%.3f,%.3f)",
+                            view.getFloat(at), view.getFloat(at + 4)));
+                    default -> { }
+                }
+            }
+            out.append('\n');
+        }
+    }
+
     private static String firstVertex(FrameDraws.Draw draw) {
         VertexLayout layout = draw.layout();
         byte[] data = draw.vertices();

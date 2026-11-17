@@ -276,11 +276,16 @@ final class VulkanTextures implements AutoCloseable {
             entries.put(textureId, entry);
             source.drainSubUpdates(textureId);
             stagingFull(commandBuffer, slot, entry.image(), image);
-        } else if (entry.image().width() != image.width() || entry.image().height() != image.height()) {
+        } else if (entry.image().width() != image.width() || entry.image().height() != image.height()
+                || entry.image().mipLevels() != image.levelCount()) {
+            // The chain length is part of what has to match: the video setting's mipmap levels arrive as "how many
+            // levels the game allocated and uploaded", and changing that setting reloads the textures at the same
+            // size. Without this the image kept its old chain and the setting only took effect after a restart.
             // A texture cannot be resized in place, and GL did allow it: glTexImage2D on an existing name replaces
-            // the level at a possibly different size. The chain can change length with it, and a sampler built for
-            // the old length would offer levels the new image does not have, so it is re-derived (and cached: a
-            // resize that keeps the same chain lands on the same sampler).
+            // the level at a possibly different size. The chain can change length with it - it does whenever the
+            // video setting's mipmap levels change - and a sampler built for the old length would offer levels the
+            // new image does not have, so it is re-derived (and cached: a resize that keeps the chain lands on the
+            // same sampler).
             entry.image().close();
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format,
                     image.levelCount());

@@ -29,12 +29,16 @@ import java.nio.IntBuffer;
 final class TextureBackendVk implements TextureBackend {
 
     /**
-     * Whether the mip chain is handed to the device, or only level 0.
+     * Debug override for the mip chain: {@code -Doutlands.mipmaps=false} truncates it to level 0.
      *
-     * <p>A switch rather than a constant because mips change how every minified texel in the game is filtered, and the
-     * one way to see what that costs or breaks is to render the same frame without them:
-     * {@code -Doutlands.mipmaps=false}. It truncates the chain here rather than in the renderer so the image, its
-     * sampler and every upload follow one decision.</p>
+     * <p><b>The video setting decides, not this.</b> "Mipmap Levels" in the options reaches the device twice over:
+     * the game allocates and uploads exactly that many levels ({@code TextureUtil.allocateTextureImpl}), and it picks
+     * the min filter from the same setting ({@code GL_LINEAR} at zero, {@code GL_NEAREST_MIPMAP_LINEAR} above it).
+     * This class reports the levels it was given and the renderer derives the sampler from the filter, so a setting
+     * of 0 means one level and a LOD range of zero with nothing switched off here.</p>
+     *
+     * <p>What the switch is for is the one question a setting cannot ask: is this picture the way it is because of
+     * mips? It truncates in the backend so the image, its sampler and every upload follow one decision.</p>
      */
     private static final boolean MIPMAPS = !"false".equals(System.getProperty("outlands.mipmaps"));
 
