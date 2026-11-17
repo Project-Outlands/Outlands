@@ -37,7 +37,7 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties;
 import static org.lwjgl.vulkan.VK13.vkCmdPipelineBarrier2;
 
 /**
- * One sampled 2D image: device-local, optimally tiled, single mip level.
+ * One sampled 2D image: device-local, optimally tiled, with the mip chain the game uploaded.
  *
  * <p><b>Format {@code B8G8R8A8_UNORM} is the pixel contract, not a choice.</b> The texture backend holds
  * {@code 0xAARRGGBB} ints, which on a little-endian machine is the byte order B, G, R, A - the same bytes a GL
@@ -63,6 +63,10 @@ final class VulkanImage implements AutoCloseable {
     private final int width;
     private final int height;
     private final int format;
+    /** How many levels the image holds; 1 for everything that is not an uploaded texture with a chain. */
+    private final int mipLevels;
+    /** The device allocation this image holds, so {@link #liveBytes()} can be kept honest on release. */
+    private final long memorySize;
     /** Whether this image has been in a layout it can be copied into and sampled from. */
     private boolean initialised;
 
@@ -88,6 +92,13 @@ final class VulkanImage implements AutoCloseable {
         return created;
     }
 
+    /** Device bytes held by live images of this class, so growth shows up in the periodic report. */
+    private static long bytesLive;
+
+    static long liveBytes() {
+        return bytesLive;
+    }
+
     static int destroyedCount() {
         return destroyed;
     }
@@ -96,7 +107,8 @@ final class VulkanImage implements AutoCloseable {
         return copies;
     }
 
-    private VulkanImage(VkDevice device, long image, long memory, long view, int width, int height, int format) {
+    private VulkanImage(VkDevice device, long image, long memory, long view, int width, int height, int format,
+                        int mipLevels, long memorySize) {
         this.device = device;
         this.image = image;
         this.memory = memory;
@@ -104,6 +116,18 @@ final class VulkanImage implements AutoCloseable {
         this.width = width;
         this.height = height;
         this.format = format;
+        this.mipLevels = mipLevels;
+        this.memorySize = memorySize;
+    }
+
+    /** How many mip levels this image has. */
+    int mipLevels() {
+        return mipLevels;
+    }
+
+    /** The driver's handle, so a validation message that names an image can be read against the probe's log. */
+    long handle() {
+        return image;
     }
 
     int format() {
@@ -174,17 +198,33 @@ final class VulkanImage implements AutoCloseable {
      * the convention every other uploaded texture already follows.</p>
      */
     static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format) {
+        return create(device, context, width, height, format, 1);
+    }
+
+    /**
+     * An uploaded texture, with {@code mipLevels} levels.
+     *
+     * <p>The level size rule is Vulkan's: each level is {@code max(1, level 0 >> level)}, which is exactly how
+     * vanilla builds its chain, so the sizes are derived rather than passed in.</p>
+     */
+    static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format,
+                              int mipLevels) {
         // TRANSFER_SRC as well, so the upload verification can read the image back. Without it the copy is invalid -
         // the validation layers named it as VUID-vkCmdCopyImageToBuffer-srcImage-00186 - and an invalid copy that
         // happens to work is not a verification.
         return create(device, context, width, height, format,
                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
                         | VK_IMAGE_USAGE_SAMPLED_BIT,
-                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT, "texture");
+                org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT, "texture", mipLevels);
     }
 
     private static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format,
                                       int usage, int aspect, String what) {
+        return create(device, context, width, height, format, usage, aspect, what, 1);
+    }
+
+    private static VulkanImage create(VkDevice device, VulkanContext context, int width, int height, int format,
+                                      int usage, int aspect, String what, int mipLevels) {
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("an " + what + " needs a positive size, got " + width + "x" + height);
         }
@@ -193,7 +233,7 @@ final class VulkanImage implements AutoCloseable {
                     .sType$Default()
                     .imageType(VK_IMAGE_TYPE_2D)
                     .format(format)
-                    .mipLevels(1)
+                    .mipLevels(mipLevels)
                     .arrayLayers(1)
                     .samples(VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK_IMAGE_TILING_OPTIMAL)
@@ -220,9 +260,11 @@ final class VulkanImage implements AutoCloseable {
                 memory = memoryOut.get(0);
                 VkCheck.check(vkBindImageMemory(device, image, memory, 0L), "vkBindImageMemory");
 
-                view = createView(device, image, stack, format, aspect);
+                view = createView(device, image, stack, format, aspect, mipLevels);
                 created++;
-                return new VulkanImage(device, image, memory, view, width, height, format);
+                bytesLive += requirements.size();
+                return new VulkanImage(device, image, memory, view, width, height, format, mipLevels,
+                        requirements.size());
             } catch (RuntimeException e) {
                 if (view != 0L) {
                     vkDestroyImageView(device, view, null);
@@ -237,7 +279,8 @@ final class VulkanImage implements AutoCloseable {
         }
     }
 
-    private static long createView(VkDevice device, long image, MemoryStack stack, int format, int aspect) {
+    private static long createView(VkDevice device, long image, MemoryStack stack, int format, int aspect,
+                                   int mipLevels) {
         org.lwjgl.vulkan.VkImageViewCreateInfo viewInfo = org.lwjgl.vulkan.VkImageViewCreateInfo.calloc(stack)
                 .sType$Default()
                 .image(image)
@@ -246,7 +289,7 @@ final class VulkanImage implements AutoCloseable {
         VkImageSubresourceRange range = VkImageSubresourceRange.calloc(stack)
                 .aspectMask(aspect)
                 .baseMipLevel(0)
-                .levelCount(1)
+                .levelCount(mipLevels)
                 .baseArrayLayer(0)
                 .layerCount(1);
         viewInfo.subresourceRange(range);
@@ -258,7 +301,11 @@ final class VulkanImage implements AutoCloseable {
     /**
      * Copies {@code staging} (already flipped into Vulkan's top-down order) into this image and leaves it sampleable.
      *
-     * @param staging a buffer of {@code width * height * 4} bytes in {@code B8G8R8A8}
+     * <p>One copy command with a region per level: the levels are the game's own data, already in host memory, and
+     * {@code VkBufferImageCopy} carries its own buffer offset, so the whole chain costs one call rather than one per
+     * level.</p>
+     *
+     * @param staging a buffer holding every level back to back, {@code B8G8R8A8}, level 0 first
      */
     void upload(VkCommandBuffer commandBuffer, long staging) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -269,16 +316,22 @@ final class VulkanImage implements AutoCloseable {
                     org.lwjgl.vulkan.VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                     org.lwjgl.vulkan.VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
-            region.get(0)
-                    .bufferOffset(0L)
-                    // Zero means "tightly packed at the image's width", which is how the staging data is built.
-                    .bufferRowLength(0)
-                    .bufferImageHeight(0);
-            region.get(0).imageOffset().x(0).y(0).z(0);
-            region.get(0).imageExtent().width(width).height(height).depth(1);
-            region.get(0).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0).baseArrayLayer(0).layerCount(1);
+            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(mipLevels, stack);
+            long offset = 0L;
+            for (int level = 0; level < mipLevels; level++) {
+                int levelWidth = Math.max(1, width >> level);
+                int levelHeight = Math.max(1, height >> level);
+                region.get(level)
+                        .bufferOffset(offset)
+                        // Zero means "tightly packed at the image's width", which is how the staging data is built.
+                        .bufferRowLength(0)
+                        .bufferImageHeight(0);
+                region.get(level).imageOffset().x(0).y(0).z(0);
+                region.get(level).imageExtent().width(levelWidth).height(levelHeight).depth(1);
+                region.get(level).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(level).baseArrayLayer(0).layerCount(1);
+                offset += (long) levelWidth * levelHeight * 4L;
+            }
             org.lwjgl.vulkan.VK10.vkCmdCopyBufferToImage(commandBuffer, staging, image,
                     org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
 
@@ -513,7 +566,7 @@ final class VulkanImage implements AutoCloseable {
                 .image(image);
         barrier.get(0).subresourceRange()
                 .aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                .baseMipLevel(0).levelCount(mipLevels).baseArrayLayer(0).layerCount(1);
         vkCmdPipelineBarrier2(commandBuffer, org.lwjgl.vulkan.VkDependencyInfo.calloc(stack)
                 .sType$Default()
                 .pImageMemoryBarriers(barrier));
@@ -546,6 +599,7 @@ final class VulkanImage implements AutoCloseable {
         vkDestroyImageView(device, view, null);
         vkDestroyImage(device, image, null);
         vkFreeMemory(device, memory, null);
+        bytesLive -= memorySize;
         destroyed++;
     }
 }

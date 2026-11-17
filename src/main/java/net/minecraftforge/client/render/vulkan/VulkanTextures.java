@@ -2,8 +2,6 @@ package net.minecraftforge.client.render.vulkan;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.longs.Long2LongMap;
-import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 
 import net.minecraftforge.client.render.texture.TextureBackend;
 import net.minecraftforge.client.render.texture.TextureImage;
@@ -25,6 +23,8 @@ import static org.lwjgl.vulkan.VK10.VK_FILTER_NEAREST;
 import static org.lwjgl.vulkan.VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 import static org.lwjgl.vulkan.VK10.VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
 import static org.lwjgl.vulkan.VK10.VK_SAMPLER_ADDRESS_MODE_REPEAT;
+import static org.lwjgl.vulkan.VK10.VK_SAMPLER_MIPMAP_MODE_LINEAR;
+import static org.lwjgl.vulkan.VK10.VK_SAMPLER_MIPMAP_MODE_NEAREST;
 import static org.lwjgl.vulkan.VK10.vkCreateSampler;
 import static org.lwjgl.vulkan.VK10.vkDestroySampler;
 
@@ -52,6 +52,9 @@ import static org.lwjgl.vulkan.VK10.vkDestroySampler;
  */
 final class VulkanTextures implements AutoCloseable {
 
+    private static final org.apache.logging.log4j.Logger LOGGER =
+            org.apache.logging.log4j.LogManager.getLogger("Outlands|render");
+
     private final VulkanContext context;
     private final VulkanDescriptors descriptors;
     private final TextureBackend source;
@@ -71,7 +74,18 @@ final class VulkanTextures implements AutoCloseable {
      */
     private final Int2ObjectMap<External> externals = new Int2ObjectOpenHashMap<>();
     /** Samplers, keyed by the GL parameters that produced them. Vanilla uses a handful of combinations. */
-    private final Long2LongMap samplers = new Long2LongOpenHashMap();
+    private final java.util.Map<SamplerKey, Long> samplers = new java.util.HashMap<>();
+
+    /**
+     * Whether the mip chains are reported, off unless asked for with {@code -Doutlands.probe.texture=true}.
+     *
+     * <p>The question it answers is "which textures have a chain at all": vanilla builds one for the block atlas and
+     * for nothing else it loads through {@code TextureUtil}, mods vary, and a wrong answer here is invisible - the
+     * picture is only blurrier or sharper at distance than GL's.</p>
+     */
+    private static final boolean TEXTURE_PROBE = Boolean.getBoolean("outlands.probe.texture");
+    private int chainedTextures;
+    private long chainedBytes;
     /** Staging buffers for uploads recorded in this frame, per slot, freed after that frame's fence. */
     private final List<VulkanBuffer>[] pendingStaging;
     /**
@@ -115,6 +129,16 @@ final class VulkanTextures implements AutoCloseable {
      */
     private record External(long view, long sampler, long set, int width, int height) {}
 
+    /**
+     * What a sampler is a function of.
+     *
+     * <p>{@code maxLevel} is here because Vulkan has no per-texture maximum level: a sampler with a LOD range wider
+     * than its view's chain is a validation error on some drivers and silently clamped on others, so the range is
+     * part of the sampler. GL's {@code GL_TEXTURE_MAX_LEVEL} - which vanilla sets to the level count it allocated -
+     * becomes this field.</p>
+     */
+    private record SamplerKey(int minFilter, int magFilter, int wrapS, int wrapT, int maxLevel) {}
+
     @SuppressWarnings("unchecked")
     /**
      * Whether uploaded textures are created as sRGB images.
@@ -140,10 +164,9 @@ final class VulkanTextures implements AutoCloseable {
             this.pendingReads[slot] = new ArrayList<>();
         }
 
-        this.samplers.defaultReturnValue(0L);
         // The stand-in is white in either encoding, so its format only has to match for consistency.
         this.white = VulkanImage.create(context.device(), context, 1, 1, textureFormat());
-        this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET);
+        this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 0);
         this.whiteSet = descriptors.allocate(white.view(), whiteSampler);
         for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
             this.descriptors.writeLightmap(i, white.view(), whiteSampler);
@@ -158,7 +181,7 @@ final class VulkanTextures implements AutoCloseable {
             // Opaque white, in the image's own byte order. Done here rather than in the constructor because filling
             // an image needs a recording command buffer, and this is the first moment one exists.
             stagingFull(commandBuffer, slot, white,
-                    new TextureImage(0, 1, 1, new int[] {0xFFFFFFFF},
+                    new TextureImage(0, 1, 1, new int[][] {{0xFFFFFFFF}},
                             TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 1L));
             whiteUploaded = true;
         }
@@ -241,23 +264,33 @@ final class VulkanTextures implements AutoCloseable {
         // and copies because they come from an sRGB attachment. One format answers both.
         int format = textureFormat();
         if (entry == null) {
-            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
-            long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
+            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format,
+                    image.levelCount());
+            long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT(),
+                    image.levelCount() - 1);
             long set = descriptors.allocate(created.view(), sampler);
             entry = new Entry(created, sampler, set, -1L);
+            if (TEXTURE_PROBE) {
+                reportChain(textureId, image, created);
+            }
             entries.put(textureId, entry);
             source.drainSubUpdates(textureId);
             stagingFull(commandBuffer, slot, entry.image(), image);
         } else if (entry.image().width() != image.width() || entry.image().height() != image.height()) {
             // A texture cannot be resized in place, and GL did allow it: glTexImage2D on an existing name replaces
-            // the level at a possibly different size. The sampler survives, so only the image and its set change.
+            // the level at a possibly different size. The chain can change length with it, and a sampler built for
+            // the old length would offer levels the new image does not have, so it is re-derived (and cached: a
+            // resize that keeps the same chain lands on the same sampler).
             entry.image().close();
-            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format);
+            VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format,
+                    image.levelCount());
+            long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT(),
+                    image.levelCount() - 1);
             // The old set named an image that no longer exists, so it goes back to the pool rather than being retired
             // with it: a resized texture happens on every window resize for every GUI texture.
             descriptors.free(entry.descriptorSet());
-            long set = descriptors.allocate(created.view(), entry.sampler());
-            entry = new Entry(created, entry.sampler(), set, -1L);
+            long set = descriptors.allocate(created.view(), sampler);
+            entry = new Entry(created, sampler, set, -1L);
             entries.put(textureId, entry);
             source.drainSubUpdates(textureId);
             stagingFull(commandBuffer, slot, entry.image(), image);
@@ -274,6 +307,52 @@ final class VulkanTextures implements AutoCloseable {
         return entry;
     }
 
+    /**
+     * Reports a texture's device image, keyed by the driver handle.
+     *
+     * <p>The handle is the only thing a validation message names, so a run that reports an image in the wrong layout
+     * can be read back against this line - which texture it is, how large, and how many levels it was given.</p>
+     */
+    private void reportChain(int textureId, TextureImage image, VulkanImage created) {
+        if (image.levelCount() > 1) {
+            chainedTextures++;
+            long bytes = 0L;
+            for (int level = 0; level < image.levelCount(); level++) {
+                bytes += (long) image.levelWidth(level) * image.levelHeight(level) * 4L;
+            }
+            chainedBytes += bytes;
+            LOGGER.info("probe: image 0x{} texture {} {}x{} has {} mip levels ({} MB), filter {}/{}",
+                    Long.toHexString(created.handle()), textureId, image.width(), image.height(),
+                    image.levelCount(), bytes >> 20, image.minFilter(), image.magFilter());
+        } else {
+            LOGGER.info("probe: image 0x{} texture {} {}x{} has 1 level, filter {}/{}",
+                    Long.toHexString(created.handle()), textureId, image.width(), image.height(),
+                    image.minFilter(), image.magFilter());
+        }
+    }
+
+    /**
+     * How much host-visible staging memory is being held, and in how many buffers.
+     *
+     * <p>Reported because it is the one allocation in this class the JVM's own accounting cannot see: a staging
+     * buffer is a native mapping, so a pool that grows shows up as nothing in a heap histogram and as a memory
+     * failure from somewhere else entirely.</p>
+     */
+    String stagingStats() {
+        long bytes = 0L;
+        int count = stagingPool.size();
+        for (VulkanBuffer buffer : stagingPool) {
+            bytes += buffer.size();
+        }
+        for (List<VulkanBuffer> pending : pendingStaging) {
+            count += pending.size();
+            for (VulkanBuffer buffer : pending) {
+                bytes += buffer.size();
+            }
+        }
+        return (bytes >> 20) + " MB staging in " + count + " buffers";
+    }
+
     private VulkanBuffer acquireStaging(long byteSize) {
         for (int i = 0; i < stagingPool.size(); i++) {
             VulkanBuffer candidate = stagingPool.get(i);
@@ -284,54 +363,76 @@ final class VulkanTextures implements AutoCloseable {
         return VulkanBuffer.createStaging(context.device(), context, byteSize);
     }
 
+    /**
+     * Stages the whole mip chain and copies it into {@code target}.
+     *
+     * <p>Levels go back to back, level 0 first, and the copy takes its offsets from the same sizes - so the layout in
+     * the buffer and the layout the copy expects are one calculation, not two that have to agree.</p>
+     */
     private void stagingFull(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image) {
-        int[] argb = image.argb();
-        int byteSize = argb.length * 4;
-        VulkanBuffer buffer = acquireStaging(byteSize);
-        org.lwjgl.system.MemoryUtil.memIntBuffer(buffer.mappedAddress(), argb.length).put(argb);
+        int ints = 0;
+        for (int level = 0; level < image.levelCount(); level++) {
+            ints += image.levelWidth(level) * image.levelHeight(level);
+        }
+        VulkanBuffer buffer = acquireStaging((long) ints * 4L);
+        java.nio.IntBuffer mapped = org.lwjgl.system.MemoryUtil.memIntBuffer(buffer.mappedAddress(), ints);
+        for (int level = 0; level < image.levelCount(); level++) {
+            mapped.put(image.level(level));
+        }
         pendingStaging[slot].add(buffer);
         target.upload(commandBuffer, buffer.handle());
     }
 
     private void stagingSub(VkCommandBuffer commandBuffer, int slot, VulkanImage target, TextureImage image,
                             java.util.List<TextureBackend.SubUpdate> subUpdates) {
+        // An update can name a level this image does not have: the chain stops at the first level that is missing
+        // or does not halve, and the game may still be writing into the levels past it.
+        int usable = 0;
         long totalBytes = 0L;
         for (TextureBackend.SubUpdate sub : subUpdates) {
-            totalBytes += (long) sub.width() * sub.height() * 4L;
+            if (sub.level() < image.levelCount()) {
+                usable++;
+                totalBytes += (long) sub.width() * sub.height() * 4L;
+            }
         }
-        if (totalBytes <= 0L) {
+        if (usable == 0) {
             return;
         }
         VulkanBuffer buffer = acquireStaging(totalBytes);
-        int[] argb = image.argb();
-        int imageWidth = image.width();
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            org.lwjgl.vulkan.VkBufferImageCopy.Buffer regions =
-                    org.lwjgl.vulkan.VkBufferImageCopy.calloc(subUpdates.size(), stack);
+        // Heap-allocated, not stack-allocated: the count is however many rectangles the game wrote, and a
+        // MemoryStack frame of that size is refused outright once it is large - which is how a long animation tick
+        // during a world load became "Out of stack space" instead of an upload.
+        try (org.lwjgl.vulkan.VkBufferImageCopy.Buffer regions = org.lwjgl.vulkan.VkBufferImageCopy.malloc(usable)) {
 
             long currentByteOffset = 0L;
-            for (int i = 0; i < subUpdates.size(); i++) {
-                TextureBackend.SubUpdate sub = subUpdates.get(i);
+            int written = 0;
+            for (TextureBackend.SubUpdate sub : subUpdates) {
+                if (sub.level() >= image.levelCount()) {
+                    continue;
+                }
                 int subPixels = sub.width() * sub.height();
+                int[] levelPixels = image.level(sub.level());
+                int levelWidth = image.levelWidth(sub.level());
 
                 java.nio.IntBuffer mapped = org.lwjgl.system.MemoryUtil.memIntBuffer(
                         buffer.mappedAddress() + currentByteOffset, subPixels);
                 for (int row = 0; row < sub.height(); row++) {
                     mapped.position(row * sub.width());
-                    mapped.put(argb, (sub.yOffset() + row) * imageWidth + sub.xOffset(), sub.width());
+                    mapped.put(levelPixels, (sub.yOffset() + row) * levelWidth + sub.xOffset(), sub.width());
                 }
 
-                regions.get(i)
+                regions.get(written)
                         .bufferOffset(currentByteOffset)
                         .bufferRowLength(0)
                         .bufferImageHeight(0);
-                regions.get(i).imageOffset().x(sub.xOffset()).y(sub.yOffset()).z(0);
-                regions.get(i).imageExtent().width(sub.width()).height(sub.height()).depth(1);
-                regions.get(i).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .mipLevel(0).baseArrayLayer(0).layerCount(1);
+                regions.get(written).imageOffset().x(sub.xOffset()).y(sub.yOffset()).z(0);
+                regions.get(written).imageExtent().width(sub.width()).height(sub.height()).depth(1);
+                regions.get(written).imageSubresource().aspectMask(org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(sub.level()).baseArrayLayer(0).layerCount(1);
 
                 currentByteOffset += (long) subPixels * 4L;
+                written++;
             }
 
             pendingStaging[slot].add(buffer);
@@ -570,41 +671,72 @@ final class VulkanTextures implements AutoCloseable {
      * clamping is what stops a pass reading past the edge of the image it is processing.</p>
      */
     long renderTargetSampler(int glFilter) {
-        return sampler(glFilter, glFilter, 33071, 33071);
+        return sampler(glFilter, glFilter, 33071, 33071, 0);
     }
 
     /**
-     * A sampler for the given GL sampler parameters.
+     * A sampler for the given GL sampler parameters, able to read {@code maxLevel} mip levels.
      *
      * <p>Repeat is the default for the wrapping modes and linear for the filters, because that is what GL's own
-     * defaults are - {@code GL_REPEAT} and {@code GL_NEAREST_MIPMAP_LINEAR}. A texture whose game code never set a
-     * parameter has {@link TextureImage#UNSET} here, and answering with the GL default is what makes an unchanged
-     * atlas look identical rather than subtly different.</p>
+     * defaults are - {@code GL_REPEAT}, {@code GL_LINEAR} and {@code GL_NEAREST_MIPMAP_LINEAR}. A texture whose game
+     * code never set a parameter has {@link TextureImage#UNSET} here, and answering with the GL default is what makes
+     * an unchanged atlas look identical rather than subtly different.</p>
+     *
+     * <p><b>The four mipmap min filters split into two questions.</b> GL names them as a pair - one filter inside a
+     * level and one between levels - and Vulkan asks the same two questions as {@code minFilter} and
+     * {@code mipmapMode}. {@code GL_NEAREST_MIPMAP_NEAREST}, {@code GL_LINEAR_MIPMAP_NEAREST},
+     * {@code GL_NEAREST_MIPMAP_LINEAR} and {@code GL_LINEAR_MIPMAP_LINEAR} are exactly the four combinations, so the
+     * mapping is a decode rather than a choice. When there is no chain to read, the LOD range is pinned to level 0
+     * regardless of what the filter asks for: a sampler that offers levels an image does not have is undefined
+     * behaviour, and the four filters above are also what a one-level texture wants anyway.</p>
      */
-    private long sampler(int minFilter, int magFilter, int wrapS, int wrapT) {
-        long key = ((long) minFilter << 48) | ((long) magFilter << 32) | ((long) wrapS << 16) | (wrapT & 0xFFFFL);
-        long existing = samplers.get(key);
-        if (existing != 0L) {
+    private long sampler(int minFilter, int magFilter, int wrapS, int wrapT, int maxLevel) {
+        // GL's defaults for the parameters the game never set.
+        int min = minFilter == TextureImage.UNSET ? 9986 : minFilter;
+        int mag = magFilter == TextureImage.UNSET ? 9729 : magFilter;
+        boolean mipmapped = mipmapped(min) && maxLevel > 0;
+
+        SamplerKey key = new SamplerKey(min, mag, wrapS, wrapT, mipmapped ? maxLevel : 0);
+        Long existing = samplers.get(key);
+        if (existing != null) {
             return existing;
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkSamplerCreateInfo info = VkSamplerCreateInfo.calloc(stack)
                     .sType$Default()
-                    .magFilter(magFilter == 9729 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST)
-                    .minFilter(minFilter == 9729 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST)
+                    .magFilter(vkFilter(mag))
+                    .minFilter(vkFilter(min))
+                    .mipmapMode(mipmapped && interLevelLinear(min)
+                            ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST)
                     .addressModeU(addressMode(wrapS))
                     .addressModeV(addressMode(wrapT))
                     .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                     .borderColor(VK_BORDER_COLOR_INT_OPAQUE_BLACK);
-            // No mip chain is uploaded yet, so the LOD range is pinned to level 0 rather than left to sample a
-            // level that does not exist.
-            info.minLod(0.0f).maxLod(0.0f);
+            info.minLod(0.0f).maxLod(mipmapped ? maxLevel : 0.0f);
             LongBuffer out = stack.mallocLong(1);
             VkCheck.check(vkCreateSampler(context.device(), info, null, out), "vkCreateSampler");
             long sampler = out.get(0);
             samplers.put(key, sampler);
             return sampler;
         }
+    }
+
+    /** The four GL min filters that read a mip chain; {@code GL_NEAREST} and {@code GL_LINEAR} read level 0 alone. */
+    static boolean mipmapped(int glMinFilter) {
+        return glMinFilter >= 9984 && glMinFilter <= 9987;
+    }
+
+    /** {@code GL_NEAREST_MIPMAP_LINEAR} and {@code GL_LINEAR_MIPMAP_LINEAR} interpolate between levels. */
+    static boolean interLevelLinear(int glMinFilter) {
+        return glMinFilter == 9986 || glMinFilter == 9987;
+    }
+
+    /** GL's filter to Vulkan's: within a level, {@code 9985} and {@code 9987} are the linear halves of their pairs. */
+    static int vkFilter(int glFilter) {
+        return switch (glFilter) {
+            case 9729, 9985, 9987 -> VK_FILTER_LINEAR; // GL_LINEAR, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR_MIPMAP_LINEAR
+            default -> VK_FILTER_NEAREST;
+        };
     }
 
     private static int addressMode(int glWrap) {
@@ -621,6 +753,10 @@ final class VulkanTextures implements AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        if (TEXTURE_PROBE) {
+            LOGGER.info("probe: textures with a mip chain: {}, {} MB of levels uploaded, {} images live",
+                    chainedTextures, chainedBytes >> 20, entries.size());
+        }
         for (int slot = 0; slot < pendingStaging.length; slot++) {
             releaseSlot(slot);
         }

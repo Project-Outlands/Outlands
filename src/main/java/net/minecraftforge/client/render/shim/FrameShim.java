@@ -1624,7 +1624,7 @@ public final class FrameShim implements ShimGl.Impl {
      * {@code glGetTexImage}: a texture's pixels, answered from the copy the backend uploaded.
      *
      * <p><b>Why this one needs no read-back path at all.</b> A texture's pixels arrive from the game - the backend is
-     * the thing that received them - so they are already in host memory as {@code TextureImage.argb}. Reading a
+     * the thing that received them - so they are already in host memory as {@code TextureImage.levels}. Reading a
      * texture is therefore a format conversion, not a GPU copy, and it can answer synchronously like GL does. The
      * mods that ask are exporters and icon builders: Bookshelf, LibrarianLib's {@code TextureMapExporter}, Quark's
      * {@code TextureDump} and TurretMod.</p>
@@ -1643,14 +1643,14 @@ public final class FrameShim implements ShimGl.Impl {
                 net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
         net.minecraftforge.client.render.texture.TextureImage image =
                 textures == null ? null : textures.image(textures.boundTexture());
-        if (image == null || level != 0) {
+        if (image == null || level < 0 || level >= image.levelCount()) {
             FrameStates.reportSkippedOnce("glGetTexImage(level " + level + ")",
-                    "only the pixels of a level-0 texture the game uploaded are kept here");
+                    "only the mip levels the game itself uploaded are kept here, and that level is not one of them");
             return;
         }
-        int[] argb = image.argb();
-        int width = image.width();
-        int height = image.height();
+        int[] argb = image.level(level);
+        int width = image.levelWidth(level);
+        int height = image.levelHeight(level);
         int at = pixels.position();
         if (!TexturePixels.write(argb, width, height, format, type, pixels, at)) {
             FrameStates.reportSkippedOnce("glGetTexImage(format " + format + ", type " + type + ")",
@@ -1725,18 +1725,18 @@ public final class FrameShim implements ShimGl.Impl {
         }
         net.minecraftforge.client.render.texture.TextureBackend textures =
                 net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
-        if (textures != null && level == 0) {
+        if (textures != null && level >= 0) {
             net.minecraftforge.client.render.texture.TextureImage image = textures.image(textures.boundTexture());
-            if (image != null) {
+            if (image != null && level < image.levelCount()) {
                 return switch (parameterName) {
-                    case GL_TEXTURE_WIDTH -> image.width();
-                    case GL_TEXTURE_HEIGHT -> image.height();
+                    case GL_TEXTURE_WIDTH -> image.levelWidth(level);
+                    case GL_TEXTURE_HEIGHT -> image.levelHeight(level);
                     default -> 0;
                 };
             }
         }
         FrameStates.reportSkippedOnce("glGetTexLevelParameteri(" + parameterName + ")",
-                "only a level-0 texture's width and height are known here; anything else would be a guess");
+                "only the width and height of a level the game uploaded are known here; anything else would be a guess");
         return 0;
     }
 
