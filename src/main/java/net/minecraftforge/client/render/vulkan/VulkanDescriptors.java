@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.vulkan;
 
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
@@ -15,9 +16,11 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
 import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+import static org.lwjgl.vulkan.VK10.VK_WHOLE_SIZE;
 import static org.lwjgl.vulkan.VK10.vkAllocateDescriptorSets;
 import static org.lwjgl.vulkan.VK10.vkUpdateDescriptorSets;
 import static org.lwjgl.vulkan.VK10.vkCreateDescriptorPool;
@@ -93,14 +96,22 @@ final class VulkanDescriptors implements AutoCloseable {
                     "vkCreateDescriptorSetLayout");
             this.setLayout = layoutOut.get(0);
 
-            // Set 1 is the lightmap: one sampler that every draw reads and the game replaces a handful of times per
-            // second, so it is bound once per frame instead of travelling in every draw's set.
-            VkDescriptorSetLayoutBinding.Buffer lightmapBinding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+            // Set 1 is the per-frame state: the lightmap, one sampler that every draw reads and the game replaces a
+            // handful of times per second, and the per-draw data block, which every draw reads one entry of.
+            VkDescriptorSetLayoutBinding.Buffer lightmapBinding = VkDescriptorSetLayoutBinding.calloc(2, stack);
             lightmapBinding.get(0)
                     .binding(0)
                     .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                     .descriptorCount(1)
                     .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            // Binding 1: the draw data. Both stages read it - the vertex shader the matrix, the fragment shader the
+            // fog and the alpha test - and it is per frame slot, like the lightmap, because each slot has its own
+            // buffer that the CPU writes while the GPU may still be reading the other two.
+            lightmapBinding.get(1)
+                    .binding(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                    .descriptorCount(1)
+                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             VkDescriptorSetLayoutCreateInfo lightmapLayoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                     .sType$Default()
                     .pBindings(lightmapBinding);
@@ -133,10 +144,14 @@ final class VulkanDescriptors implements AutoCloseable {
             }
             this.pipelineLayout = pipelineLayoutOut.get(0);
 
-            VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(1, stack);
+            VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
             sizes.get(0)
                     .type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                     .descriptorCount(MAX_SETS + VulkanSwapchain.FRAMES_IN_FLIGHT);
+            // One per frame slot: the lightmap set carries a draw-data buffer as well as its sampler.
+            sizes.get(1)
+                    .type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                    .descriptorCount(VulkanSwapchain.FRAMES_IN_FLIGHT);
             VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                     .sType$Default()
                     .maxSets(MAX_SETS + VulkanSwapchain.FRAMES_IN_FLIGHT)
@@ -180,6 +195,28 @@ final class VulkanDescriptors implements AutoCloseable {
                     .descriptorCount(1)
                     .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                     .pImageInfo(image);
+            vkUpdateDescriptorSets(device, write, null);
+        }
+    }
+
+    /**
+     * Points set 1's draw-data binding at a frame slot's buffer.
+     *
+     * <p>Written when the buffer is created and again only if it is reallocated, which is why the range is
+     * {@code VK_WHOLE_SIZE}: growing the buffer keeps the same descriptor as long as the handle does.</p>
+     */
+    void writeDrawData(int slot, long buffer) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkDescriptorBufferInfo.Buffer info = VkDescriptorBufferInfo.calloc(1, stack);
+            info.get(0).buffer(buffer).offset(0L).range(VK_WHOLE_SIZE);
+            VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+            write.get(0)
+                    .sType$Default()
+                    .dstSet(lightmapSets[slot])
+                    .dstBinding(1)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                    .pBufferInfo(info);
             vkUpdateDescriptorSets(device, write, null);
         }
     }

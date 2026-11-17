@@ -55,6 +55,8 @@ public final class SpirvReflection {
     private static final int DECORATION_DESCRIPTOR_SET = 34;
     private static final int DECORATION_OFFSET = 35;
     private static final int DECORATION_ARRAY_STRIDE = 6;
+    /** {@code StorageBuffer}: a shader storage block, which is how the per-draw data reaches the stream shader. */
+    private static final int STORAGE_STORAGE_BUFFER = 12;
     private static final int DECORATION_LOCATION = 30;
 
     // Storage classes.
@@ -83,10 +85,15 @@ public final class SpirvReflection {
     public record StageVariable(String name, int location, boolean output) {}
 
     /** One member of a uniform block, as the compiler laid it out. */
-    public record Member(String name, int offset, int size) {}
+    /** @param arrayStride the element stride when this member is an array, 0 otherwise */
+    public record Member(String name, int offset, int size, int arrayStride) {}
 
     /** One uniform block: what GL calls one of a shader's uniforms. */
-    public record Block(String name, int set, int binding, List<Member> members, int size) {
+    /**
+     * @param arrayStride when the block is a single array of a struct - a storage buffer of per-draw blocks - the
+     *                    stride between entries and the members of one entry, rather than of the wrapper
+     */
+    public record Block(String name, int set, int binding, List<Member> members, int size, int arrayStride) {
         /** The offset of a member, or -1 when the block has no such member. */
         public int offsetOf(String memberName) {
             for (Member member : members) {
@@ -316,9 +323,25 @@ public final class SpirvReflection {
 
             if (storage == STORAGE_UNIFORM_CONSTANT) {
                 samplers.add(new Sampler(nameOf(names, id, "sampler" + binding), set, binding));
-            } else if ((storage == STORAGE_UNIFORM || storage == STORAGE_PUSH_CONSTANT)
+            } else if ((storage == STORAGE_UNIFORM || storage == STORAGE_PUSH_CONSTANT
+                    || storage == STORAGE_STORAGE_BUFFER)
                     && resolved != null && resolved.kind == TypeKind.STRUCT) {
                 boolean isBlock = hasDecoration(decor, DECORATION_BLOCK);
+                int arrayStride = 0;
+                // A storage buffer of per-draw blocks is a struct whose only member is a runtime array of a struct.
+                // What a caller wants to compare against the writer is one entry, not the wrapper around it - and the
+                // stride, because the draw that reads entry N computes its address as N * stride.
+                if (storage == STORAGE_STORAGE_BUFFER && resolved.memberTypes.length == 1) {
+                    int arrayId = resolved.memberTypes[0];
+                    Type array = types.resolve(arrayId);
+                    if (array != null && array.kind == TypeKind.ARRAY) {
+                        Type element = types.resolve(array.memberOrComponent);
+                        if (element != null && element.kind == TypeKind.STRUCT) {
+                            arrayStride = arrayStrideOf(arrayId, types, decorations);
+                            resolved = element;
+                        }
+                    }
+                }
                 List<Member> members = new ArrayList<>();
                 int blockSize = 0;
                 for (int i = 0; i < resolved.memberTypes.length; i++) {
@@ -328,11 +351,12 @@ public final class SpirvReflection {
                     int offset = offsets.getOrDefault(DECORATION_OFFSET, 0);
                     int size = types.sizeOf(memberId, constants);
                     members.add(new Member(memberNameOf(memberNames, resolved, i,
-                            nameOf(names, memberId, "member" + i)), offset, size));
+                            nameOf(names, memberId, "member" + i)), offset, size, arrayStrideOf(memberId, types, decorations)));
                     blockSize = Math.max(blockSize, offset + size);
                 }
                 if (isBlock || !members.isEmpty()) {
-                    Block block = new Block(nameOf(names, id, "uniforms"), set, binding, members, blockSize);
+                    Block block = new Block(nameOf(names, id, "uniforms"), set, binding, members, blockSize,
+                            arrayStride);
                     // Kept apart from the descriptor blocks: a push constant has no set to bind, and a caller
                     // asking "what does this block cost" means the size Vulkan's 128-byte limit is spent on.
                     (storage == STORAGE_PUSH_CONSTANT ? pushConstants : blocks).add(block);
@@ -340,6 +364,22 @@ public final class SpirvReflection {
             }
         }
         return new Module(List.copyOf(samplers), List.copyOf(blocks), List.copyOf(pushConstants));
+    }
+
+    /**
+     * The element stride of an array type.
+     *
+     * <p>{@code ArrayStride} decorates the array <em>type</em>, not the member that uses it, so it is looked up by
+     * type id. It is the number a shader-side index multiplies by, which makes it the one value a per-draw buffer
+     * cannot get wrong.</p>
+     */
+    private static int arrayStrideOf(int typeId, TypeTable types, Map<Integer, int[]> decorations) {
+        Type type = types.resolve(typeId);
+        if (type == null || type.kind != TypeKind.ARRAY) {
+            return 0;
+        }
+        int[] decor = decorations.getOrDefault(typeId, new int[64]);
+        return Math.max(0, decor[DECORATION_ARRAY_STRIDE] - 1);
     }
 
     private static boolean hasDecoration(int[] decorations, int decoration) {

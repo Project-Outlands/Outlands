@@ -6,11 +6,14 @@ layout(location = 0) in vec4 inColor;
 layout(location = 1) in vec2 inUv;
 layout(location = 2) in vec2 inLightmap;
 layout(location = 3) in float inEyeDist;
+// The draw's own index, from the vertex stage: a fragment shader has no instance index of its own, and this block is
+// per draw.
+layout(location = 4) flat in int inDraw;
 
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(set = 1, binding = 0) uniform sampler2D lightmap;
 
-layout(push_constant) uniform PushConstants {
+struct DrawData {
     mat4 modelViewProjection;
     vec4 fogColor;
     /** The overlay colour as RGBA8, unpacked with unpackUnorm4x8. */
@@ -30,33 +33,38 @@ layout(push_constant) uniform PushConstants {
     float pointSize;
     float spare0;
     float spare1;
-} pc;
+};
 
-vec4 overlayColor() {
-    return unpackUnorm4x8(pc.overlayColorPacked);
+layout(set = 1, binding = 1) readonly buffer DrawDataBuffer {
+    DrawData draws[];
+};
+
+vec4 overlayColor(DrawData d) {
+    return unpackUnorm4x8(d.overlayColorPacked);
 }
 
 layout(location = 0) out vec4 outColor;
 
-float computeFogFactor(float dist) {
-    if (pc.fogMode == 9729) { // GL_LINEAR
-        float range = pc.fogEnd - pc.fogStart;
+float computeFogFactor(DrawData d, float dist) {
+    if (d.fogMode == 9729) { // GL_LINEAR
+        float range = d.fogEnd - d.fogStart;
         if (abs(range) > 0.0001) {
-            return clamp((pc.fogEnd - dist) / range, 0.0, 1.0);
+            return clamp((d.fogEnd - dist) / range, 0.0, 1.0);
         }
         return 0.0;
-    } else if (pc.fogMode == 2048) { // GL_EXP
-        return clamp(exp(-pc.fogDensity * dist), 0.0, 1.0);
-    } else if (pc.fogMode == 2049) { // GL_EXP2
-        float f = pc.fogDensity * dist;
+    } else if (d.fogMode == 2048) { // GL_EXP
+        return clamp(exp(-d.fogDensity * dist), 0.0, 1.0);
+    } else if (d.fogMode == 2049) { // GL_EXP2
+        float f = d.fogDensity * dist;
         return clamp(exp(-f * f), 0.0, 1.0);
     }
     return 1.0;
 }
 
 void main() {
+    DrawData d = draws[inDraw];
     vec2 uv;
-    int flip = (pc.flags >> 1) & 3;
+    int flip = (d.flags >> 1) & 3;
     if (flip == 2) {
         uv = inUv.yx;
     } else if (flip == 1) {
@@ -68,16 +76,16 @@ void main() {
 
     // glAlphaFunc's comparison, all eight of them. GL_ALWAYS (the default) is index 7 and never discards, so a draw
     // that never called glAlphaFunc costs one compare.
-    if ((pc.flags & 1) != 0) {
-        int comparison = (pc.flags >> 6) & 7;
+    if ((d.flags & 1) != 0) {
+        int comparison = (d.flags >> 6) & 7;
         float a = sample4.a;
         bool passes = comparison == 7
-                || (comparison == 1 && a < pc.alphaReference)
-                || (comparison == 2 && a == pc.alphaReference)
-                || (comparison == 3 && a <= pc.alphaReference)
-                || (comparison == 4 && a > pc.alphaReference)
-                || (comparison == 5 && a != pc.alphaReference)
-                || (comparison == 6 && a >= pc.alphaReference);
+                || (comparison == 1 && a < d.alphaReference)
+                || (comparison == 2 && a == d.alphaReference)
+                || (comparison == 3 && a <= d.alphaReference)
+                || (comparison == 4 && a > d.alphaReference)
+                || (comparison == 5 && a != d.alphaReference)
+                || (comparison == 6 && a >= d.alphaReference);
         if (!passes) {
             discard;
         }
@@ -106,32 +114,32 @@ void main() {
     // Over the entity's own texture (the case that happens: the outline pass calls it with unit 0 active) the texture
     // is replaced, so the silhouette is one flat colour - that is what a glowing entity looks like, and it is why
     // multiplying the texture in here turned a white outline into the entity's own colour.
-    int overlayMode = (pc.flags >> 3) & 3;
+    int overlayMode = (d.flags >> 3) & 3;
     if (overlayMode > 1) {
         // The alpha still comes through the lightmap, as GL's modulate stage does: whatever the light contributes
         // there multiplies alpha as well as colour, and leaving it out would invent an opacity the fixed pipeline
         // never produced.
-        outColor = vec4(inColor.rgb * overlayColor().rgb * light, sample4.a * inColor.a * lightAlpha);
+        outColor = vec4(inColor.rgb * overlayColor(d).rgb * light, sample4.a * inColor.a * lightAlpha);
         return;
     }
     // Over a light: the texture stays, the light becomes the constant colour, and the silhouette's alpha comes from
     // that light. Kept because a mod can configure the combiner this way, and the two are not the same picture.
     if (overlayMode > 0) {
-        outColor = vec4(sample4.rgb * inColor.rgb * overlayColor().rgb,
+        outColor = vec4(sample4.rgb * inColor.rgb * overlayColor(d).rgb,
                 sample4.a * inColor.a * lightAlpha);
         return;
     }
 
     // The overlay is the lightmap unit's combine stage, so it modifies the light and not the finished colour:
     // vanilla makes a hurt mob red by lighting it red, not by mixing red into its textures.
-    if (overlayColor().a > 0.0) {
-        light = mix(light, overlayColor().rgb, overlayColor().a);
+    if (overlayColor(d).a > 0.0) {
+        light = mix(light, overlayColor(d).rgb, overlayColor(d).a);
     }
 
     vec4 baseColor = vec4(sample4.rgb * inColor.rgb * light, sample4.a * inColor.a);
-    if (pc.fogMode > 0) {
-        float f = computeFogFactor(inEyeDist);
-        outColor = vec4(mix(pc.fogColor.rgb, baseColor.rgb, f), baseColor.a);
+    if (d.fogMode > 0) {
+        float f = computeFogFactor(d, inEyeDist);
+        outColor = vec4(mix(d.fogColor.rgb, baseColor.rgb, f), baseColor.a);
     } else {
         outColor = baseColor;
     }

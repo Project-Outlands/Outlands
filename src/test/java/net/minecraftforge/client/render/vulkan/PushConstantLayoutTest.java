@@ -26,6 +26,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PushConstantLayoutTest {
 
+    private static SpirvReflection.Block storageBlock(String resource, int binding) throws IOException {
+        try (InputStream in = PushConstantLayoutTest.class.getResourceAsStream(resource)) {
+            assertNotNull(in, resource + " must be on the test classpath");
+            SpirvReflection.Module module = SpirvReflection.reflect(in.readAllBytes());
+            for (SpirvReflection.Block block : module.blocks()) {
+                if (block.binding() == binding) {
+                    return block;
+                }
+            }
+            throw new AssertionError(resource + " declares no descriptor block at binding " + binding
+                    + ", only " + module.blocks());
+        }
+    }
+
     private static SpirvReflection.Block pushConstants(String resource) throws IOException {
         try (InputStream in = PushConstantLayoutTest.class.getResourceAsStream(resource)) {
             assertNotNull(in, resource + " must be on the test classpath");
@@ -75,24 +89,38 @@ class PushConstantLayoutTest {
      */
     @Test
     void eachFragmentBlockMatchesItsVertexBlock() throws IOException {
-        for (String name : new String[] {"stream", "terrain"}) {
-            SpirvReflection.Block vertex = pushConstants("/assets/outlands/shaders/" + name + ".vert.spv");
-            SpirvReflection.Block fragment = pushConstants("/assets/outlands/shaders/" + name + ".frag.spv");
-            // A stage may declare fewer members than the other - it only has to stay inside the range the pipeline
-            // layout reserves - so the shared prefix is what has to agree.
-            int shared = Math.min(vertex.members().size(), fragment.members().size());
-            for (int i = 0; i < shared; i++) {
-                int index = i;
-                assertEquals(vertex.members().get(i).offset(), fragment.members().get(i).offset(),
-                        () -> name + ": member " + index + " is at a different offset in the fragment stage: "
-                                + vertex.members() + " vs " + fragment.members());
-            }
+        // Terrain still travels in push constants; the stream's per-draw block moved into a storage buffer, where the
+        // two stages have to agree just as exactly.
+        SpirvReflection.Block vertex = pushConstants("/assets/outlands/shaders/terrain.vert.spv");
+        SpirvReflection.Block fragment = pushConstants("/assets/outlands/shaders/terrain.frag.spv");
+        assertSharedPrefix("terrain", vertex, fragment);
+
+        assertSharedPrefix("stream",
+                storageBlock("/assets/outlands/shaders/stream.vert.spv", 1),
+                storageBlock("/assets/outlands/shaders/stream.frag.spv", 1));
+    }
+
+    private static void assertSharedPrefix(String name, SpirvReflection.Block vertex,
+                                           SpirvReflection.Block fragment) {
+        // A stage may declare fewer members than the other - it only has to stay inside the range the pipeline
+        // layout reserves - so the shared prefix is what has to agree.
+        int shared = Math.min(vertex.members().size(), fragment.members().size());
+        for (int i = 0; i < shared; i++) {
+            int index = i;
+            assertEquals(vertex.members().get(i).offset(), fragment.members().get(i).offset(),
+                    () -> name + ": member " + index + " is at a different offset in the fragment stage: "
+                            + vertex.members() + " vs " + fragment.members());
         }
     }
 
     @Test
     void theStreamBlockMatchesItsWriter() throws IOException {
-        SpirvReflection.Block block = pushConstants("/assets/outlands/shaders/stream.vert.spv");
+        SpirvReflection.Block block = storageBlock("/assets/outlands/shaders/stream.vert.spv", 1);
+        // The stride is the whole indexing scheme: the draw for entry N is issued with firstInstance = N, and the
+        // shader reads draws[gl_InstanceIndex]. A member added to the struct moves every entry after the first.
+        assertEquals(VulkanStream.DRAW_DATA_BYTES, block.arrayStride(),
+                () -> "the draw-data array stride is " + block.arrayStride() + ", the writer packs "
+                        + VulkanStream.DRAW_DATA_BYTES + " bytes a draw: " + block.members());
         assertLayout(block, offsets(
                 "modelViewProjection", 0,
                 "fogColor", 64,
@@ -108,9 +136,9 @@ class PushConstantLayoutTest {
                 "pointSize", 116,
                 "spare0", 120,
                 "spare1", 124));
-        assertTrue(block.size() <= VulkanPipeline.PUSH_CONSTANT_BYTES,
-                () -> "the stream block is " + block.size() + " bytes, over the guaranteed "
-                        + VulkanPipeline.PUSH_CONSTANT_BYTES);
+        assertTrue(block.size() <= VulkanStream.DRAW_DATA_BYTES,
+                () -> "the stream block is " + block.size() + " bytes, over the " + VulkanStream.DRAW_DATA_BYTES
+                        + " the writer packs");
     }
 
     @Test

@@ -10,6 +10,7 @@ import net.minecraftforge.client.render.vertex.PrimitiveShape;
 import net.minecraftforge.client.render.vertex.VertexConverter;
 
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
 
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
 import static org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets;
@@ -80,6 +82,18 @@ final class VulkanStream implements AutoCloseable {
      */
     private final VulkanBuffer[] vertexBuffers;
     private final VulkanBuffer[] indexBuffers;
+    /**
+     * One draw-data block per draw, per frame slot: the 128 bytes that used to be pushed.
+     *
+     * <p>Written by the CPU into host-visible memory the GPU reads, the same way the vertex and index buffers work, so
+     * a draw costs a memcpy instead of a state change. The descriptor points at it once and only has to be rewritten
+     * if the buffer is reallocated.</p>
+     */
+    /** Bytes of draw data per draw: the same block the push-constant path still uses for program draws. */
+    static final int DRAW_DATA_BYTES = VulkanPipeline.PUSH_CONSTANT_BYTES;
+
+    private final VulkanBuffer[] drawDataBuffers;
+    private final long[] drawDataHandles;
     private final VulkanDescriptors descriptors;
     private final VulkanTextures textures;
     /**
@@ -138,21 +152,6 @@ final class VulkanStream implements AutoCloseable {
     private VulkanPipeline.PipelineState cachedPipelineState;
     private VulkanPipeline cachedPipeline;
 
-    private final float[] lastPushedMvp = new float[16];
-    private float lastPushedAlphaRef = -1.0F;
-    private float lastPushedAlphaTest = -1.0F;
-    private int lastPushedFogMode = -1;
-    private float lastPushedFogStart = -1.0F;
-    private float lastPushedFogEnd = -1.0F;
-    private float lastPushedFogDensity = -1.0F;
-    private final float[] lastPushedFogColor = new float[4];
-    private final float[] lastPushedOverlayColor = new float[4];
-    /** The overlay mode last pushed, as 0.0 or 1.0, so a change of mode re-pushes. */
-    private float lastPushedOverlayMode = -1.0F;
-    private float lastPushedFogTanX = Float.NaN;
-    private float lastPushedFogTanY = Float.NaN;
-    private float lastPushedPointSize = Float.NaN;
-    private long lastPushedLayout = 0L;
 
     static final int STATIC_QUAD_CAPACITY = 65_536;
     static final int STATIC_QUAD_INDEX_COUNT = STATIC_QUAD_CAPACITY * 6;
@@ -167,11 +166,17 @@ final class VulkanStream implements AutoCloseable {
         this.staticQuadIndexBuffer = createStaticQuadIndexBuffer(device, context);
         this.vertexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
         this.indexBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.drawDataBuffers = new VulkanBuffer[VulkanSwapchain.FRAMES_IN_FLIGHT];
+        this.drawDataHandles = new long[VulkanSwapchain.FRAMES_IN_FLIGHT];
         for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
             this.vertexBuffers[i] = VulkanBuffer.createDynamic(device, context,
                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 1024 * 1024);
             this.indexBuffers[i] = VulkanBuffer.createDynamic(device, context,
                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 512 * 1024);
+            this.drawDataBuffers[i] = VulkanBuffer.createDynamic(device, context,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 512 * 1024);
+            this.drawDataHandles[i] = this.drawDataBuffers[i].handle();
+            descriptors.writeDrawData(i, this.drawDataHandles[i]);
         }
         this.vertex = VulkanShader.load(device, "/assets/outlands/shaders/stream.vert.spv");
         this.fragment = VulkanShader.load(device, "/assets/outlands/shaders/stream.frag.spv");
@@ -373,7 +378,16 @@ final class VulkanStream implements AutoCloseable {
             }
 
             ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
-            java.nio.FloatBuffer push = constants.asFloatBuffer();
+            // The program path still pushes: a mod's shader reads the block through the layout its own pipeline was
+            // built with, and those draws are a small share of a frame.
+            int drawDataBytes = Math.max(VulkanPipeline.PUSH_CONSTANT_BYTES, draws.size() * DRAW_DATA_BYTES);
+            drawDataBuffers[slot].ensureCapacity(drawDataBytes);
+            if (drawDataBuffers[slot].handle() != drawDataHandles[slot]) {
+                drawDataHandles[slot] = drawDataBuffers[slot].handle();
+                descriptors.writeDrawData(slot, drawDataHandles[slot]);
+            }
+            ByteBuffer drawData = MemoryUtil.memByteBuffer(drawDataBuffers[slot].mappedAddress(), drawDataBytes);
+            java.nio.FloatBuffer drawDataFloats = drawData.asFloatBuffer();
             long boundSet = 0L;
             long boundPipeline = 0L;
             boundIndexBuffer = 0L;
@@ -393,7 +407,6 @@ final class VulkanStream implements AutoCloseable {
             float[][] appliedBlendConstants = {{Float.NaN, 0.0F, 0.0F, 0.0F}};
 
             int indexOfOp = -1;
-            lastPushedLayout = 0L;
             // What the instance is currently open over. A frame starts on the window's image and every switch moves it.
             FrameRenderTarget current = windowTarget;
             FrameDump.maybeDump(ops);
@@ -420,7 +433,6 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = 0L;
                     boundPipeline = 0L;
                     boundIndexBuffer = 0L;
-                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.ReadPixels read) {
@@ -431,7 +443,6 @@ final class VulkanStream implements AutoCloseable {
                     current.beginRendering(commandBuffer);
                     appliedViewport[0] = Integer.MIN_VALUE;
                     appliedScissor[0] = Integer.MIN_VALUE;
-                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.FramebufferCopy copy) {
@@ -446,7 +457,6 @@ final class VulkanStream implements AutoCloseable {
                     // assuming the hardware state is still what it was before the copy.
                     appliedViewport[0] = Integer.MIN_VALUE;
                     appliedScissor[0] = Integer.MIN_VALUE;
-                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.TerrainLayer terrainOp) {
@@ -469,11 +479,9 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = 0L;
                     boundPipeline = 0L;
                     boundIndexBuffer = 0L;
-                    lastPushedLayout = 0L;
                     continue;
                 }
                 if (op instanceof FrameDraws.Clear clearOp) {
-                    lastPushedLayout = 0L;
                     int mask = clearOp.mask();
                     boolean clearColor = (mask & 0x4000) != 0;
                     boolean clearDepth = (mask & 0x100) != 0;
@@ -622,13 +630,17 @@ final class VulkanStream implements AutoCloseable {
                     // the last streamed draw had left behind, which placed every shader-drawn part of a model at the
                     // previous part's transform.
                     programs.record(commandBuffer, slot, ds, topo, programWinding, constants);
-                    issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
+                    // A program draw keeps the push path, so it has no draw-data entry: instance 0 it is.
+                    issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot, 0);
                     boundPipeline = 0L;
                     boundSet = 0L;
-                    lastPushedLayout = 0L;
                     continue;
                 }
 
+                // This draw's own block, written before anything reads it. No comparison with the previous draw's
+                // state: every draw gets its own entry whether it changed or not, which is what makes the pipeline
+                // state stay put across draws.
+                packDrawData(drawData, drawDataFloats, indexOfOp, draw.state());
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                         targetFlipsWinding);
                 applyLineWidth(commandBuffer, appliedLineWidth, ds);
@@ -649,64 +661,6 @@ final class VulkanStream implements AutoCloseable {
                     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
                     boundPipeline = pipeline.handle();
                 }
-                float[] curMvp = draw.state().mvp();
-                float curAlphaRef = draw.state().alphaReference();
-                float curAlphaTest = draw.state().alphaTest() ? 1.0F : 0.0F;
-                long curLayout = pipeline.layout();
-                int curFogMode = ds.fogMode();
-                float curFogStart = ds.fogStart();
-                float curFogEnd = ds.fogEnd();
-                float curFogDensity = ds.fogDensity();
-                float[] curFogColor = ds.fogColor();
-                float[] curOverlayColor = ds.overlayColor();
-                // The mode travels as it is: it says *what* the texture environment replaced (1 a light, 2 the
-                // texture), and collapsing it to "is it outline mode" sent the second case down the normal path - a
-                // silhouette in the entity's own texture colour, which is exactly what it was meant to avoid.
-                float curOverlayMode = (float) ds.overlayMode();
-                float curFogTanX = ds.fogTanX();
-                float curFogTanY = ds.fogTanY();
-                float curPointSize = ds.pointSize();
-
-                boolean needPush = curLayout != lastPushedLayout
-                        || curAlphaRef != lastPushedAlphaRef
-                        || curAlphaTest != lastPushedAlphaTest
-                        || curFogMode != lastPushedFogMode
-                        || (curFogMode > 0 && (curFogStart != lastPushedFogStart
-                                || curFogEnd != lastPushedFogEnd
-                                || curFogDensity != lastPushedFogDensity
-                                || curFogColor[0] != lastPushedFogColor[0]
-                                || curFogColor[1] != lastPushedFogColor[1]
-                                || curFogColor[2] != lastPushedFogColor[2]
-                                || curFogColor[3] != lastPushedFogColor[3]))
-                        || curOverlayMode != lastPushedOverlayMode
-                        || curOverlayColor[3] != lastPushedOverlayColor[3]
-                        // In outline mode the constant's alpha is zero and its colour is the whole point, so the
-                        // colour has to be compared whenever either mode is set, not only when there is alpha.
-                        || ((curOverlayMode != 0.0F || curOverlayColor[3] > 0.0f)
-                                && (curOverlayColor[0] != lastPushedOverlayColor[0]
-                                        || curOverlayColor[1] != lastPushedOverlayColor[1]
-                                        || curOverlayColor[2] != lastPushedOverlayColor[2]))
-                        || curFogTanX != lastPushedFogTanX
-                        || curFogTanY != lastPushedFogTanY
-                        || curPointSize != lastPushedPointSize
-                        || !java.util.Arrays.equals(curMvp, lastPushedMvp);
-                if (needPush) {
-                    pushConstants(commandBuffer, curLayout, constants, ds);
-                    System.arraycopy(curMvp, 0, lastPushedMvp, 0, 16);
-                    lastPushedAlphaRef = curAlphaRef;
-                    lastPushedAlphaTest = curAlphaTest;
-                    lastPushedFogMode = curFogMode;
-                    lastPushedFogStart = curFogStart;
-                    lastPushedFogEnd = curFogEnd;
-                    lastPushedFogDensity = curFogDensity;
-                    System.arraycopy(curFogColor, 0, lastPushedFogColor, 0, 4);
-                    System.arraycopy(curOverlayColor, 0, lastPushedOverlayColor, 0, 4);
-                    lastPushedOverlayMode = curOverlayMode;
-                    lastPushedFogTanX = curFogTanX;
-                    lastPushedFogTanY = curFogTanY;
-                    lastPushedPointSize = curPointSize;
-                    lastPushedLayout = curLayout;
-                }
                 if (textureSets[indexOfOp] != boundSet || streamSetsStale) {
                     // Both of the stream's sets, together: set 1 is the lightmap and a program draw may have replaced
                     // it since this was last bound.
@@ -715,7 +669,7 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = textureSets[indexOfOp];
                     streamSetsStale = false;
                 }
-                issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot);
+                issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot, indexOfOp);
             }
         }
     }
@@ -728,7 +682,7 @@ final class VulkanStream implements AutoCloseable {
      * one place where a mistake is a misaligned mesh rather than an error.</p>
      */
     private void issueDraw(VkCommandBuffer commandBuffer, FrameDraws.Draw draw, PrimitiveShape shape,
-                           int vertexOffset, int indexOffset, int slot) {
+                           int vertexOffset, int indexOffset, int slot, int firstInstance) {
         if (shape.needsIndexing()) {
             boolean staticQuad = isStaticQuad(shape, draw.vertexCount());
             long neededIndexBuffer = staticQuad ? staticQuadIndexBuffer.handle() : indexBuffers[slot].handle();
@@ -738,9 +692,9 @@ final class VulkanStream implements AutoCloseable {
                 boundIndexBuffer = neededIndexBuffer;
             }
             vkCmdDrawIndexed(commandBuffer, shape.indexCount(draw.vertexCount()), 1, indexOffset,
-                    vertexOffset / VertexConverter.STRIDE, 0);
+                    vertexOffset / VertexConverter.STRIDE, firstInstance);
         } else {
-            vkCmdDraw(commandBuffer, draw.vertexCount(), 1, vertexOffset / VertexConverter.STRIDE, 0);
+            vkCmdDraw(commandBuffer, draw.vertexCount(), 1, vertexOffset / VertexConverter.STRIDE, firstInstance);
         }
     }
 
@@ -898,7 +852,7 @@ final class VulkanStream implements AutoCloseable {
     static void pushConstants(VkCommandBuffer commandBuffer, long layout, ByteBuffer constants,
                                       DrawState state) {
         java.nio.FloatBuffer push = constants.asFloatBuffer();
-        packConstants(constants, push, state);
+        packConstants(constants, 0, push, state);
         constants.position(0);
         constants.limit(VulkanPipeline.PUSH_CONSTANT_BYTES);
         vkCmdPushConstants(commandBuffer, layout,
@@ -908,42 +862,57 @@ final class VulkanStream implements AutoCloseable {
     }
 
     /** The block itself: the matrix, then the fixed-function state the stream shader reads. */
-    private static void packConstants(ByteBuffer constants, java.nio.FloatBuffer push, DrawState state) {
-        writeMvp(push, state.mvp());
+    /**
+     * Packs one draw's block at its own stride in the draw-data buffer.
+     *
+     * <p>Package-private so a test can pack several draws into one buffer and check they do not overlap: the offsets
+     * here are in two units at once - bytes for the scalars, floats for the matrix - and getting one of them wrong is
+     * an exception at best and a wrong picture at worst.</p>
+     */
+    static void packDrawData(ByteBuffer target, java.nio.FloatBuffer floats, int drawIndex, DrawState state) {
+        packConstants(target, drawIndex * DRAW_DATA_BYTES, floats, state);
+    }
+
+    private static void packConstants(ByteBuffer constants, int base, java.nio.FloatBuffer push, DrawState state) {
+        // The scalars are written through the byte view, the matrix through a float view: two different index units
+        // for one block. Writing the matrix at the byte offset put the second draw's block at byte 512 of a 128-byte
+        // view, which is how this was found.
+        writeMvp(push, base / Float.BYTES, state.mvp());
         float[] fogColor = state.fogColor();
         float[] overlayColor = state.overlayColor();
-        constants.putFloat(64, fogColor[0]);
-        constants.putFloat(68, fogColor[1]);
-        constants.putFloat(72, fogColor[2]);
-        constants.putFloat(76, fogColor[3]);
+        constants.putFloat(base + 64, fogColor[0]);
+        constants.putFloat(base + 68, fogColor[1]);
+        constants.putFloat(base + 72, fogColor[2]);
+        constants.putFloat(base + 76, fogColor[3]);
         // Packed RGBA8: the block was full, and a colour is the cheapest thing in it to compress.
-        constants.putInt(80, packColor(overlayColor));
-        constants.putFloat(84, state.alphaReference());
+        constants.putInt(base + 80, packColor(overlayColor));
+        constants.putFloat(base + 84, state.alphaReference());
         // Bit 0 alpha test, bits 1-2 flip mode, bits 3-4 overlay mode (1 a light was replaced, 2 the texture, 0 the
         // hurt-flash mix), bit 5 radial fog. The stream path has no flip mode of its own, so that field stays 0 here;
         // the radial case needs no bit because a zero tangent already means GL's planar distance.
         // Bits 6-8 carry the alpha test's comparison function, so a mod that sets GL_ALWAYS or GL_LEQUAL gets the
         // test it asked for instead of a failed frame.
         int comparison = alphaComparisonIndex(state.alphaComparison());
-        constants.putInt(88, (state.alphaTest() ? 1 : 0) | ((state.overlayMode() & 3) << 3) | (comparison << 6));
-        constants.putInt(92, state.fogMode());
-        constants.putFloat(96, state.fogStart());
-        constants.putFloat(100, state.fogEnd());
-        constants.putFloat(104, state.fogDensity());
-        constants.putFloat(108, state.fogTanX());
-        constants.putFloat(112, state.fogTanY());
-        constants.putFloat(116, state.pointSize());
+        constants.putInt(base + 88, (state.alphaTest() ? 1 : 0) | ((state.overlayMode() & 3) << 3) | (comparison << 6));
+        constants.putInt(base + 92, state.fogMode());
+        constants.putFloat(base + 96, state.fogStart());
+        constants.putFloat(base + 100, state.fogEnd());
+        constants.putFloat(base + 104, state.fogDensity());
+        constants.putFloat(base + 108, state.fogTanX());
+        constants.putFloat(base + 112, state.fogTanY());
+        constants.putFloat(base + 116, state.pointSize());
     }
 
-    private static void writeMvp(java.nio.FloatBuffer target, float[] mvp) {
-        target.position(0);
-        target.put(mvp);
+    /** @param base index in floats, not bytes */
+    private static void writeMvp(java.nio.FloatBuffer target, int base, float[] mvp) {
+        for (int i = 0; i < 16; i++) {
+            target.put(base + i, mvp[i]);
+        }
         // Column-major: row 1 is Y (negated for Vulkan NDC) and row 2 is Z (remapped to [0, w]).
         for (int col = 0; col < 16; col += 4) {
-            target.put(col + 1, -target.get(col + 1));
-            target.put(col + 2, 0.5F * (target.get(col + 2) + target.get(col + 3)));
+            target.put(base + col + 1, -target.get(base + col + 1));
+            target.put(base + col + 2, 0.5F * (target.get(base + col + 2) + target.get(base + col + 3)));
         }
-        target.position(0);
     }
 
 
@@ -965,9 +934,14 @@ final class VulkanStream implements AutoCloseable {
     }
 
     private VulkanPipeline pipelineFor(VulkanPipeline.PipelineState state) {
-        return pipelines.computeIfAbsent(state,
-                key -> VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
-                        descriptors.pipelineLayout(), descriptors.layout(), key));
+        VulkanPipeline existing = pipelines.get(state);
+        if (existing != null) {
+            return existing;
+        }
+        VulkanPipeline created = VulkanPipeline.create(device, vertex, fragment, colorFormat, depthFormat,
+                descriptors.pipelineLayout(), descriptors.layout(), state);
+        pipelines.put(state, created);
+        return created;
     }
 
     /** The lightmap image the shared set 1 currently points at per slot. */
