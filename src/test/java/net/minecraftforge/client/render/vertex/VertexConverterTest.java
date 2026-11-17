@@ -70,6 +70,36 @@ class VertexConverterTest {
     }
 
     @Test
+    void blockFromAnArrayIsACopyAndTheCopyEqualsTheGeneralPath() {
+        // The array path takes a shortcut for BLOCK: it is the target layout byte for byte, so it is a copy. The
+        // general path has to agree with it, which is what the second half checks - an equivalent format that is a
+        // different object takes the long way round.
+        VertexFormat block = DefaultVertexFormats.BLOCK;
+        byte[] source = new byte[3 * block.getSize()];
+        for (int i = 0; i < source.length; i++) {
+            source[i] = (byte) (i * 11);
+        }
+
+        ByteBuffer fast = direct(3 * VertexConverter.STRIDE);
+        VertexConverter.convert(source, 0, VertexLayout.of(block), 3, 0xFFFFFFFF, null, false, null, null, null,
+                fast, 0);
+        byte[] fastOut = new byte[3 * VertexConverter.STRIDE];
+        fast.duplicate().get(fastOut);
+        assertEquals(new String(source), new String(fastOut), "BLOCK from an array is a straight copy");
+
+        VertexFormat sameLayout = new VertexFormat();
+        for (int i = 0; i < block.getElementCount(); i++) {
+            sameLayout.addElement(block.getElement(i));
+        }
+        ByteBuffer general = direct(3 * VertexConverter.STRIDE);
+        VertexConverter.convert(source, 0, VertexLayout.of(sameLayout), 3, 0xFFFFFFFF, null, false, null, null,
+                null, general, 0);
+        byte[] generalOut = new byte[3 * VertexConverter.STRIDE];
+        general.duplicate().get(generalOut);
+        assertEquals(new String(fastOut), new String(generalOut), "the shortcut and the general path agree");
+    }
+
+    @Test
     void positionTexColorIsRewrittenAndGetsAFullBrightnessLightmap() {
         // This is the GUI and font format: no lightmap, and no normal. Its vertices must not come out black.
         VertexFormat format = DefaultVertexFormats.POSITION_TEX_COLOR;

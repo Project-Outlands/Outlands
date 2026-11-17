@@ -1,6 +1,8 @@
 package net.minecraftforge.client.render.vertex;
 
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
+import org.lwjgl.system.MemoryUtil;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -38,6 +40,17 @@ public final class VertexConverter {
 
     /** Full lightmap: both components at their maximum, which is what an unlit-input vertex should look like. */
     private static final int FULL_LIGHTMAP = 0xFFFF;
+
+    /** What the source carries for colour, resolved once per call so the vertex loop has no type tests. */
+    private static final int COLOR_NONE = 0;
+    private static final int COLOR_UBYTE4 = 1;
+    private static final int COLOR_FLOAT4 = 2;
+    private static final int COLOR_FLOAT3 = 3;
+
+    /** What the source carries for a normal, likewise. */
+    private static final int NORMAL_NONE = 0;
+    private static final int NORMAL_BYTE = 1;
+    private static final int NORMAL_FLOAT = 2;
 
     private static final VarHandle FLOAT_VIEW =
             MethodHandles.byteArrayViewVarHandle(float[].class, ByteOrder.nativeOrder());
@@ -115,19 +128,79 @@ public final class VertexConverter {
             throw new IllegalArgumentException("layout needs " + required + " bytes for " + vertexCount
                     + " vertices at stride " + inStride + ", the array has " + (source.length - sourceOffset));
         }
+        if (vertexCount <= 0) {
+            return;
+        }
 
-        VertexLayout.Attribute[] attributes = layout.attributesArray();
-        int attrCount = attributes.length;
-        VertexLayout.Attribute normalAttr = null;
-        VertexLayout.Attribute colorAttr = null;
-        for (int i = 0; i < attrCount; i++) {
-            VertexLayout.Attribute attr = attributes[i];
-            if (attr.usage() == VertexFormatElement.EnumUsage.NORMAL) {
-                normalAttr = attr;
-            } else if (attr.usage() == VertexFormatElement.EnumUsage.COLOR) {
-                colorAttr = attr;
+        // Already the target layout, byte for byte. Vanilla's BLOCK format is exactly it, and it is the format tile
+        // entities, items and most mod draws use - so the common case costs a copy and nothing else.
+        if (layout.format() == DefaultVertexFormats.BLOCK) {
+            copyRange(source, sourceOffset, target, targetOffset, vertexCount * STRIDE);
+            return;
+        }
+
+        // Every attribute is resolved once, before the loop. The switch this replaced ran per vertex per attribute,
+        // and for the formats that reach here it was most of what the method did.
+        int positionAt = -1;
+        int positionCount = 3;
+        int uvAt = -1;
+        int lightmapAt = -1;
+        int colorAt = -1;
+        int colorKind = COLOR_NONE;
+        int normalAt = -1;
+        int normalKind = NORMAL_NONE;
+        for (VertexLayout.Attribute attribute : layout.attributesArray()) {
+            switch (attribute.usage()) {
+                case POSITION -> {
+                    if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
+                        throw new UnsupportedOperationException("position of type " + attribute.type()
+                                + " is not handled: vanilla only uses FLOAT positions");
+                    }
+                    positionAt = attribute.offset();
+                    positionCount = attribute.count();
+                }
+                case UV -> {
+                    if (attribute.uvIndex() == 1) {
+                        // The second texture coordinate is the lightmap: two unsigned shorts in the target.
+                        if (attribute.type() != VertexFormatElement.EnumType.SHORT
+                                && attribute.type() != VertexFormatElement.EnumType.USHORT) {
+                            throw new UnsupportedOperationException("lightmap of type " + attribute.type()
+                                    + " is not handled: vanilla uses SHORT");
+                        }
+                        lightmapAt = attribute.offset();
+                    } else {
+                        if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
+                            throw new UnsupportedOperationException("texture coordinate of type " + attribute.type()
+                                    + " is not handled: vanilla uses FLOAT");
+                        }
+                        uvAt = attribute.offset();
+                    }
+                }
+                case COLOR -> {
+                    colorAt = attribute.offset();
+                    if (attribute.type() == VertexFormatElement.EnumType.FLOAT) {
+                        colorKind = attribute.count() >= 4 ? COLOR_FLOAT4 : COLOR_FLOAT3;
+                    } else if (attribute.type() == VertexFormatElement.EnumType.UBYTE && attribute.count() == 4) {
+                        colorKind = COLOR_UBYTE4;
+                    } else {
+                        // No case for anything else: the fallback colour is used whole, which is what the old code
+                        // did by reading nothing.
+                        colorKind = COLOR_NONE;
+                    }
+                }
+                case NORMAL -> {
+                    normalAt = attribute.offset();
+                    normalKind = switch (attribute.type()) {
+                        case BYTE, UBYTE -> NORMAL_BYTE;
+                        case FLOAT -> NORMAL_FLOAT;
+                        default -> NORMAL_NONE;
+                    };
+                }
+                default -> {
+                }
             }
         }
+
         int fallbackLight = FULL_LIGHTMAP | (FULL_LIGHTMAP << 16);
         if (fallbackLightmap != null) {
             int block = Math.round(Math.max(0.0F, Math.min(240.0F, fallbackLightmap[0])));
@@ -140,67 +213,111 @@ public final class VertexConverter {
         int fbB = fallbackColor & 0xFF;
         int fbA = (fallbackColor >>> 24) & 0xFF;
 
+        boolean lit = normalAt >= 0 && lightingEnabled && normalMatrix != null && lighting != null;
+        float[] cachedVertex = lit ? new float[] {1.0F, 1.0F, 1.0F} : null;
+        float[] cachedConstant = lit ? new float[] {0.0F, 0.0F, 0.0F} : null;
         float lastNx = Float.NaN, lastNy = Float.NaN, lastNz = Float.NaN;
-        float[] cachedVertex = {1.0F, 1.0F, 1.0F};
-        float[] cachedConstant = {0.0F, 0.0F, 0.0F};
+
+        // A direct target is the mapped vertex buffer, and writing to it through a long address is the only way to
+        // avoid a bounds check per component. A heap target is a test or a byte array, where the buffer's own put is
+        // the right call, so the choice is made once here rather than per write.
+        long address = target.isDirect() ? MemoryUtil.memAddress(target) : 0L;
+        boolean mvpTexture = textureMatrix != null;
 
         for (int vertex = 0; vertex < vertexCount; vertex++) {
             int base = targetOffset + vertex * STRIDE;
             int sourceBase = sourceOffset + vertex * inStride;
 
-            target.putFloat(base + UV_OFFSET, 0.0F);
-            target.putFloat(base + UV_OFFSET + 4, 0.0F);
-            target.putInt(base + LIGHTMAP_OFFSET, fallbackLight);
+            // Neutrals first, so a format that lacks an attribute still produces a sane vertex.
+            putFloat(address, target, base + UV_OFFSET, 0.0F);
+            putFloat(address, target, base + UV_OFFSET + 4, 0.0F);
+            putInt(address, target, base + LIGHTMAP_OFFSET, fallbackLight);
 
-            for (int i = 0; i < attrCount; i++) {
-                VertexLayout.Attribute attribute = attributes[i];
-                int at = sourceBase + attribute.offset();
-                switch (attribute.usage()) {
-                    case POSITION -> copyPosition(source, at, target, base, attribute);
-                    case UV -> copyUv(source, at, target, base, attribute, textureMatrix);
-                    default -> {
-                    }
+            if (positionAt >= 0) {
+                int at = sourceBase + positionAt;
+                putFloat(address, target, base + POSITION_OFFSET, (float) FLOAT_VIEW.get(source, at));
+                putFloat(address, target, base + POSITION_OFFSET + 4, (float) FLOAT_VIEW.get(source, at + 4));
+                // A two-component position exists (GUI points); its third coordinate is zero rather than absent.
+                putFloat(address, target, base + POSITION_OFFSET + 8,
+                        positionCount >= 3 ? (float) FLOAT_VIEW.get(source, at + 8) : 0.0F);
+            }
+
+            if (lightmapAt >= 0) {
+                int at = sourceBase + lightmapAt;
+                putShort(address, target, base + LIGHTMAP_OFFSET, (short) SHORT_VIEW.get(source, at));
+                putShort(address, target, base + LIGHTMAP_OFFSET + 2, (short) SHORT_VIEW.get(source, at + 2));
+            }
+
+            if (uvAt >= 0) {
+                int at = sourceBase + uvAt;
+                float u = (float) FLOAT_VIEW.get(source, at);
+                float v = (float) FLOAT_VIEW.get(source, at + 4);
+                if (mvpTexture) {
+                    putFloat(address, target, base + UV_OFFSET,
+                            textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12]);
+                    putFloat(address, target, base + UV_OFFSET + 4,
+                            textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13]);
+                } else {
+                    putFloat(address, target, base + UV_OFFSET, u);
+                    putFloat(address, target, base + UV_OFFSET + 4, v);
                 }
             }
 
             int r = fbR, g = fbG, b = fbB, a = fbA;
-            if (colorAttr != null) {
-                int at = sourceBase + colorAttr.offset();
-                if (colorAttr.type() == VertexFormatElement.EnumType.UBYTE && colorAttr.count() == 4) {
+            switch (colorKind) {
+                case COLOR_UBYTE4 -> {
+                    int at = sourceBase + colorAt;
                     r = source[at] & 0xFF;
                     g = source[at + 1] & 0xFF;
                     b = source[at + 2] & 0xFF;
                     a = source[at + 3] & 0xFF;
-                } else if (colorAttr.type() == VertexFormatElement.EnumType.FLOAT) {
+                }
+                case COLOR_FLOAT4 -> {
+                    int at = sourceBase + colorAt;
                     r = toByte((float) FLOAT_VIEW.get(source, at)) & 0xFF;
                     g = toByte((float) FLOAT_VIEW.get(source, at + 4)) & 0xFF;
                     b = toByte((float) FLOAT_VIEW.get(source, at + 8)) & 0xFF;
-                    a = colorAttr.count() >= 4 ? (toByte((float) FLOAT_VIEW.get(source, at + 12)) & 0xFF) : 0xFF;
+                    a = toByte((float) FLOAT_VIEW.get(source, at + 12)) & 0xFF;
+                }
+                case COLOR_FLOAT3 -> {
+                    int at = sourceBase + colorAt;
+                    r = toByte((float) FLOAT_VIEW.get(source, at)) & 0xFF;
+                    g = toByte((float) FLOAT_VIEW.get(source, at + 4)) & 0xFF;
+                    b = toByte((float) FLOAT_VIEW.get(source, at + 8)) & 0xFF;
+                    a = 0xFF;
+                }
+                default -> {
                 }
             }
 
-            if (normalAttr != null && lightingEnabled && normalMatrix != null && lighting != null) {
-                int at = sourceBase + normalAttr.offset();
+            if (lit) {
+                int at = sourceBase + normalAt;
                 float nx, ny, nz;
-                if (normalAttr.type() == VertexFormatElement.EnumType.BYTE
-                        || normalAttr.type() == VertexFormatElement.EnumType.UBYTE) {
-                    nx = source[at];
-                    ny = source[at + 1];
-                    nz = source[at + 2];
-                } else if (normalAttr.type() == VertexFormatElement.EnumType.FLOAT) {
-                    nx = (float) FLOAT_VIEW.get(source, at);
-                    ny = (float) FLOAT_VIEW.get(source, at + 4);
-                    nz = (float) FLOAT_VIEW.get(source, at + 8);
-                } else {
-                    nx = 0.0F; ny = 0.0F; nz = 0.0F;
+                switch (normalKind) {
+                    case NORMAL_BYTE -> {
+                        nx = source[at];
+                        ny = source[at + 1];
+                        nz = source[at + 2];
+                    }
+                    case NORMAL_FLOAT -> {
+                        nx = (float) FLOAT_VIEW.get(source, at);
+                        ny = (float) FLOAT_VIEW.get(source, at + 4);
+                        nz = (float) FLOAT_VIEW.get(source, at + 8);
+                    }
+                    default -> {
+                        nx = 0.0F;
+                        ny = 0.0F;
+                        nz = 0.0F;
+                    }
                 }
 
                 if (nx != lastNx || ny != lastNy || nz != lastNz) {
                     lastNx = nx;
                     lastNy = ny;
                     lastNz = nz;
-                    computeLightingFactor(nx, ny, nz, normalAttr.type(), normalMatrix, lighting,
-                            cachedVertex, cachedConstant);
+                    computeLightingFactor(nx, ny, nz, normalKind == NORMAL_BYTE
+                                    ? VertexFormatElement.EnumType.BYTE : VertexFormatElement.EnumType.FLOAT,
+                            normalMatrix, lighting, cachedVertex, cachedConstant);
                 }
 
                 // GL's equation as the model rearranged it: vertex * A + B. With colour material off - or on with a
@@ -211,7 +328,41 @@ public final class VertexConverter {
                 b = clampByte(Math.round(b * cachedVertex[2] + 255.0F * cachedConstant[2]));
             }
 
-            target.putInt(base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
+            putInt(address, target, base + COLOR_OFFSET, (a << 24) | (b << 16) | (g << 8) | r);
+        }
+    }
+
+    /** Copies a byte range into the target, whichever kind of buffer it is. */
+    private static void copyRange(byte[] source, int sourceOffset, ByteBuffer target, int targetOffset, int length) {
+        if (target.isDirect()) {
+            MemoryUtil.memByteBuffer(MemoryUtil.memAddress(target) + targetOffset, length)
+                    .put(source, sourceOffset, length);
+        } else {
+            target.put(source, sourceOffset, length);
+        }
+    }
+
+    private static void putFloat(long address, ByteBuffer out, int index, float value) {
+        if (address != 0L) {
+            MemoryUtil.memPutFloat(address + index, value);
+        } else {
+            out.putFloat(index, value);
+        }
+    }
+
+    private static void putInt(long address, ByteBuffer out, int index, int value) {
+        if (address != 0L) {
+            MemoryUtil.memPutInt(address + index, value);
+        } else {
+            out.putInt(index, value);
+        }
+    }
+
+    private static void putShort(long address, ByteBuffer out, int index, short value) {
+        if (address != 0L) {
+            MemoryUtil.memPutShort(address + index, value);
+        } else {
+            out.putShort(index, value);
         }
     }
 
@@ -372,17 +523,6 @@ public final class VertexConverter {
         return out;
     }
 
-    private static void copyPosition(byte[] source, int at, ByteBuffer out, int base,
-            VertexLayout.Attribute attribute) {
-        if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
-            throw new UnsupportedOperationException("position of type " + attribute.type()
-                    + " is not handled: vanilla only uses FLOAT positions");
-        }
-        out.putFloat(base + POSITION_OFFSET, (float) FLOAT_VIEW.get(source, at));
-        out.putFloat(base + POSITION_OFFSET + 4, (float) FLOAT_VIEW.get(source, at + 4));
-        // A two-component position exists (GUI points); its third coordinate is zero rather than absent.
-        out.putFloat(base + POSITION_OFFSET + 8, attribute.count() >= 3 ? (float) FLOAT_VIEW.get(source, at + 8) : 0.0F);
-    }
 
     private static void copyPosition(ByteBuffer in, int at, ByteBuffer out, int base,
             VertexLayout.Attribute attribute) {
@@ -396,35 +536,6 @@ public final class VertexConverter {
         out.putFloat(base + POSITION_OFFSET + 8, attribute.count() >= 3 ? in.getFloat(at + 8) : 0.0F);
     }
 
-    private static void copyUv(byte[] source, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute,
-                               float[] textureMatrix) {
-        if (attribute.uvIndex() == 1) {
-            // The second texture coordinate is the lightmap: two unsigned shorts in the target.
-            if (attribute.type() != VertexFormatElement.EnumType.SHORT
-                    && attribute.type() != VertexFormatElement.EnumType.USHORT) {
-                throw new UnsupportedOperationException("lightmap of type " + attribute.type()
-                        + " is not handled: vanilla uses SHORT");
-            }
-            out.putShort(base + LIGHTMAP_OFFSET, (short) SHORT_VIEW.get(source, at));
-            out.putShort(base + LIGHTMAP_OFFSET + 2, (short) SHORT_VIEW.get(source, at + 2));
-            return;
-        }
-        if (attribute.type() != VertexFormatElement.EnumType.FLOAT) {
-            throw new UnsupportedOperationException("texture coordinate of type " + attribute.type()
-                    + " is not handled: vanilla uses FLOAT");
-        }
-        float u = (float) FLOAT_VIEW.get(source, at);
-        float v = (float) FLOAT_VIEW.get(source, at + 4);
-        if (textureMatrix != null) {
-            float uPrime = textureMatrix[0] * u + textureMatrix[4] * v + textureMatrix[12];
-            float vPrime = textureMatrix[1] * u + textureMatrix[5] * v + textureMatrix[13];
-            out.putFloat(base + UV_OFFSET, uPrime);
-            out.putFloat(base + UV_OFFSET + 4, vPrime);
-        } else {
-            out.putFloat(base + UV_OFFSET, u);
-            out.putFloat(base + UV_OFFSET + 4, v);
-        }
-    }
 
     private static void copyUv(ByteBuffer in, int at, ByteBuffer out, int base, VertexLayout.Attribute attribute,
                                float[] textureMatrix) {
