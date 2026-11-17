@@ -499,6 +499,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         }
         int drawn = 0;
         int culled = 0;
+        int matched = -1;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             boolean isTranslucent = layer == net.minecraft.util.BlockRenderLayer.TRANSLUCENT.ordinal();
             VulkanPipeline activePipeline = isTranslucent ? translucentPipeline : pipeline;
@@ -610,13 +611,16 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             if (visibleChunks != null) {
                 translucentSortedList.clear();
                 int count = visibleChunks.size();
+                int found = 0;
                 var map = layerSliceMaps[layer];
                 for (int i = 0; i < count; i++) {
                     TerrainSlice slice = map.get(visibleChunks.getLong(i));
                     if (slice != null) {
+                        found++;
                         translucentSortedList.add(slice);
                     }
                 }
+                matched = found;
                 if (isTranslucent) {
                     this.cameraX = viewX;
                     this.cameraY = viewY;
@@ -800,6 +804,27 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
 
             drawCount += drawn;
         }
+        // A layer that has geometry and drew none of it is the picture the player notices: the world is gone and only
+        // the sky and the particles remain. The three ways it can happen are told apart here, because each one is a
+        // different bug: the walk handed over no sections, the walk's sections did not match any slice, or our own
+        // frustum rejected them.
+        if (drawn == 0 && !list.isEmpty()) {
+            alarm(layer, list.size(), visibleChunks, matched, culled);
+        }
+    }
+
+    private static long lastAlarmNanos;
+
+    private static void alarm(int layer, int slices, java.util.List<?> visibleChunks, int matched, int culled) {
+        long now = System.nanoTime();
+        if (now - lastAlarmNanos < 5_000_000_000L) {
+            return;
+        }
+        lastAlarmNanos = now;
+        String visible = visibleChunks == null ? "no list"
+                : visibleChunks.size() + " sections" + (matched < 0 ? "" : ", " + matched + " matched");
+        LOGGER.warn("terrain layer {} drew nothing: {} slices held, the game gave {}, {} culled by our frustum",
+                layer, slices, visible, culled);
     }
 
     /**
