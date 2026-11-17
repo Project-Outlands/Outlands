@@ -6,8 +6,8 @@ package net.minecraftforge.client.render.probe;
  * <p><b>Why this is the measurement that matters now.</b> The other halves of the section-graph architecture are already
  * here in some form: terrain meshes live in this renderer's own buffers, and a layer is drawn with one indirect command
  * per slab rather than one per section. What vanilla still does on the render thread, every frame, is walk the
- * visibility graph - frustum, per-section face encoding, the region cache and the raster occluder - and that is the
- * part Sodium moves to its own thread and stores in a dense lattice.</p>
+ * visibility graph - frustum, per-section face encoding and the region cache - and that is the part Sodium moves to
+ * its own thread and stores in a dense lattice.</p>
  *
  * <p>Whether it is worth moving depends on what it costs, so it is measured: wall time of
  * {@code RenderGlobal.setupTerrain}, how many sections the walk visited, and the worst frame of each.</p>
@@ -28,12 +28,6 @@ public final class TerrainCullProbe {
     private static long walkMaxNanos;
     private static long walks;
     private static long frames;
-    private static long visibleThisWalk;
-    private static long traversableThisWalk;
-    private static long hiddenThisWalk;
-    private static long visible;
-    private static long traversable;
-    private static long hidden;
     private static long resultSize;
     private static long published;
     private static long maxResultSize;
@@ -68,12 +62,6 @@ public final class TerrainCullProbe {
             maxNanosPerFrame = elapsed;
         }
         visited += visitedThisFrame;
-        visible += visibleThisWalk;
-        traversable += traversableThisWalk;
-        hidden += hiddenThisWalk;
-        visibleThisWalk = 0;
-        traversableThisWalk = 0;
-        hiddenThisWalk = 0;
         published += resultSize;
         if (resultSize > maxResultSize) {
             maxResultSize = resultSize;
@@ -110,25 +98,6 @@ public final class TerrainCullProbe {
         visitedThisFrame++;
     }
 
-    /**
-     * Records the verdict a section got: drawn, walked through but not drawn, or cut.
-     *
-     * <p>The three counts are what makes two runs comparable at all: with different scenes, "the walk took 4 ms" says
-     * nothing, while "it culled 62% of what it reached" is the same statement in any scene.</p>
-     */
-    public static void verdict(boolean rendered, boolean traversed) {
-        if (!enabled) {
-            return;
-        }
-        if (!traversed) {
-            hiddenThisWalk++;
-        } else if (rendered) {
-            visibleThisWalk++;
-        } else {
-            traversableThisWalk++;
-        }
-    }
-
     /** Records how many sections the walk ended up publishing. */
     public static void result(int size) {
         if (!enabled) {
@@ -154,10 +123,7 @@ public final class TerrainCullProbe {
                 + " ms/walk (worst " + oneDecimal(walkMaxNanos / 1_000_000.0) + ", " + walks + " walks in "
                 + frames + " calls), "
                 + (long) (visited / Math.max(1, walks)) + " sections/walk (at most " + maxVisitedPerFrame + "),"
-                + " visible " + (long) (visible / Math.max(1, walks))
-                + " traversable " + (long) (traversable / Math.max(1, walks))
-                + " hidden " + (long) (hidden / Math.max(1, walks))
-                + ", published " + (long) (published / Math.max(1, walks)) + " (at most " + maxResultSize + ")";
+                + " published " + (long) (published / Math.max(1, walks)) + " (at most " + maxResultSize + ")";
         walkNanos = 0;
         walkMaxNanos = 0;
         walks = 0;
@@ -165,9 +131,6 @@ public final class TerrainCullProbe {
         frames = 0;
         visited = 0;
         maxVisitedPerFrame = 0;
-        visible = 0;
-        traversable = 0;
-        hidden = 0;
         published = 0;
         maxResultSize = 0;
         maxNanosPerFrame = 0;

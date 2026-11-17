@@ -1,10 +1,9 @@
 --- before/net/minecraft/client/renderer/chunk/CompiledChunk.java
 +++ after/net/minecraft/client/renderer/chunk/CompiledChunk.java
-@@ -36,6 +36,15 @@
+@@ -36,6 +36,14 @@
      private final List<TileEntity> tileEntities = Lists.newArrayList();
      private SetVisibility setVisibility = new SetVisibility();
      private BufferBuilder.State state;
-+    private int[] occluderData;
 +    /**
 +     * Forge: the animated sprites this chunk's geometry samples.
 +     *
@@ -16,15 +15,10 @@
  
      public boolean isEmpty()
      {
-@@ -91,5 +100,27 @@
+@@ -91,5 +99,17 @@
      public void setState(BufferBuilder.State stateIn)
      {
          this.state = stateIn;
-+    }
-+
-+    public int[] getOccluderData()
-+    {
-+        return this.occluderData;
 +    }
 +
 +    /** Forge: records a sprite this chunk's geometry samples. */
@@ -37,10 +31,5 @@
 +    public java.util.Set<net.minecraft.client.renderer.texture.TextureAtlasSprite> outlandsSprites()
 +    {
 +        return this.outlandsSprites;
-+    }
-+
-+    public void setOccluderData(int[] occluderDataIn)
-+    {
-+        this.occluderData = occluderDataIn;
      }
  }

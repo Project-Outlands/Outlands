@@ -20,14 +20,3 @@
      @Override
      public boolean isBoundingBoxInFrustum(AxisAlignedBB p_78546_1_)
      {
-@@ -54,5 +67,10 @@
-                    p_78546_1_.maxY,
-                    p_78546_1_.maxZ
-                );
-+    }
-+
-+    public org.joml.Matrix4f getVpMatrix()
-+    {
-+        return this.clippingHelper != null ? this.clippingHelper.getVpMatrix() : null;
-     }
- }

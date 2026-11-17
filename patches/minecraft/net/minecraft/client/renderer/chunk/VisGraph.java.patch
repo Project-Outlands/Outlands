@@ -15,27 +15,15 @@
                  }
              }
          }
-@@ -65,15 +66,25 @@
+@@ -65,15 +66,15 @@
  
      public Set<EnumFacing> getVisibleFacings(BlockPos pos)
      {
 -        return this.floodFill(getIndex(pos));
--    }
--
--    private Set<EnumFacing> floodFill(int pos)
 +        return this.floodFill(getIndex(pos), (BitSet) this.bitSet.clone());
-+    }
-+
-+    public long[] getOpaqueBits()
-+    {
-+        return this.bitSet.toLongArray();
-+    }
-+
-+    public int getEmpty()
-+    {
-+        return this.empty;
-+    }
-+
+     }
+ 
+-    private Set<EnumFacing> floodFill(int pos)
 +    private Set<EnumFacing> floodFill(int pos, BitSet visited)
      {
          Set<EnumFacing> set = EnumSet.noneOf(EnumFacing.class);
@@ -46,7 +34,7 @@
  
          while (!queue.isEmpty())
          {
-@@ -84,9 +95,9 @@
+@@ -84,9 +85,9 @@
              {
                  int j = this.getNeighborIndexAtFace(i, enumfacing);
  

@@ -1,6 +1,6 @@
 --- before/net/minecraft/client/renderer/culling/ClippingHelper.java
 +++ after/net/minecraft/client/renderer/culling/ClippingHelper.java
-@@ -16,25 +16,63 @@
+@@ -16,20 +16,53 @@
          return p_178624_1_[0] * p_178624_2_ + p_178624_1_[1] * p_178624_4_ + p_178624_1_[2] * p_178624_6_ + p_178624_1_[3];
      }
  
@@ -62,13 +62,3 @@
              {
                  return false;
              }
-         }
- 
-         return true;
-+    }
-+
-+    public org.joml.Matrix4f getVpMatrix()
-+    {
-+        return null;
-     }
- }

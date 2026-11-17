@@ -49,7 +49,7 @@
              this.boundingBox = new AxisAlignedBB(x, y, z, x + 16, y + 16, z + 16);
  
              for (EnumFacing enumfacing : EnumFacing.values())
-@@ -152,8 +178,13 @@
+@@ -152,6 +178,10 @@
              generator.getLock().unlock();
          }
  
@@ -59,11 +59,8 @@
 +
          VisGraph lvt_9_1_ = new VisGraph();
          HashSet lvt_10_1_ = Sets.newHashSet();
-+        net.minecraftforge.client.render.culling.geometry.RenderableBounds renderableBounds = new net.minecraftforge.client.render.culling.geometry.RenderableBounds();
  
-         if (!this.worldView.isEmpty())
-         {
-@@ -171,27 +202,30 @@
+@@ -171,7 +201,7 @@
                      lvt_9_1_.setOpaqueCube(blockpos$mutableblockpos);
                  }
  
@@ -72,10 +69,7 @@
                  {
                      TileEntity tileentity = this.worldView.getTileEntity(blockpos$mutableblockpos, Chunk.EnumCreateEntityType.CHECK);
  
-                     if (tileentity != null)
-                     {
-+                        renderableBounds.mark(blockpos$mutableblockpos.getX() & 15, blockpos$mutableblockpos.getY() & 15, blockpos$mutableblockpos.getZ() & 15);
-                         TileEntitySpecialRenderer<TileEntity> tileentityspecialrenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
+@@ -181,17 +211,19 @@
  
                          if (tileentityspecialrenderer != null)
                          {
@@ -97,7 +91,7 @@
                  int j = blockrenderlayer1.ordinal();
  
                  if (block.getDefaultState().getRenderType() != EnumBlockRenderType.INVISIBLE)
-@@ -204,8 +238,14 @@
+@@ -204,8 +236,13 @@
                          this.preRenderBlocks(bufferbuilder, blockpos);
                      }
  
@@ -106,7 +100,6 @@
 +                    if (blockrendererdispatcher.renderBlock(iblockstate, blockpos$mutableblockpos, this.worldView, bufferbuilder))
 +                    {
 +                        aboolean[j] = true;
-+                        renderableBounds.mark(blockpos$mutableblockpos.getX() & 15, blockpos$mutableblockpos.getY() & 15, blockpos$mutableblockpos.getZ() & 15);
 +                    }
 +                }
 +                }
@@ -114,40 +107,15 @@
              }
  
              for (BlockRenderLayer blockrenderlayer : BlockRenderLayer.values())
-@@ -224,7 +264,32 @@
-             }
+@@ -225,6 +262,7 @@
          }
  
-+        int emptyCount = lvt_9_1_.getEmpty();
-+        if (emptyCount == 0)
-+        {
-+            compiledchunk.setOccluderData(new int[] { grondag.bitraster.PackedBox.FULL_BOX, grondag.bitraster.PackedBox.FULL_BOX });
-+        }
-+        else if (emptyCount < 4096)
-+        {
-+            long[] words = lvt_9_1_.getOpaqueBits();
-+            int[] boxes = net.minecraftforge.client.render.culling.geometry.OccluderBoxes.from(words);
-+            int count = boxes == null ? 0 : boxes.length;
-+            int bounds = renderableBounds.packed();
-+            int[] data = new int[count + 1];
-+            data[0] = bounds;
-+            if (boxes != null)
-+            {
-+                System.arraycopy(boxes, 0, data, 1, count);
-+            }
-+            compiledchunk.setOccluderData(data);
-+        }
-+        else if (!renderableBounds.isEmpty())
-+        {
-+            compiledchunk.setOccluderData(new int[] { renderableBounds.packed() });
-+        }
-+
          compiledchunk.setVisibility(lvt_9_1_.computeVisibility());
 +        net.minecraftforge.client.render.terrain.BiomeColorCache.endBuild();
          this.lockCompileTask.lock();
  
          try
-@@ -269,38 +334,40 @@
+@@ -269,38 +307,40 @@
      public ChunkCompileTaskGenerator makeCompileTaskChunk()
      {
          this.lockCompileTask.lock();
@@ -195,7 +163,7 @@
              {
                  if (this.compileTask != null && this.compileTask.getStatus() != ChunkCompileTaskGenerator.Status.DONE)
                  {
-@@ -312,11 +379,15 @@
+@@ -312,11 +352,15 @@
                  this.compileTask.setCompiledChunk(this.compiledChunk);
                  return this.compileTask;
              }
@@ -211,7 +179,7 @@
      }
  
      protected double getDistanceSq()
-@@ -393,6 +464,7 @@
+@@ -393,6 +437,7 @@
      {
          this.stopCompileTask();
          this.world = null;
@@ -219,7 +187,7 @@
  
          for (int i = 0; i < BlockRenderLayer.values().length; i++)
          {
-@@ -408,6 +480,26 @@
+@@ -408,6 +453,22 @@
          return this.position;
      }
  
@@ -238,15 +206,11 @@
 +        return this.regionZ;
 +    }
 +
-+    public int[] getOccluderData()
-+    {
-+        return this.compiledChunk.getOccluderData();
-+    }
 +
      public void setNeedsUpdate(boolean immediate)
      {
          if (this.needsUpdate)
-@@ -434,6 +526,26 @@
+@@ -434,6 +495,26 @@
      {
          return this.needsUpdate && this.needsImmediateUpdate;
      }
