@@ -63,6 +63,16 @@ public final class ChunkMeshCapture {
     /** Incremental capture event queue consumed by the render thread. */
     private static final Queue<CaptureEvent> PENDING_EVENTS = new ConcurrentLinkedQueue<>();
 
+    /**
+     * How many events are waiting, and how many bytes their meshes hold.
+     *
+     * <p>Counted rather than measured: {@code ConcurrentLinkedQueue.size()} walks the queue, and this is read from a
+     * report. A consumer that falls behind on a world load is the one thing here that can grow without a bound - every
+     * queued event owns a vertex array - so the depth is worth reporting next to the cost.</p>
+     */
+    private static final AtomicLong PENDING_COUNT = new AtomicLong();
+    private static final AtomicLong PENDING_BYTES = new AtomicLong();
+
     /** Temporary: what the capture costs on the thread that runs it, and how much of it there is. */
     private static long captureNanos;
     private static long captureQuads;
@@ -122,6 +132,8 @@ public final class ChunkMeshCapture {
         ChunkLifecycle.unregister(LIFECYCLE_LISTENER);
         ACTIVE_KEYS.clear();
         PENDING_EVENTS.clear();
+        PENDING_COUNT.set(0L);
+        PENDING_BYTES.set(0L);
         for (Queue<byte[]> bucket : POOL) {
             bucket.clear();
         }
@@ -222,8 +234,18 @@ public final class ChunkMeshCapture {
             }
         }
         PENDING_EVENTS.clear();
+        PENDING_COUNT.set(0L);
+        PENDING_BYTES.set(0L);
         if (enabled) {
-            PENDING_EVENTS.add(CaptureEvent.clear());
+            queue(CaptureEvent.clear());
+        }
+    }
+
+    private static void queue(CaptureEvent event) {
+        PENDING_EVENTS.add(event);
+        PENDING_COUNT.incrementAndGet();
+        if (event.capture() != null) {
+            PENDING_BYTES.addAndGet(event.capture().vertices().length);
         }
     }
 
@@ -237,6 +259,10 @@ public final class ChunkMeshCapture {
         List<CaptureEvent> list = new ArrayList<>();
         CaptureEvent event;
         while ((event = PENDING_EVENTS.poll()) != null) {
+            PENDING_COUNT.decrementAndGet();
+            if (event.capture() != null) {
+                PENDING_BYTES.addAndGet(-event.capture().vertices().length);
+            }
             list.add(event);
         }
         return list;
@@ -253,7 +279,7 @@ public final class ChunkMeshCapture {
         for (BlockRenderLayer layer : BlockRenderLayer.values()) {
             Key key = new Key(x, y, z, layer);
             if (ACTIVE_KEYS.remove(key)) {
-                PENDING_EVENTS.add(CaptureEvent.remove(key));
+                queue(CaptureEvent.remove(key));
             }
         }
     }
@@ -311,7 +337,8 @@ public final class ChunkMeshCapture {
         }
         String report = captureCount + " meshes, " + captureQuads + " quads, "
                 + String.format(java.util.Locale.ROOT, "%.2f", captureNanos / 1_000_000.0)
-                + " ms on the render thread";
+                + " ms on the render thread, " + (PENDING_COUNT.get() == 0L ? "queue empty"
+                        : PENDING_COUNT.get() + " queued holding " + (PENDING_BYTES.get() >> 20) + " MB");
         captureNanos = 0;
         captureQuads = 0;
         captureCount = 0;
@@ -331,7 +358,7 @@ public final class ChunkMeshCapture {
 
             if (quadCount == 0) {
                 if (ACTIVE_KEYS.remove(key)) {
-                    PENDING_EVENTS.add(CaptureEvent.remove(key));
+                    queue(CaptureEvent.remove(key));
                     captured.incrementAndGet();
                 }
                 return true;
@@ -349,7 +376,7 @@ public final class ChunkMeshCapture {
 
             Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, compactVertices, quadCount);
             ACTIVE_KEYS.add(key);
-            PENDING_EVENTS.add(CaptureEvent.update(key, capture));
+            queue(CaptureEvent.update(key, capture));
             captured.incrementAndGet();
 
             // Also check if any other layers became empty in this compiled chunk
@@ -358,7 +385,7 @@ public final class ChunkMeshCapture {
                     if (l != layer && compiled.isLayerEmpty(l)) {
                         Key emptyKey = new Key(chunkX, chunkY, chunkZ, l);
                         if (ACTIVE_KEYS.remove(emptyKey)) {
-                            PENDING_EVENTS.add(CaptureEvent.remove(emptyKey));
+                            queue(CaptureEvent.remove(emptyKey));
                         }
                     }
                 }

@@ -327,6 +327,7 @@ final class VulkanSwapchain {
     }
 
     void drawFrame(long window) {
+        RenderWatchdog.start(Thread.currentThread());
         FrameTiming.begin();
         if (!outOfDate && windowSizeChanged()) {
             // A size change does not have to surface as VK_ERROR_OUT_OF_DATE_KHR - on Wayland it does not - so the
@@ -342,6 +343,7 @@ final class VulkanSwapchain {
         }
 
         final int frame = frameIndex;
+        RenderWatchdog.blockingOn("waiting for frame " + frame + "'s fence (the GPU to finish two frames ago)");
         VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
         FrameTiming.afterWait();
         // This slot's work has finished, so the staging buffers its recorded texture copies read from are free.
@@ -357,6 +359,7 @@ final class VulkanSwapchain {
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer imageIndexOut = stack.mallocInt(1);
+            RenderWatchdog.blockingOn("waiting for a swapchain image");
             int acquire = vkAcquireNextImageKHR(device, swapchain, Long.MAX_VALUE,
                     imageAcquiredSemaphores[frame], 0L, imageIndexOut);
             if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -373,10 +376,10 @@ final class VulkanSwapchain {
                 outOfDate = true;
             }
 
-            VkCheck.check(vkResetFences(device, fences[frame]), "vkResetFences");
             record(commandBuffers[frame], imageIndex, frame, stack);
             FrameTiming.afterRecord();
             submit(frame, imageIndex, stack);
+            RenderWatchdog.blockingOn("presenting image " + imageIndex + " (FIFO present waits for the display)");
             present(imageIndex, stack);
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
             // waiting here costs the player nothing.
@@ -385,6 +388,8 @@ final class VulkanSwapchain {
         }
 
         FrameTiming.end();
+        RenderWatchdog.frameCompleted();
+        MemoryProbe.frameCompleted();
         frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
     }
 
@@ -472,6 +477,7 @@ final class VulkanSwapchain {
         if (!textures.hasReads(frame)) {
             return;
         }
+        RenderWatchdog.blockingOn("waiting for read-back frame " + frame + "'s fence");
         VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
         textures.finishReads(frame);
     }
@@ -484,6 +490,7 @@ final class VulkanSwapchain {
         net.minecraftforge.client.render.screenshot.Screenshots.Request request = screenshotRequest;
         screenshotRequest = null;
         try {
+            RenderWatchdog.blockingOn("waiting for screenshot frame " + frame + "'s fence");
             VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
             byte[] bgra = screenshotBuffer.read(screenshotWidth * screenshotHeight * 4);
             byte[] rgba = net.minecraftforge.client.render.screenshot.Screenshots.swizzleBgra(
@@ -543,7 +550,7 @@ final class VulkanSwapchain {
      * the replay's per-vertex conversion against the rest of it, pipeline creation, and what the chunk-mesh capture
      * costs on the render thread.</p>
      */
-    private static String probeReport() {
+    private String probeReport() {
         // The split goes first: callReport resets the replay count it divides by.
         String split = net.minecraftforge.client.render.vulkan.VulkanStream.splitReport();
         return "probe: cpu " + FrameTiming.reportAndReset()
@@ -552,6 +559,9 @@ final class VulkanSwapchain {
                 + (split == null ? "" : ", " + split)
                 + ", collect " + net.minecraftforge.client.render.vertex.FrameDraws.collectReport()
                 + ", pipelines " + net.minecraftforge.client.render.vulkan.VulkanStream.pipelineReport()
+                + ", " + MemoryProbe.report()
+                + ", " + (VulkanImage.liveBytes() >> 20) + " MB images"
+                + (textures != null ? ", " + textures.stagingStats() : "")
                 + ", chunk capture " + net.minecraftforge.client.render.ChunkMeshCapture.captureReport()
                 // A figure taken through the validation layer is a figure about the layer, so the line says which
                 // mode it was taken in.
@@ -750,6 +760,11 @@ final class VulkanSwapchain {
                 .stageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
         VkCommandBufferSubmitInfo.Buffer commandBufferInfo = VkCommandBufferSubmitInfo.calloc(1, stack);
         commandBufferInfo.get(0).sType$Default().commandBuffer(commandBuffers[frame]);
+
+        // Reset here, immediately before the submit that will signal it, and not a line earlier: everything that can
+        // throw - the recording, with every texture upload it does - runs before this point, and a fence left reset
+        // with nothing submitted against it is a permanent freeze the next time this slot is waited on.
+        VkCheck.check(vkResetFences(device, fences[frame]), "vkResetFences");
 
         VkSubmitInfo2.Buffer submitInfo = VkSubmitInfo2.calloc(1, stack);
         submitInfo.get(0)
@@ -1176,6 +1191,7 @@ final class VulkanSwapchain {
     }
 
     void close() {
+        RenderWatchdog.blockingOn("waiting for the device to go idle at shutdown");
         vkDeviceWaitIdle(device);
         destroySizedResources();
         for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {

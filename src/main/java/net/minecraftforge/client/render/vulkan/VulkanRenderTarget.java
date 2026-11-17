@@ -108,6 +108,7 @@ final class VulkanRenderTarget implements RenderTarget, FrameRenderTarget {
         if (color == null && depth == null) {
             return;
         }
+        RenderWatchdog.blockingOn("waiting for the device to go idle before rebuilding a render target");
         org.lwjgl.vulkan.VK10.vkDeviceWaitIdle(context.device());
         if (color != null) {
             color.close();
