@@ -380,6 +380,7 @@ final class VulkanStream implements AutoCloseable {
                     : textures.whiteDescriptorSet();
         }
 
+        long loopStartedAt = SPLIT ? System.nanoTime() : 0L;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             if (totalVertexBytes > 0) {
                 callsVertexBind++;
@@ -557,6 +558,7 @@ final class VulkanStream implements AutoCloseable {
                     }
                     continue;
                 }
+                long headStartedAt = SPLIT ? System.nanoTime() : 0L;
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
                 if (textures.isFramebufferTarget(draw.state().texture()) && draw.vertexCount() == 12) {
@@ -649,14 +651,24 @@ final class VulkanStream implements AutoCloseable {
                 // This draw's own block, written before anything reads it. No comparison with the previous draw's
                 // state: every draw gets its own entry whether it changed or not, which is what makes the pipeline
                 // state stay put across draws.
+                long packStartedAt = SPLIT ? System.nanoTime() : 0L;
                 packDrawData(drawData, drawDataFloats, indexOfOp, draw.state());
+                long postStartedAt = SPLIT ? System.nanoTime() : 0L;
+                if (SPLIT) {
+                    packNanos += postStartedAt - packStartedAt;
+                    headNanos += packStartedAt - headStartedAt;
+                }
                 applyViewport(commandBuffer, viewport, appliedViewport, draw.state(), targetWidth, targetHeight,
                         targetFlipsWinding);
                 applyLineWidth(commandBuffer, appliedLineWidth, ds);
                 applyBlendConstants(commandBuffer, appliedBlendConstants, ds);
+                if (SPLIT) {
+                    postNanos += System.nanoTime() - postStartedAt;
+                }
                 // Compared as one value rather than as a dozen fields: the key is a record, so a field added to it
                 // is compared without anyone remembering to extend a condition here. The version of this that listed
                 // the fields by hand would have gone on reusing a pipeline across a stencil change, silently.
+                long stateStartedAt = SPLIT ? System.nanoTime() : 0L;
                 VulkanPipeline.PipelineState wanted = VulkanPipeline.PipelineState.of(topo, ds, targetFlipsWinding);
                 VulkanPipeline pipeline;
                 if (cachedPipeline != null && wanted.equals(cachedPipelineState)) {
@@ -679,8 +691,18 @@ final class VulkanStream implements AutoCloseable {
                     boundSet = textureSets[indexOfOp];
                     streamSetsStale = false;
                 }
+                long issueStartedAt = SPLIT ? System.nanoTime() : 0L;
+                if (SPLIT) {
+                    stateNanos += issueStartedAt - stateStartedAt;
+                }
                 issueDraw(commandBuffer, draw, shape, offsets[indexOfOp], indexOffsets[indexOfOp], slot, indexOfOp);
+                if (SPLIT) {
+                    issueNanos += System.nanoTime() - issueStartedAt;
+                }
             }
+        }
+        if (SPLIT) {
+            loopNanos += System.nanoTime() - loopStartedAt;
         }
     }
 
@@ -738,6 +760,7 @@ final class VulkanStream implements AutoCloseable {
                 && applied[0][3] == want[3]) {
             return;
         }
+        movedBlend++;
         System.arraycopy(want, 0, applied[0], 0, 4);
         org.lwjgl.vulkan.VK10.vkCmdSetBlendConstants(commandBuffer, applied[0]);
     }
@@ -750,6 +773,7 @@ final class VulkanStream implements AutoCloseable {
             return;
         }
         applied[0] = width;
+        movedLineWidth++;
         org.lwjgl.vulkan.VK10.vkCmdSetLineWidth(commandBuffer, width);
     }
 
@@ -780,6 +804,7 @@ final class VulkanStream implements AutoCloseable {
         applied[1] = y;
         applied[2] = width;
         applied[3] = height;
+        movedViewport++;
 
         viewport.get(0).x((float) x).y((float) y).width((float) width).height((float) height)
                 .minDepth(0.0f).maxDepth(1.0f);
@@ -816,6 +841,7 @@ final class VulkanStream implements AutoCloseable {
         applied[2] = width;
         applied[3] = height;
 
+        movedScissor++;
         scissor.get(0).offset().x(x).y(y);
         scissor.get(0).extent().width(width).height(height);
         org.lwjgl.vulkan.VK10.vkCmdSetScissor(commandBuffer, 0, scissor);
@@ -980,6 +1006,26 @@ final class VulkanStream implements AutoCloseable {
     private static int callsVertexBind;
     private static int callsDraw;
     private static long convertNanos;
+    /**
+     * Whether the draw loop's time is split by part, off unless asked for.
+     *
+     * <p>Six {@code nanoTime} calls a draw is 0.14 ms of a frame of a thousand draws - a tenth of the recording it is
+     * measuring - so it is a property like the other probes, not something every run pays.</p>
+     */
+    private static final boolean SPLIT = Boolean.getBoolean("outlands.probe.record");
+
+    /** The draw loop's own split, so a per-draw microsecond has a name before it has a fix. */
+    private static long loopNanos;
+    private static long headNanos;
+    private static long packNanos;
+    private static long postNanos;
+    private static long stateNanos;
+    private static long issueNanos;
+    /** How often a draw actually moved a dynamic setting, which is the untimed work left in the loop. */
+    private static int movedViewport;
+    private static int movedScissor;
+    private static int movedLineWidth;
+    private static int movedBlend;
     private static long convertedVertices;
 
     /** The native calls the replay makes per frame, by kind. */
@@ -1006,6 +1052,39 @@ final class VulkanStream implements AutoCloseable {
         }
         convertNanos = 0;
         convertedVertices = 0;
+        return report;
+    }
+
+    /**
+     * Temporary: where the draw loop's time goes, per frame, in milliseconds.
+     *
+     * <p>Four numbers because they have four different fixes: the pack is a 128-byte write, the pipeline is a record
+     * the size of the fixed-function state and an equality test against the last one, the issue is the native call,
+     * and "other" is everything else in the loop - the state comparisons, the shape and topology lookups, and
+     * whatever was not thought of.</p>
+     */
+    public static String splitReport() {
+        if (!SPLIT) {
+            return null;
+        }
+        int n = Math.max(1, replays);
+        String report = String.format(java.util.Locale.ROOT,
+                "draw loop %.2f ms a frame: head %.2f / pack %.2f / viewport %.2f / pipeline %.2f"
+                        + " / issue %.2f / other %.2f, state moved vp %d sc %d lw %d bc %d a frame",
+                loopNanos / 1e6 / n, headNanos / 1e6 / n, packNanos / 1e6 / n, postNanos / 1e6 / n,
+                stateNanos / 1e6 / n, issueNanos / 1e6 / n,
+                (loopNanos - headNanos - packNanos - postNanos - stateNanos - issueNanos) / 1e6 / n,
+                movedViewport / n, movedScissor / n, movedLineWidth / n, movedBlend / n);
+        loopNanos = 0;
+        headNanos = 0;
+        packNanos = 0;
+        postNanos = 0;
+        stateNanos = 0;
+        issueNanos = 0;
+        movedViewport = 0;
+        movedScissor = 0;
+        movedLineWidth = 0;
+        movedBlend = 0;
         return report;
     }
 
@@ -1114,6 +1193,11 @@ final class VulkanStream implements AutoCloseable {
             }
             if (indexBuffers[slot] != null) {
                 indexBuffers[slot].close();
+            }
+            // The draw data buffer was never closed. It is host-visible and it grows, so a renderer reload leaked
+            // whatever it had grown to - half a megabyte once a world has been rendered for a while.
+            if (drawDataBuffers[slot] != null) {
+                drawDataBuffers[slot].close();
             }
         }
         for (VulkanPipeline pipeline : pipelines.values()) {

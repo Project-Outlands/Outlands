@@ -544,9 +544,12 @@ final class VulkanSwapchain {
      * costs on the render thread.</p>
      */
     private static String probeReport() {
+        // The split goes first: callReport resets the replay count it divides by.
+        String split = net.minecraftforge.client.render.vulkan.VulkanStream.splitReport();
         return "probe: cpu " + FrameTiming.reportAndReset()
                 + ", replay " + net.minecraftforge.client.render.vulkan.VulkanStream.convertReport()
                 + ", calls " + net.minecraftforge.client.render.vulkan.VulkanStream.callReport()
+                + (split == null ? "" : ", " + split)
                 + ", collect " + net.minecraftforge.client.render.vertex.FrameDraws.collectReport()
                 + ", pipelines " + net.minecraftforge.client.render.vulkan.VulkanStream.pipelineReport()
                 + ", chunk capture " + net.minecraftforge.client.render.ChunkMeshCapture.captureReport()
