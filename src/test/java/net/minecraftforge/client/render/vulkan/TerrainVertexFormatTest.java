@@ -157,4 +157,37 @@ class TerrainVertexFormatTest {
         assertEquals(0.25f, hwU, 0.0001f);
         assertEquals(0.5f, hwV, 0.0001f);
     }
+
+    @Test
+    void aUvOnASpriteEdgeStaysInsideItsOwnQuad() {
+        // 2592/4096 and 2608/4096 are sprite boundaries in a 4096-wide block atlas, and a 16-bit normalized value
+        // cannot represent them exactly: the step is 1/65535, which is 0.0625 of a texel, and rounding to the
+        // nearest step lands a hair outside. On a block face that hair samples the next sprite in the atlas - and
+        // since the atlas has no gutter and a fluid's neighbour is its own darker flow texture, that is a visible
+        // seam at every fluid block boundary. Every vertex must stay inside its quad's own rectangle.
+        float minU = 2592f / 4096f;
+        float maxU = 2608f / 4096f;
+        float minV = 1088f / 2048f;
+        float maxV = 1104f / 2048f;
+        BufferBuilder builder = new BufferBuilder(256);
+        builder.begin(7, DefaultVertexFormats.BLOCK);
+        float[] us = {minU, minU, maxU, maxU};
+        float[] vs = {minV, maxV, maxV, minV};
+        for (int i = 0; i < 4; i++) {
+            builder.pos(i, 0.0F, 0.0F).color(1.0F, 1.0F, 1.0F, 1.0F).tex(us[i], vs[i]).lightmap(240, 7).endVertex();
+        }
+        builder.finishDrawing();
+
+        byte[] compact = TerrainVertexFormat.compact(builder.getByteBuffer(), 1);
+        ByteBuffer buf = ByteBuffer.wrap(compact).order(ByteOrder.nativeOrder());
+        for (int v = 0; v < 4; v++) {
+            int base = v * TerrainVertexFormat.COMPACT_STRIDE;
+            float u = (buf.getShort(base + 8) & 0xFFFF) / 65535.0F;
+            float w = (buf.getShort(base + 10) & 0xFFFF) / 65535.0F;
+            org.junit.jupiter.api.Assertions.assertTrue(u >= minU && u <= maxU,
+                    "vertex " + v + " u " + u + " left the quad's rectangle [" + minU + ", " + maxU + "]");
+            org.junit.jupiter.api.Assertions.assertTrue(w >= minV && w <= maxV,
+                    "vertex " + v + " v " + w + " left the quad's rectangle [" + minV + ", " + maxV + "]");
+        }
+    }
 }

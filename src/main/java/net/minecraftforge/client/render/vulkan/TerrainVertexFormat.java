@@ -90,8 +90,14 @@ public final class TerrainVertexFormat {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
         long src = srcAddress;
         long dst = dstAddress;
+        long uBounds = 0L;
+        long vBounds = 0L;
         for (int i = 0; i < vertexCount; i++) {
-            putVertex(dst,
+            if ((i & (VERTICES_PER_QUAD - 1)) == 0) {
+                uBounds = quadUvBoundsAddress(src, RAW_UV_OFFSET);
+                vBounds = quadUvBoundsAddress(src, RAW_UV_OFFSET + 4);
+            }
+            putVertex(dst, uBounds, vBounds,
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET),
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 4),
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 8),
@@ -109,8 +115,14 @@ public final class TerrainVertexFormat {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
         int src = 0;
         int out = 0;
+        long uBounds = 0L;
+        long vBounds = 0L;
         for (int i = 0; i < vertexCount; i++) {
-            putVertex(dst, out,
+            if ((i & (VERTICES_PER_QUAD - 1)) == 0) {
+                uBounds = quadUvBoundsArray(raw, src, RAW_UV_OFFSET);
+                vBounds = quadUvBoundsArray(raw, src, RAW_UV_OFFSET + 4);
+            }
+            putVertex(dst, out, uBounds, vBounds,
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET),
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 4),
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 8),
@@ -128,8 +140,14 @@ public final class TerrainVertexFormat {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
         int src = 0;
         long dst = dstAddress;
+        long uBounds = 0L;
+        long vBounds = 0L;
         for (int i = 0; i < vertexCount; i++) {
-            putVertex(dst,
+            if ((i & (VERTICES_PER_QUAD - 1)) == 0) {
+                uBounds = quadUvBoundsArray(raw, src, RAW_UV_OFFSET);
+                vBounds = quadUvBoundsArray(raw, src, RAW_UV_OFFSET + 4);
+            }
+            putVertex(dst, uBounds, vBounds,
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET),
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 4),
                     (float) FLOAT_VIEW.get(raw, src + RAW_POSITION_OFFSET + 8),
@@ -155,22 +173,73 @@ public final class TerrainVertexFormat {
                 | (((long) light) << 48);
     }
 
-    private static long uvColor(float u, float v, int color) {
-        int u16 = Math.min(65535, Math.max(0, Math.round(u * UV_SCALE)));
-        int v16 = Math.min(65535, Math.max(0, Math.round(v * UV_SCALE)));
+    /**
+     * The quantised bounds of one texture axis over a quad's four vertices, packed as {@code (low << 32) | high}.
+     *
+     * <p><b>Why a quad needs its own bounds.</b> {@code u} and {@code v} are stored as 16-bit normalized values, so a
+     * sprite edge is not exactly representable: the step is 1/65535, which is 0.0625 of a texel on a 4096-wide atlas,
+     * and rounding to the nearest step can land a hair <i>outside</i> the sprite. At the edge of a block face that hair
+     * is enough to sample the next sprite in the atlas - which is a visible seam at every block boundary of a fluid,
+     * because the atlas has no gutter between sprites and the fluid's neighbour is its own darker flow texture.
+     * Rounding each vertex against its quad's own rectangle costs one comparison and removes it.</p>
+     */
+    private static long quadUvBoundsAddress(long srcAddress, int uvOffset) {
+        float min = Float.POSITIVE_INFINITY;
+        float max = Float.NEGATIVE_INFINITY;
+        for (int v = 0; v < VERTICES_PER_QUAD; v++) {
+            float value = MemoryUtil.memGetFloat(srcAddress + (long) v * RAW_STRIDE + uvOffset);
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
+        return quantisedBounds(min, max);
+    }
+
+    private static long quadUvBoundsArray(byte[] raw, int src, int uvOffset) {
+        float min = Float.POSITIVE_INFINITY;
+        float max = Float.NEGATIVE_INFINITY;
+        for (int v = 0; v < VERTICES_PER_QUAD; v++) {
+            float value = (float) FLOAT_VIEW.get(raw, src + v * RAW_STRIDE + uvOffset);
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
+        return quantisedBounds(min, max);
+    }
+
+    private static long quantisedBounds(float min, float max) {
+        int low = (int) Math.ceil(min * UV_SCALE);
+        int high = (int) Math.floor(max * UV_SCALE);
+        if (low > high) {
+            // A degenerate quad, or one whose rectangle is narrower than a step: nothing to keep it inside of.
+            low = high = Math.round(min * UV_SCALE);
+        }
+        low = Math.min(65535, Math.max(0, low));
+        high = Math.min(65535, Math.max(0, high));
+        return (((long) low) << 32) | (high & 0xFFFFFFFFL);
+    }
+
+    private static int quantise(float value, long bounds) {
+        int low = (int) (bounds >> 32);
+        int high = (int) bounds;
+        int quantised = Math.round(value * UV_SCALE);
+        return Math.min(high, Math.max(low, quantised));
+    }
+
+    private static long uvColor(float u, float v, long uBounds, long vBounds, int color) {
+        int u16 = quantise(u, uBounds);
+        int v16 = quantise(v, vBounds);
         return ((long) u16) | (((long) v16) << 16) | (((long) color & 0xFFFFFFFFL) << 32);
     }
 
-    private static void putVertex(long dst, float x, float y, float z, int color, float u, float v,
-                                  short blockLight, short skyLight) {
+    private static void putVertex(long dst, long uBounds, long vBounds, float x, float y, float z, int color,
+                                  float u, float v, short blockLight, short skyLight) {
         MemoryUtil.memPutLong(dst, posLight(x, y, z, blockLight, skyLight));
-        MemoryUtil.memPutLong(dst + 8, uvColor(u, v, color));
+        MemoryUtil.memPutLong(dst + 8, uvColor(u, v, uBounds, vBounds, color));
     }
 
-    private static void putVertex(byte[] dst, int offset, float x, float y, float z, int color, float u, float v,
-                                  short blockLight, short skyLight) {
+    private static void putVertex(byte[] dst, int offset, long uBounds, long vBounds, float x, float y, float z,
+                                  int color, float u, float v, short blockLight, short skyLight) {
         LONG_VIEW.set(dst, offset, posLight(x, y, z, blockLight, skyLight));
-        LONG_VIEW.set(dst, offset + 8, uvColor(u, v, color));
+        LONG_VIEW.set(dst, offset + 8, uvColor(u, v, uBounds, vBounds, color));
     }
 
     /** Compacts from mapped memory into a byte array: the arena's path when a mesh is rebuilt in place. */
@@ -178,8 +247,14 @@ public final class TerrainVertexFormat {
         int vertexCount = quadCount * VERTICES_PER_QUAD;
         long src = srcAddress;
         int out = 0;
+        long uBounds = 0L;
+        long vBounds = 0L;
         for (int i = 0; i < vertexCount; i++) {
-            putVertex(dst, out,
+            if ((i & (VERTICES_PER_QUAD - 1)) == 0) {
+                uBounds = quadUvBoundsAddress(src, RAW_UV_OFFSET);
+                vBounds = quadUvBoundsAddress(src, RAW_UV_OFFSET + 4);
+            }
+            putVertex(dst, out, uBounds, vBounds,
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET),
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 4),
                     MemoryUtil.memGetFloat(src + RAW_POSITION_OFFSET + 8),
