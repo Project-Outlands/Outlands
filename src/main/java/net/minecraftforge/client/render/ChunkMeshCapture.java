@@ -372,6 +372,8 @@ public final class ChunkMeshCapture {
             net.minecraftforge.client.render.terrain.SpriteAnimationGate.collect(source, quadCount, compiled::outlandsAddSprite);
             int byteLength = quadCount * net.minecraftforge.client.render.vulkan.TerrainVertexFormat.COMPACT_QUAD_SIZE;
             byte[] compactVertices = acquireBuffer(byteLength);
+            net.minecraftforge.client.render.vulkan.FluidDump.maybeDump(layer, source, quadCount,
+                    chunkX, chunkY, chunkZ);
             net.minecraftforge.client.render.vulkan.TerrainVertexFormat.compact(source, quadCount, compactVertices);
 
             Captured capture = new Captured(chunkX, chunkY, chunkZ, layer, compactVertices, quadCount);
