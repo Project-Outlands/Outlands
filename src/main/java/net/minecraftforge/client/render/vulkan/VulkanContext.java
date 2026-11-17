@@ -89,6 +89,8 @@ final class VulkanContext {
     private static final Logger LOGGER = LogManager.getLogger("Outlands|render");
 
     private static final String VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation";
+    /** Set once the instance is created, so a measurement can say whether the layer was in the way. */
+    private static volatile boolean validationActive;
 
     private final VkInstance instance;
     private long debugMessenger;
@@ -297,6 +299,7 @@ final class VulkanContext {
                 }
                 validation = false;
             }
+            validationActive = validation;
 
             int instanceFlags = 0;
             // MoltenVK is not a conformant implementation, so it only appears when asked for explicitly.
@@ -688,7 +691,22 @@ final class VulkanContext {
      * priority, this has to be revisited before merge: shipping it enabled would cost every player performance
      * for a check aimed at us.</p>
      */
+    /**
+     * Whether the Khronos validation layer runs.
+     *
+     * <p><b>Off by default, because it costs about as much as the rendering does.</b> Every command goes through the
+     * layer's state tracking, and a frame of a thousand draws measured 2 us a draw with it active - against the few
+     * hundred nanoseconds a bare {@code vkCmdDrawIndexed} should take. A performance figure taken with the layer on
+     * is a figure about the layer. It is still the right thing to run while changing the backend, so
+     * {@code -Doutlands.render.vulkan.validation=true} turns it back on and the renderer's line reports which mode a
+     * measurement was taken in.</p>
+     */
     private static boolean validationRequested() {
-        return Boolean.parseBoolean(System.getProperty("outlands.render.vulkan.validation", "true"));
+        return Boolean.parseBoolean(System.getProperty("outlands.render.vulkan.validation", "false"));
+    }
+
+    /** Whether the validation layer is active, for a measurement to say which mode it was taken in. */
+    public static boolean validationActive() {
+        return validationActive;
     }
 }
