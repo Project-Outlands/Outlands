@@ -19,7 +19,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class TextInput {
 
-    /** Receives committed text after it passed the same character filter a typed character goes through. */
+    /**
+     * Receives committed text after it passed the same character filter a typed character goes through. A focused
+     * text field has already accepted the text when this is called.
+     * <p>
+     * Called on Foundation's event-pump thread while the client thread waits for input dispatch.
+     */
     public interface Listener {
         void onCommittedText(String text);
     }

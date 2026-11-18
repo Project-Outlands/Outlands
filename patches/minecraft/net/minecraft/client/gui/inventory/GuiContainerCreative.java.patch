@@ -1,6 +1,22 @@
 --- before/net/minecraft/client/gui/inventory/GuiContainerCreative.java
 +++ after/net/minecraft/client/gui/inventory/GuiContainerCreative.java
-@@ -57,6 +57,8 @@
+@@ -38,13 +38,14 @@
+ import net.minecraft.util.math.MathHelper;
+ import net.minecraft.util.text.TextComponentTranslation;
+ import net.minecraft.util.text.TextFormatting;
++import net.minecraftforge.client.input.TextInput;
+ import net.minecraftforge.fml.relauncher.Side;
+ import net.minecraftforge.fml.relauncher.SideOnly;
+ import org.lwjgl.input.Keyboard;
+ import org.lwjgl.input.Mouse;
+ 
+ @SideOnly(Side.CLIENT)
+-public class GuiContainerCreative extends InventoryEffectRenderer
++public class GuiContainerCreative extends InventoryEffectRenderer implements TextInput.Listener
+ {
+     private static final ResourceLocation CREATIVE_INVENTORY_TABS = new ResourceLocation("textures/gui/container/creative_inventory/tabs.png");
+     private static final InventoryBasic basicInventory = new InventoryBasic("tmp", true, 45);
+@@ -57,6 +58,8 @@
      private Slot destroyItemSlot;
      private boolean clearSearch;
      private CreativeCrafting listener;
@@ -9,7 +25,7 @@
  
      public GuiContainerCreative(EntityPlayer player)
      {
-@@ -305,6 +307,13 @@
+@@ -305,6 +308,13 @@
              this.setCurrentCreativeTab(CreativeTabs.CREATIVE_TAB_ARRAY[i]);
              this.listener = new CreativeCrafting(this.mc);
              this.mc.player.inventoryContainer.addListener(this.listener);
@@ -23,7 +39,7 @@
          }
          else
          {
-@@ -328,7 +337,7 @@
+@@ -328,7 +338,7 @@
      @Override
      protected void keyTyped(char typedChar, int keyCode) throws IOException
      {
@@ -32,7 +48,28 @@
          {
              if (GameSettings.isKeyDown(this.mc.gameSettings.keyBindChat))
              {
-@@ -366,6 +375,34 @@
+@@ -361,11 +371,55 @@
+         }
+     }
+ 
++    @Override
++    public void onCommittedText(String text)
++    {
++        if (this.searchField == null || !this.searchField.getVisible() || !this.searchField.isFocused())
++        {
++            return;
++        }
++
++        if (this.clearSearch)
++        {
++            this.clearSearch = false;
++            this.searchField.setText(text);
++        }
++        this.updateCreativeSearch();
++    }
++
+     private void updateCreativeSearch()
+     {
          GuiContainerCreative.ContainerCreative guicontainercreative$containercreative = (GuiContainerCreative.ContainerCreative)this.inventorySlots;
          guicontainercreative$containercreative.itemList.clear();
  
@@ -67,7 +104,7 @@
          if (this.searchField.getText().isEmpty())
          {
              for (Item item : Item.REGISTRY)
-@@ -390,10 +427,10 @@
+@@ -390,10 +444,10 @@
      {
          CreativeTabs creativetabs = CreativeTabs.CREATIVE_TAB_ARRAY[selectedTabIndex];
  
@@ -80,7 +117,7 @@
          }
      }
  
-@@ -427,7 +464,7 @@
+@@ -427,7 +481,7 @@
  
              for (CreativeTabs creativetabs : CreativeTabs.CREATIVE_TAB_ARRAY)
              {
@@ -89,7 +126,7 @@
                  {
                      this.setCurrentCreativeTab(creativetabs);
                      return;
-@@ -440,6 +477,7 @@
+@@ -440,6 +494,7 @@
  
      private boolean needsScrollBars()
      {
@@ -97,7 +134,7 @@
          return selectedTabIndex != CreativeTabs.INVENTORY.getIndex()
                 && CreativeTabs.CREATIVE_TAB_ARRAY[selectedTabIndex].hasScrollbar()
                 && ((GuiContainerCreative.ContainerCreative)this.inventorySlots).canScroll();
-@@ -447,6 +485,7 @@
+@@ -447,6 +502,7 @@
  
      private void setCurrentCreativeTab(CreativeTabs tab)
      {
@@ -105,7 +142,7 @@
          int i = selectedTabIndex;
          selectedTabIndex = tab.getIndex();
          GuiContainerCreative.ContainerCreative guicontainercreative$containercreative = (GuiContainerCreative.ContainerCreative)this.inventorySlots;
-@@ -467,8 +506,8 @@
+@@ -467,8 +523,8 @@
                          {
                              ItemStack itemstack = new ItemStack(Items.PAPER);
                              itemstack.getOrCreateSubCompound("CustomCreativeLock");
@@ -116,7 +153,7 @@
                              itemstack.setStackDisplayName(new TextComponentTranslation("inventory.hotbarInfo", s1, s).getUnformattedText());
                              guicontainercreative$containercreative.itemList.add(itemstack);
                          }
-@@ -552,12 +591,14 @@
+@@ -552,12 +608,14 @@
  
          if (this.searchField != null)
          {
@@ -132,7 +169,7 @@
                  this.updateCreativeSearch();
              }
              else
-@@ -631,14 +672,26 @@
+@@ -631,14 +689,26 @@
  
          super.drawScreen(mouseX, mouseY, partialTicks);
  
@@ -160,7 +197,7 @@
          if (this.destroyItemSlot != null
                  && selectedTabIndex == CreativeTabs.INVENTORY.getIndex()
                  && this.isPointInRegion(this.destroyItemSlot.xPos, this.destroyItemSlot.yPos, 16, 16, mouseX, mouseY))
-@@ -646,6 +699,18 @@
+@@ -646,6 +716,18 @@
              this.drawHoveringText(I18n.format("inventory.binSlot"), mouseX, mouseY);
          }
  
@@ -179,7 +216,7 @@
          GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
          GlStateManager.disableLighting();
          this.renderHoveredToolTip(mouseX, mouseY);
-@@ -690,7 +755,7 @@
+@@ -690,7 +772,7 @@
              {
                  if (i == 0)
                  {
@@ -188,7 +225,7 @@
                  }
                  else
                  {
-@@ -698,7 +763,10 @@
+@@ -698,7 +780,10 @@
                  }
              }
  
@@ -200,7 +237,7 @@
          }
          else
          {
-@@ -713,17 +781,36 @@
+@@ -713,17 +798,36 @@
          RenderHelper.enableGUIStandardItemLighting();
          CreativeTabs creativetabs = CreativeTabs.CREATIVE_TAB_ARRAY[selectedTabIndex];
  
@@ -239,7 +276,7 @@
          this.drawTexturedModalRect(this.guiLeft, this.guiTop, 0, 0, this.xSize, this.ySize);
          this.searchField.drawTextBox();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-@@ -737,6 +824,14 @@
+@@ -737,6 +841,14 @@
              this.drawTexturedModalRect(i, j + (int)((k - j - 17) * this.currentScroll), 232 + (this.needsScrollBars() ? 0 : 12), 0, 12, 15);
          }
  
@@ -254,7 +291,7 @@
          this.drawTab(creativetabs);
  
          if (creativetabs == CreativeTabs.INVENTORY)
-@@ -754,6 +849,14 @@
+@@ -754,6 +866,14 @@
  
      protected boolean isMouseOverTab(CreativeTabs tab, int mouseX, int mouseY)
      {
@@ -269,7 +306,7 @@
          int i = tab.getColumn();
          int j = 28 * i;
          int k = 0;
-@@ -850,6 +953,8 @@
+@@ -850,6 +970,8 @@
          }
  
          GlStateManager.disableLighting();
@@ -278,7 +315,7 @@
          this.drawTexturedModalRect(l, i1, j, k, 28, 32);
          this.zLevel = 100.0F;
          this.itemRender.zLevel = 100.0F;
-@@ -872,6 +977,15 @@
+@@ -872,6 +994,15 @@
          {
              this.mc.displayGuiScreen(new GuiStats(this, this.mc.player.getStatFileWriter()));
          }
@@ -294,7 +331,7 @@
      }
  
      public int getSelectedTabIndex()
-@@ -903,8 +1017,8 @@
+@@ -903,8 +1034,8 @@
                  hotbarsnapshot.set(j, entityplayersp.inventory.getStackInSlot(j).copy());
              }
  
@@ -305,7 +342,7 @@
              client.ingameGUI.setOverlayMessage(new TextComponentTranslation("inventory.hotbarSaved", s1, s), false);
              creativesettings.write();
          }
-@@ -1093,6 +1207,39 @@
+@@ -1093,6 +1224,39 @@
          {
              return this.slot.canTakeStack(playerIn);
          }

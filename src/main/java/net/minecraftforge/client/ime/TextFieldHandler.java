@@ -157,19 +157,17 @@ public final class TextFieldHandler {
             return;
         }
 
-        // Announced before it is written anywhere: a screen that draws its own text widget and the focused field are
-        // two of several possible destinations, and whoever else wants to see the text should not depend on which
-        // one it happened to reach.
-        TextInput.dispatch(filtered);
-
         final GuiTextField field = focusedTextInput;
         if (field != null && field.getVisible() && field.isFocused()) {
             field.writeText(filtered);
+            TextInput.dispatch(filtered);
             if (FMLLog.log.isDebugEnabled()) {
                 FMLLog.log.debug("committed text [{}] written to {}", filtered, field.getClass().getSimpleName());
             }
             return;
         }
+
+        TextInput.dispatch(filtered);
 
         // No text field: signs, books and any mod screen that handles its own text receive the commit as the key-less
         // character events LWJGL2 produced, so nothing has to know about them individually. keyCode 0 marks "text,
