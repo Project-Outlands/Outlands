@@ -8,7 +8,7 @@
  import net.minecraft.client.renderer.culling.ClippingHelper;
  import net.minecraft.client.renderer.culling.ClippingHelperImpl;
  import net.minecraft.client.renderer.culling.Frustum;
-@@ -105,6 +104,112 @@
+@@ -105,6 +104,117 @@
      private WorldClient world;
      private Set<RenderChunk> chunksToUpdate = Sets.newLinkedHashSet();
      private List<RenderGlobal.ContainerLocalRenderInformation> renderInfos = Lists.newArrayListWithCapacity(69696);
@@ -33,13 +33,18 @@
 +        for (int i = 0; i < size; i++)
 +        {
 +            RenderChunk renderchunk = this.renderInfos.get(i).renderChunk;
++            // Every section the walk reached is visible, whether or not it has geometry: this mark is what the entity
++            // cull asks for ("was this section drawn this frame"), and a section of air has no geometry but can hold
++            // an entity - a flying mob, a falling block, an item in the air. Marking only the sections with compiled
++            // layers made such an entity disappear past the cull's 32-block free pass while vanilla still drew it,
++            // because vanilla asks about the entity's own box, not about the terrain around it.
++            renderchunk.setVisibleFrameIndex(this.lastTerrainFrameCount);
 +            CompiledChunk compiled = renderchunk.getCompiledChunk();
 +            if (compiled.isEmpty())
 +            {
 +                continue;
 +            }
 +
-+            renderchunk.setVisibleFrameIndex(this.lastTerrainFrameCount);
 +            long pos = renderchunk.getPosition().toLong();
 +            // Indexed by the layer's own ordinal: the terrain layer and this classification both key on it, so a
 +            // hard-coded list here would drift from the enum rather than fail.
@@ -121,7 +126,7 @@
      private final Set<TileEntity> setTileEntities = Sets.newHashSet();
      private ViewFrustum viewFrustum;
      private int starGLCallList = -1;
-@@ -428,13 +533,11 @@
+@@ -428,13 +538,11 @@
                      double d20 = 0.0;
                      double d21 = d18 * d16 - d19 * d15;
                      double d22 = d19 * d16 + d18 * d15;
@@ -140,7 +145,7 @@
                  }
              }
          }
-@@ -464,7 +567,10 @@
+@@ -464,7 +572,10 @@
          else
          {
              this.chunksToUpdate.clear();
@@ -151,7 +156,7 @@
  
              if (this.viewFrustum != null)
              {
-@@ -546,6 +652,7 @@
+@@ -546,6 +657,7 @@
      protected void stopChunkUpdates()
      {
          this.chunksToUpdate.clear();
@@ -159,7 +164,7 @@
          this.renderDispatcher.stopChunkUpdates();
      }
  
-@@ -562,8 +669,10 @@
+@@ -562,8 +674,10 @@
  
      public void renderEntities(Entity renderViewEntity, ICamera camera, float partialTicks)
      {
@@ -170,7 +175,7 @@
              this.renderEntitiesStartupCounter--;
          }
          else
-@@ -590,9 +699,12 @@
+@@ -590,9 +704,12 @@
                  this.mc.gameSettings,
                  partialTicks
              );
@@ -183,7 +188,7 @@
              Entity entity = this.mc.getRenderViewEntity();
              double d3 = entity.lastTickPosX + (entity.posX - entity.lastTickPosX) * partialTicks;
              double d4 = entity.lastTickPosY + (entity.posY - entity.lastTickPosY) * partialTicks;
-@@ -604,11 +716,15 @@
+@@ -604,11 +721,15 @@
              this.mc.entityRenderer.enableLightmap();
              this.world.profiler.endStartSection("global");
              List<Entity> list = this.world.getLoadedEntityList();
@@ -199,7 +204,7 @@
                  this.countEntitiesRendered++;
  
                  if (entity1.isInRangeToRender3d(d0, d1, d2))
-@@ -618,48 +734,102 @@
+@@ -618,48 +739,102 @@
              }
  
              this.world.profiler.endStartSection("entities");
@@ -333,7 +338,7 @@
                                  }
                              }
                          }
-@@ -671,12 +841,14 @@
+@@ -671,12 +846,14 @@
  
              if (!list2.isEmpty())
              {
@@ -350,7 +355,7 @@
              if (this.isRenderEntityOutlines() && (!list1.isEmpty() || this.entityOutlinesRendered))
              {
                  this.world.profiler.endStartSection("entityOutlines");
-@@ -716,14 +888,19 @@
+@@ -716,14 +893,19 @@
              this.world.profiler.endStartSection("blockentities");
              RenderHelper.enableStandardItemLighting();
  
@@ -374,7 +379,7 @@
                          TileEntityRendererDispatcher.instance.render(tileentity2, partialTicks, -1);
                      }
                  }
-@@ -733,9 +910,11 @@
+@@ -733,9 +915,11 @@
              {
                  for (TileEntity tileentity : this.setTileEntities)
                  {
@@ -386,7 +391,7 @@
  
              this.preRenderDamagedBlocks();
  
-@@ -841,6 +1020,11 @@
+@@ -841,6 +1025,11 @@
  
      public void setupTerrain(Entity viewEntity, double partialTicks, ICamera camera, int frameCount, boolean playerSpectator)
      {
@@ -398,7 +403,7 @@
          if (this.mc.gameSettings.renderDistanceChunks != this.renderDistanceChunks)
          {
              this.loadRenderers();
-@@ -891,7 +1075,11 @@
+@@ -891,7 +1080,11 @@
                                || viewEntity.posY != this.lastViewEntityY
                                || viewEntity.posZ != this.lastViewEntityZ
                                || viewEntity.rotationPitch != this.lastViewEntityPitch
@@ -411,7 +416,7 @@
          this.lastViewEntityX = viewEntity.posX;
          this.lastViewEntityY = viewEntity.posY;
          this.lastViewEntityZ = viewEntity.posZ;
-@@ -903,27 +1091,31 @@
+@@ -903,27 +1096,31 @@
          if (!flag && this.displayListEntitiesDirty)
          {
              this.displayListEntitiesDirty = false;
@@ -450,7 +455,7 @@
                  {
                      flag2 = true;
                  }
-@@ -946,51 +1138,99 @@
+@@ -946,51 +1143,99 @@
              else
              {
                  int i = blockpos1.getY() > 0 ? 248 : 8;
@@ -565,7 +570,7 @@
          }
  
          this.mc.profiler.endStartSection("captureFrustum");
-@@ -1002,58 +1242,94 @@
+@@ -1002,58 +1247,94 @@
          }
  
          this.mc.profiler.endStartSection("rebuildNear");
@@ -684,7 +689,7 @@
  
          if (MathHelper.abs(playerPos.getX() - blockpos.getX()) > this.renderDistanceChunks * 16)
          {
-@@ -1153,24 +1429,36 @@
+@@ -1153,24 +1434,36 @@
  
          this.mc.profiler.startSection("filterempty");
          int l = 0;
@@ -734,7 +739,7 @@
          this.mc.profiler.endSection();
          return l;
      }
-@@ -1178,6 +1466,18 @@
+@@ -1178,6 +1471,18 @@
      @SuppressWarnings("incomplete-switch")
      private void renderBlockLayer(BlockRenderLayer blockLayerIn)
      {
@@ -753,7 +758,7 @@
          this.mc.entityRenderer.enableLightmap();
  
          if (OpenGlHelper.useVbo())
-@@ -1191,7 +1491,14 @@
+@@ -1191,7 +1496,14 @@
              GlStateManager.glEnableClientState(32886);
          }
  
@@ -769,7 +774,7 @@
  
          if (OpenGlHelper.useVbo())
          {
-@@ -1318,6 +1625,13 @@
+@@ -1318,6 +1630,13 @@
  
      public void renderSky(float partialTicks, int pass)
      {
@@ -783,7 +788,7 @@
          if (this.mc.world.provider.getDimensionType().getId() == 1)
          {
              this.renderSkyEnd();
-@@ -1500,22 +1814,21 @@
+@@ -1500,22 +1819,21 @@
                  float f18 = 1.0F;
                  float f19 = -((float)(d0 + 65.0));
                  float f20 = -1.0F;
@@ -814,7 +819,7 @@
                  bufferbuilder.pos(-1.0, -1.0, 1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
                  bufferbuilder.pos(-1.0, -1.0, -1.0).color(0, 0, 0, 255).endVertex();
-@@ -1545,6 +1858,7 @@
+@@ -1545,6 +1863,7 @@
  
      public void renderClouds(float partialTicks, int pass, double x, double y, double z)
      {
@@ -822,7 +827,7 @@
          if (this.mc.world.provider.isSurfaceWorld())
          {
              if (this.mc.gameSettings.shouldRenderClouds() == 2)
-@@ -1584,14 +1898,13 @@
+@@ -1584,14 +1903,13 @@
                  float f9 = 4.8828125E-4F;
                  double d2 = this.cloudTickCounter + partialTicks;
                  double d0 = x + d2 * 0.03F;
@@ -840,7 +845,7 @@
                  bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX_COLOR);
  
                  for (int i1 = -256; i1 < 256; i1 += 32)
-@@ -1960,8 +2273,8 @@
+@@ -1960,8 +2278,8 @@
              float f6 = 128.0F;
              bufferbuilder.begin(7, DefaultVertexFormats.POSITION_TEX);
              bufferbuilder.setTranslation(-d2, -d3, -d4);
@@ -851,7 +856,7 @@
  
              if (d2 > worldborder.maxX() - d0)
              {
-@@ -1995,8 +2308,8 @@
+@@ -1995,8 +2313,8 @@
                  }
              }
  
@@ -862,7 +867,7 @@
  
              if (d4 > worldborder.maxZ() - d0)
              {
-@@ -2050,7 +2363,7 @@
+@@ -2050,7 +2368,7 @@
          );
          GlStateManager.enableBlend();
          GlStateManager.color(1.0F, 1.0F, 1.0F, 0.5F);
@@ -871,7 +876,7 @@
          GlStateManager.enablePolygonOffset();
          GlStateManager.alphaFunc(516, 0.1F);
          GlStateManager.enableAlpha();
-@@ -2090,8 +2403,13 @@
+@@ -2090,8 +2408,13 @@
                  double d4 = blockpos.getY() - d1;
                  double d5 = blockpos.getZ() - d2;
                  Block block = this.world.getBlockState(blockpos).getBlock();
@@ -886,7 +891,7 @@
                  {
                      if (d3 * d3 + d4 * d4 + d5 * d5 > 1024.0)
                      {
-@@ -2151,18 +2469,51 @@
+@@ -2151,18 +2474,51 @@
  
      public static void drawSelectionBoundingBox(AxisAlignedBB box, float red, float green, float blue, float alpha)
      {
@@ -950,7 +955,7 @@
      }
  
      public static void drawBoundingBox(
-@@ -2178,10 +2529,14 @@
+@@ -2178,10 +2534,14 @@
              float alpha
          )
      {
@@ -967,7 +972,7 @@
              bufferbuilder, minX, minY, minZ, maxX, maxY, maxZ, red, green, blue, alpha
          );
          tessellator.draw();
-@@ -2351,9 +2706,11 @@
+@@ -2351,9 +2711,11 @@
                  this.mc.ingameGUI.setRecordPlayingMessage(itemrecord.getRecordNameLocal());
              }
  
@@ -982,7 +987,7 @@
          }
  
          this.setPartying(this.world, pos, soundIn != null);
-@@ -2822,7 +3179,7 @@
+@@ -2822,7 +3184,7 @@
  
                  if (block.getDefaultState().getMaterial() != Material.AIR)
                  {
@@ -991,7 +996,7 @@
                      this.world
                      .playSound(
                          blockPosIn,
-@@ -3038,16 +3395,22 @@
+@@ -3038,16 +3400,22 @@
      @SideOnly(Side.CLIENT)
      class ContainerLocalRenderInformation
      {
