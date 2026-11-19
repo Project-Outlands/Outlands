@@ -185,6 +185,13 @@ public final class FrameDraws {
 
     /**
      * One render layer of the captured terrain, at its place in the sequence.
+     *
+     * <p><b>The alpha test is recorded, not inferred from the layer.</b> Vanilla decides it outside the layer call -
+     * {@code EntityRenderer.renderWorld} sets {@code glAlphaFunc(GL_GREATER, 0.5)} once, draws SOLID with the test
+     * disabled and CUTOUT_MIPPED/CUTOUT with it enabled, and only afterwards drops the reference to 0.1. A renderer
+     * that assumed the usual 0.1 for a cutout layer would keep every texel a mip level blends with a transparent
+     * neighbour, whose colour is the black under the alpha - which is what turned sugar cane into black stripes while
+     * it was only slightly minified. See {@code alphaReference}.</p>
      */
     public record TerrainLayer(
             int layer,
@@ -195,14 +202,17 @@ public final class FrameDraws {
             float fogEnd,
             float fogDensity,
             float[] fogColor,
-            it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks
+            it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks,
+            boolean alphaTest,
+            float alphaReference,
+            int alphaComparison
     ) implements Operation {
         public TerrainLayer(int layer, float[] mvp) {
-            this(layer, mvp, 0.0, 0.0, 0.0, 0, 0.0f, 1.0f, 1.0f, null, null);
+            this(layer, mvp, 0.0, 0.0, 0.0, 0, 0.0f, 1.0f, 1.0f, null, null, false, 0.1f, 516);
         }
 
         public TerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) {
-            this(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null);
+            this(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null, false, 0.1f, 516);
         }
 
         public TerrainLayer {
@@ -434,18 +444,21 @@ public final class FrameDraws {
      * @return {@code false} when nothing is collecting, which means there is no frame to draw inside
      */
     public static boolean recordTerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ) {
-        return recordTerrainLayer(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null);
+        return recordTerrainLayer(layer, mvp, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null,
+                false, 0.1f, 516);
     }
 
     public static boolean recordTerrainLayer(int layer, float[] mvp, double viewX, double viewY, double viewZ,
                                              int fogMode, float fogStart, float fogEnd, float fogDensity, float[] fogColor,
-                                             it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks) {
+                                             it.unimi.dsi.fastutil.longs.LongArrayList visibleChunks,
+                                             boolean alphaTest, float alphaReference, int alphaComparison) {
         if (!collecting) {
             return false;
         }
         synchronized (LOCK) {
             ACTIVE_DRAWS.add(new TerrainLayer(layer, mvp, viewX, viewY, viewZ,
-                    fogMode, fogStart, fogEnd, fogDensity, fogColor, visibleChunks));
+                    fogMode, fogStart, fogEnd, fogDensity, fogColor, visibleChunks,
+                    alphaTest, alphaReference, alphaComparison));
         }
         return true;
     }

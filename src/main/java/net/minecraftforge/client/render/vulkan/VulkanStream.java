@@ -479,7 +479,8 @@ final class VulkanStream implements AutoCloseable {
                         terrain.recordLayer(commandBuffer, slot, terrainOp.mvp(), terrainOp.layer(),
                                 terrainOp.viewX(), terrainOp.viewY(), terrainOp.viewZ(),
                                 terrainOp.fogMode(), terrainOp.fogStart(), terrainOp.fogEnd(),
-                                terrainOp.fogDensity(), terrainOp.fogColor(), terrainOp.visibleChunks());
+                                terrainOp.fogDensity(), terrainOp.fogColor(), terrainOp.visibleChunks(),
+                                terrainOp.alphaTest(), terrainOp.alphaReference(), terrainOp.alphaComparison());
                     }
                     // The terrain draw binds its own vertex buffer and descriptor set, so neither can be assumed by
                     // the next streamed draw: rebind the stream's buffer and forget the bound set.
@@ -868,14 +869,14 @@ final class VulkanStream implements AutoCloseable {
         return r | (g << 8) | (b << 16) | (a << 24);
     }
 
-    /**
-     * {@code glAlphaFunc}'s comparison as the three-bit index the fragment shader reads: {@code glComparison - 512},
-     * so {@code GL_NEVER} is 0 and {@code GL_ALWAYS} is 7. A value outside the eight is clamped rather than thrown -
-     * it cannot arrive from a GL enum, and refusing a draw over it would fail the frame.
-     */
     /** {@code GL_FLAT}: the shade model whose primitives take one colour. */
     private static final int GL_FLAT = 7424;
 
+    /**
+     * {@code glAlphaFunc}'s comparison as the three-bit index the fragment shaders read: {@code glComparison - 512},
+     * so {@code GL_NEVER} is 0 and {@code GL_ALWAYS} is 7. A value outside the eight is clamped rather than thrown -
+     * it cannot arrive from a GL enum, and refusing a draw over it would fail the frame.
+     */
     static int alphaComparisonIndex(int glComparison) {
         return Math.max(0, Math.min(7, glComparison - 512));
     }

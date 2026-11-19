@@ -20,7 +20,7 @@ layout(location = 2) in vec4 inColor;
 
 // Push constants: mat4 MVP (64 bytes), vec4 fogColor (16 bytes), chunkData 64-bit BDA pointer (8 bytes),
 // alphaReference (4), flags (4), fogMode (4), fogStart (4), fogEnd (4), fogDensity (4),
-// cameraX/Y/Z (12 bytes), spare (4). Total: 128 bytes, the limit Vulkan guarantees.
+// cameraX/Y/Z (12 bytes), alphaComparison (4). Total: 128 bytes, the limit Vulkan guarantees.
 //
 // alphaTest, flipU and the fog distance mode used to be three separate floats. They are one int of bits now,
 // because the distance mode had nowhere else to go and four bytes were cheaper than growing the block past 128.
@@ -38,7 +38,8 @@ layout(push_constant) uniform PushConstants {
     float cameraX;
     float cameraY;
     float cameraZ;
-    float spare;
+    /** glAlphaFunc's comparison, as the same three-bit index the streamed shader reads. */
+    int alphaComparison;
 } pc;
 
 const int FLAG_RADIAL_FOG = 8;

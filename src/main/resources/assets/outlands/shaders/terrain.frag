@@ -42,6 +42,8 @@ layout(push_constant) uniform PushConstants {
     float cameraX;
     float cameraY;
     float cameraZ;
+    /** glAlphaFunc's comparison, as the same three-bit index the streamed shader reads. */
+    int alphaComparison;
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -79,9 +81,25 @@ void main() {
     }
     vec4 sample4 = texture(atlas, uv);
 
-    // GL_GREATER is the only comparison vanilla sets, and the backend rejects the others rather than guessing.
+    // glAlphaFunc's comparison, all eight of them, the same expression the streamed shader uses. The reference is not
+    // a constant: vanilla runs the terrain passes with GL_GREATER at 0.5, and only lowers it to 0.1 afterwards. That
+    // 0.5 is what keeps a mip level's blend with a fully transparent texel out of the frame - the colour under a
+    // transparent texel is black, so a lower reference draws a plant's minified gaps as black stripes.
+    if ((pc.flags & 1) != 0) {
+        float a = sample4.a;
+        bool passes = pc.alphaComparison == 7
+                || (pc.alphaComparison == 1 && a < pc.alphaReference)
+                || (pc.alphaComparison == 2 && a == pc.alphaReference)
+                || (pc.alphaComparison == 3 && a <= pc.alphaReference)
+                || (pc.alphaComparison == 4 && a > pc.alphaReference)
+                || (pc.alphaComparison == 5 && a != pc.alphaReference)
+                || (pc.alphaComparison == 6 && a >= pc.alphaReference);
+        if (!passes) {
+            discard;
+        }
+    }
     // In addition, discard fully transparent texels so they never write depth or trigger redundant work.
-    if (((pc.flags & 1) != 0 && !(sample4.a > pc.alphaReference)) || sample4.a == 0.0) {
+    if (sample4.a == 0.0) {
         discard;
     }
 

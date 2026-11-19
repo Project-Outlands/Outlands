@@ -472,7 +472,8 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      * Records one render layer's chunks, at the point in the frame where the game asked for that layer.
      */
     void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer) {
-        recordLayer(commandBuffer, slot, cameraMatrix, layer, 0.0, 0.0, 0.0, 0, 0.0f, 1.0f, 1.0f, null, null);
+        recordLayer(commandBuffer, slot, cameraMatrix, layer, 0.0, 0.0, 0.0, 0, 0.0f, 1.0f, 1.0f, null, null,
+                false, 0.1f, 516);
     }
 
     /**
@@ -480,16 +481,22 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
      */
     void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer,
                      double viewX, double viewY, double viewZ) {
-        recordLayer(commandBuffer, slot, cameraMatrix, layer, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null);
+        recordLayer(commandBuffer, slot, cameraMatrix, layer, viewX, viewY, viewZ, 0, 0.0f, 1.0f, 1.0f, null, null,
+                false, 0.1f, 516);
     }
 
     /**
      * Records one render layer's chunks with camera viewpoint, fog parameters, and optional visible chunk list.
+     *
+     * <p>The alpha test is the GL state the frame had recorded at this layer's place in the sequence, passed through
+     * untouched: vanilla runs the terrain passes with {@code GL_GREATER 0.5}, not the 0.1 it leaves set afterwards,
+     * and that 0.5 is what keeps a mip level's blend with a fully transparent texel (whose colour is the black under
+     * its zero alpha) out of the frame.</p>
      */
     void recordLayer(VkCommandBuffer commandBuffer, int slot, float[] cameraMatrix, int layer,
                      double viewX, double viewY, double viewZ,
                      int fogMode, float fogStart, float fogEnd, float fogDensity, float[] fogColor,
-                     LongArrayList visibleChunks) {
+                     LongArrayList visibleChunks, boolean alphaTest, float alphaReference, int alphaComparison) {
         if (arenaPool == null || layer < 0 || layer >= layerSlices.length) {
             return;
         }
@@ -517,13 +524,11 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
             ByteBuffer constants = stack.malloc(VulkanPipeline.PUSH_CONSTANT_BYTES);
             constants.order(java.nio.ByteOrder.nativeOrder());
 
-            boolean alphaTest = layer == net.minecraft.util.BlockRenderLayer.CUTOUT_MIPPED.ordinal()
-                    || layer == net.minecraft.util.BlockRenderLayer.CUTOUT.ordinal();
-
             extractFrustumPlanes(cameraMatrix);
 
             chunkMatrix.set(cameraScratch);
             writeConstants(constants, chunkMatrix, chunkOffsetBuffers[slot].deviceAddress(), alphaTest,
+                    alphaReference, alphaComparison,
                     fogMode, fogStart, fogEnd, fogDensity, fogColor, viewX, viewY, viewZ);
             vkCmdPushConstants(commandBuffer, activePipeline.layout(),
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constants);
@@ -896,6 +901,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
     }
 
     private static void writeConstants(ByteBuffer constants, Matrix4f matrix, long chunkDataAddress, boolean alphaTest,
+                                       float alphaReference, int alphaComparison,
                                        int fogMode, float fogStart, float fogEnd, float fogDensity, float[] fogColor,
                                        double viewX, double viewY, double viewZ) {
         constants.clear();
@@ -910,7 +916,7 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         constants.putFloat(72, fogColor != null ? fogColor[2] : 0.0f);
         constants.putFloat(76, fogColor != null ? fogColor[3] : 1.0f);
         constants.putLong(80, chunkDataAddress);
-        constants.putFloat(88, 0.1F);
+        constants.putFloat(88, alphaReference);
         // One int of bits instead of three floats: alpha test (bit 0), flip mode (bits 1-2, always 0 here) and the
         // fog distance mode (bit 3), which arrived by way of GL_NV_fog_distance and had nowhere else to go.
         // The radial bit rides in on fogMode's high bit from FrameDraws.TerrainLayer, which is where the frame state
@@ -924,6 +930,9 @@ final class VulkanTerrainLayer implements RenderGraphNode, AutoCloseable {
         constants.putFloat(112, (float) viewX);
         constants.putFloat(116, (float) viewY);
         constants.putFloat(120, (float) viewZ);
+        // The last four bytes were unused, and the comparison needs them: the reference alone does not say which way
+        // it is compared. Same three-bit index the streamed path uses, so one fragment shader expression answers both.
+        constants.putInt(124, VulkanStream.alphaComparisonIndex(alphaComparison));
         constants.position(0);
         constants.limit(128);
     }

@@ -196,9 +196,14 @@ public final class FrameStates {
         // sixth field would have changed a record that the whole layer path shares, for one bit.
         int fogMode = fogEnabled ? state.fogMode() | (state.radialFog() ? 0x10000 : 0) : 0;
         float[] fogColor = state.fogColor();
+        // The alpha test is part of the state vanilla had set when it asked for this layer, and it is not derivable
+        // from the layer: the terrain passes run with the reference at 0.5, which is what keeps a mip level's blend
+        // with a transparent texel out of the frame. Reading it here is also what makes a mod that changes the
+        // reference mid-frame get the test it actually asked for.
         return net.minecraftforge.client.render.vertex.FrameDraws.recordTerrainLayer(
                 layer, values, viewX, viewY, viewZ,
-                fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, visibleChunks);
+                fogMode, state.fogStart(), state.fogEnd(), state.fogDensity(), fogColor, visibleChunks,
+                state.alphaTestEnabled(), state.alphaReference(), state.alphaComparison());
     }
 
     public static void texEnv(int target, int parameterName, java.nio.FloatBuffer parameters) {
