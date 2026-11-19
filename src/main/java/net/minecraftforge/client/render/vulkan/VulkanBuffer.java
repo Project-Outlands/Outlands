@@ -14,6 +14,7 @@ import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 import static org.lwjgl.vulkan.VK10.VK_SHARING_MODE_EXCLUSIVE;
@@ -32,9 +33,10 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties;
  * first real draw has geometry, and the geometry is static. The real allocator (VMA) and the upload path for data
  * that changes every frame are separate work; writing a half-allocator here would only have to be replaced.</p>
  *
- * <p>Host-visible device-local memory is what makes the staging copy unnecessary, and it is available on anything
- * with ReBAR or unified memory. The fallback to plain host memory is silent on purpose: the geometry still
- * arrives, only slower, and this is not a path where the difference is worth a warning.</p>
+ * <p><b>System memory, not host-visible VRAM.</b> On a discrete card with Resizable BAR the host-visible
+ * device-local type is a window onto VRAM: the GPU reads it at full speed, but the CPU writes it write-combined and
+ * uncached. Everything allocated here is written by the CPU - the frame's stream vertices, the staging copy of an
+ * upload, a read-back's destination - so that trade runs the wrong way; see {@link #hostWrittenType}.</p>
  */
 final class VulkanBuffer implements AutoCloseable {
 
@@ -244,30 +246,77 @@ final class VulkanBuffer implements AutoCloseable {
     private static int memoryType(VulkanContext context, int allowedBits, MemoryStack stack) {
         VkPhysicalDeviceMemoryProperties memoryProperties = VkPhysicalDeviceMemoryProperties.malloc(stack);
         vkGetPhysicalDeviceMemoryProperties(context.physicalDevice(), memoryProperties);
+        int[] typeFlags = new int[memoryProperties.memoryTypeCount()];
+        for (int i = 0; i < typeFlags.length; i++) {
+            typeFlags[i] = memoryProperties.memoryTypes(i).propertyFlags();
+        }
+        int chosen = hostWrittenType(allowedBits, typeFlags);
+        if (chosen < 0) {
+            throw new VkCheck.VulkanException("no host-visible memory type for a buffer the host writes");
+        }
+        return chosen;
+    }
 
-        // Prefer host-visible device-local (ReBAR / unified memory): written once, read by the GPU at full speed.
-        int fallback = -1;
-        for (int i = 0; i < memoryProperties.memoryTypeCount(); i++) {
+    /**
+     * The memory type a buffer the host writes should live in, given the type bits the driver allows.
+     *
+     * <p><b>System memory before host-visible VRAM, deliberately.</b> Host-visible <em>device-local</em> memory looks
+     * like the obvious choice - it is VRAM, and the GPU reads it at full speed - but on a discrete card with
+     * Resizable BAR the CPU only reaches it through the BAR, write-combined and uncached. Every buffer this class
+     * allocates is written by the CPU: the frame's stream vertices, the staging copy of a texture upload, the
+     * destination of a read-back. Measured on an RX 6650 XT (RADV, ReBAR on): converting one frame's stream vertices
+     * into a host-visible device-local buffer cost <b>~400 ns a vertex</b> against <b>3-5 ns</b> into cached system
+     * memory - 15 of the frame's 16 ms, with the profile showing all of it in {@code display_update} - and one
+     * block-atlas upload of a few megabytes took ~20 ms. The GPU then reads at most a megabyte per frame over PCIe,
+     * which is a fraction of a millisecond.</p>
+     *
+     * <p>{@code HOST_CACHED} first among the system types: it is what makes the CPU's writes fast, and it is also
+     * what a read-back needs, since the uncached alternative makes the CPU read of GPU output the slowest case
+     * there is.</p>
+     *
+     * @return the index of the type to use, or -1 when the driver offers no host-visible type for this buffer
+     */
+    static int hostWrittenType(int allowedBits, int[] typeFlags) {
+        int cached = -1;
+        int coherent = -1;
+        int any = -1;
+        int deviceLocalVisible = -1;
+        for (int i = 0; i < typeFlags.length; i++) {
             if ((allowedBits & (1 << i)) == 0) {
                 continue;
             }
-            int flags = memoryProperties.memoryTypes(i).propertyFlags();
-            boolean hostVisible = (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
-            if (!hostVisible) {
+            int flags = typeFlags[i];
+            if ((flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0) {
                 continue;
             }
-            boolean coherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
-            if ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0 && coherent) {
-                return i;
+            boolean isCoherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+            if ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+                // VRAM over the BAR: fast for the GPU, slow for every store the CPU makes.
+                if (deviceLocalVisible < 0) {
+                    deviceLocalVisible = i;
+                }
+                continue;
             }
-            if (coherent && fallback < 0) {
-                fallback = i;
+            if (isCoherent && (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0 && cached < 0) {
+                cached = i;
+            } else if (isCoherent && coherent < 0) {
+                coherent = i;
+            }
+            if (any < 0) {
+                any = i;
             }
         }
-        if (fallback < 0) {
-            throw new VkCheck.VulkanException("no host-visible coherent memory type for a vertex buffer");
+        if (cached >= 0) {
+            return cached;
         }
-        return fallback;
+        if (coherent >= 0) {
+            return coherent;
+        }
+        if (any >= 0) {
+            return any;
+        }
+        // An integrated GPU has one memory: the only host-visible type is the device-local one.
+        return deviceLocalVisible;
     }
 
     @Override
