@@ -2,6 +2,8 @@ package net.minecraftforge.client.render.vulkan;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2LongMap;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 
 import net.minecraftforge.client.render.texture.TextureBackend;
 import net.minecraftforge.client.render.texture.TextureImage;
@@ -118,7 +120,24 @@ final class VulkanTextures implements AutoCloseable {
      * @param uploadedVersion the texture version the image currently holds
      * @param descriptorSet   the set that binds it, reused for every draw that samples this texture
      */
-    private record Entry(VulkanImage image, long sampler, long descriptorSet, long uploadedVersion) {}
+    private record Entry(VulkanImage image, SamplerKey sampler, Long2LongMap setsBySampler, long descriptorSet,
+                         long uploadedVersion) {}
+
+    /**
+     * The sampler parameters a texture asks for, with GL's defaults resolved and the mip range decided by the filter.
+     *
+     * <p>One function decides this, so the key a set is cached under and the key {@link #sampler} creates are the same
+     * thing by construction. Vanilla leaves {@code GL_TEXTURE_MIN_FILTER}/{@code MAG_FILTER} at their defaults for
+     * textures it never touches - {@code GL_NEAREST_MIPMAP_LINEAR} and {@code GL_LINEAR} - and those defaults are part
+     * of the identity, not a fallback applied later.</p>
+     */
+    static SamplerKey samplerKeyFor(TextureImage image) {
+        int min = image.minFilter() == TextureImage.UNSET ? 9986 : image.minFilter();
+        int mag = image.magFilter() == TextureImage.UNSET ? 9729 : image.magFilter();
+        int maxLevel = image.levelCount() - 1;
+        boolean mipmapped = mipmapped(min) && maxLevel > 0;
+        return new SamplerKey(min, mag, image.wrapS(), image.wrapT(), mipmapped ? maxLevel : 0);
+    }
 
     /**
      * A texture backed by an image this class does not own.
@@ -137,7 +156,7 @@ final class VulkanTextures implements AutoCloseable {
      * part of the sampler. GL's {@code GL_TEXTURE_MAX_LEVEL} - which vanilla sets to the level count it allocated -
      * becomes this field.</p>
      */
-    private record SamplerKey(int minFilter, int magFilter, int wrapS, int wrapT, int maxLevel) {}
+    record SamplerKey(int minFilter, int magFilter, int wrapS, int wrapT, int maxLevel) {}
 
     @SuppressWarnings("unchecked")
     /**
@@ -166,7 +185,8 @@ final class VulkanTextures implements AutoCloseable {
 
         // The stand-in is white in either encoding, so its format only has to match for consistency.
         this.white = VulkanImage.create(context.device(), context, 1, 1, textureFormat());
-        this.whiteSampler = sampler(TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, TextureImage.UNSET, 0);
+        // The stand-in's own sampler: GL's defaults for the filters, and no chain to range over.
+        this.whiteSampler = sampler(new SamplerKey(9986, 9729, TextureImage.UNSET, TextureImage.UNSET, 0));
         this.whiteSet = descriptors.allocate(white.view(), whiteSampler);
         for (int i = 0; i < VulkanSwapchain.FRAMES_IN_FLIGHT; i++) {
             this.descriptors.writeLightmap(i, white.view(), whiteSampler);
@@ -230,7 +250,7 @@ final class VulkanTextures implements AutoCloseable {
             return external != null ? new ImageBinding(external.view(), external.sampler())
                     : new ImageBinding(white.view(), whiteSampler);
         }
-        return new ImageBinding(entry.image().view(), entry.sampler());
+        return new ImageBinding(entry.image().view(), sampler(entry.sampler()));
     }
 
     /** One sampler binding: the image it reads and the sampler that filters it. */
@@ -255,9 +275,16 @@ final class VulkanTextures implements AutoCloseable {
         }
 
         Entry entry = entries.get(textureId);
-        if (entry != null && entry.uploadedVersion() == image.version()
-                && entry.image().width() == image.width() && entry.image().height() == image.height()) {
+        SamplerKey wanted = samplerKeyFor(image);
+        boolean sameImage = entry != null && entry.uploadedVersion() == image.version()
+                && entry.image().width() == image.width() && entry.image().height() == image.height()
+                && entry.image().mipLevels() == image.levelCount();
+        if (sameImage && entry.sampler().equals(wanted)) {
             return entry;
+        }
+        if (sameImage) {
+            // Only the sampler moved, and nothing was re-uploaded.
+            return resample(textureId, entry, wanted);
         }
 
         // Both uploaded files and framebuffer copies hold sRGB-encoded bytes - PNGs because that is what a PNG is,
@@ -266,10 +293,11 @@ final class VulkanTextures implements AutoCloseable {
         if (entry == null) {
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format,
                     image.levelCount());
-            long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT(),
-                    image.levelCount() - 1);
+            long sampler = sampler(wanted);
             long set = descriptors.allocate(created.view(), sampler);
-            entry = new Entry(created, sampler, set, -1L);
+            Long2LongMap sets = new Long2LongOpenHashMap();
+            sets.put(sampler, set);
+            entry = new Entry(created, wanted, sets, set, -1L);
             if (TEXTURE_PROBE) {
                 reportChain(textureId, image, created);
             }
@@ -289,13 +317,16 @@ final class VulkanTextures implements AutoCloseable {
             entry.image().close();
             VulkanImage created = VulkanImage.create(context.device(), context, image.width(), image.height(), format,
                     image.levelCount());
-            long sampler = sampler(image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT(),
-                    image.levelCount() - 1);
-            // The old set named an image that no longer exists, so it goes back to the pool rather than being retired
-            // with it: a resized texture happens on every window resize for every GUI texture.
-            descriptors.free(entry.descriptorSet());
+            long sampler = sampler(wanted);
+            // Every set named an image that no longer exists, so they all go back to the pool rather than being
+            // retired with it: a resized texture happens on every window resize for every GUI texture.
+            for (Long2LongMap.Entry named : entry.setsBySampler().long2LongEntrySet()) {
+                descriptors.free(named.getLongValue());
+            }
             long set = descriptors.allocate(created.view(), sampler);
-            entry = new Entry(created, sampler, set, -1L);
+            Long2LongMap sets = new Long2LongOpenHashMap();
+            sets.put(sampler, set);
+            entry = new Entry(created, wanted, sets, set, -1L);
             entries.put(textureId, entry);
             source.drainSubUpdates(textureId);
             stagingFull(commandBuffer, slot, entry.image(), image);
@@ -308,8 +339,36 @@ final class VulkanTextures implements AutoCloseable {
             }
         }
 
-        entries.put(textureId, new Entry(entry.image(), entry.sampler(), entry.descriptorSet(), image.version()));
+        if (!entry.sampler().equals(wanted)) {
+            // The pixels moved *and* the filter did. The upload above was staged for the old sampler, which is still
+            // valid - same chain, so the same LOD range - but this frame should already read with the new one.
+            entry = resample(textureId, entry, wanted);
+        }
+        entries.put(textureId, new Entry(entry.image(), entry.sampler(), entry.setsBySampler(), entry.descriptorSet(),
+                image.version()));
         return entry;
+    }
+
+    /**
+     * The same image under a different sampler.
+     *
+     * <p><b>Vanilla changes the atlas's filter in the middle of every frame</b>: {@code EntityRenderer} draws
+     * {@code CUTOUT_MIPPED} with mipmaps and {@code CUTOUT} without them, switching {@code GL_TEXTURE_MIN_FILTER}
+     * around each layer. That is a sampler change with the pixels untouched, and the set cannot simply be pointed at
+     * the new sampler - a frame still in flight has it bound - so each sampler keeps its own set, allocated the first
+     * time that filter is asked for.</p>
+     */
+    private Entry resample(int textureId, Entry entry, SamplerKey wanted) {
+        long handle = sampler(wanted);
+        Long2LongMap sets = entry.setsBySampler();
+        long set = sets.get(handle);
+        if (set == 0L) {
+            set = descriptors.allocate(entry.image().view(), handle);
+            sets.put(handle, set);
+        }
+        Entry updated = new Entry(entry.image(), wanted, sets, set, entry.uploadedVersion());
+        entries.put(textureId, updated);
+        return updated;
     }
 
     /**
@@ -615,7 +674,7 @@ final class VulkanTextures implements AutoCloseable {
         if (entry == null) {
             return null;
         }
-        return new long[] {entry.image().view(), entry.sampler(), set};
+        return new long[] {entry.image().view(), sampler(entry.sampler()), set};
     }
 
     /** The stand-in set a draw uses when nothing is bound. */
@@ -676,7 +735,7 @@ final class VulkanTextures implements AutoCloseable {
      * clamping is what stops a pass reading past the edge of the image it is processing.</p>
      */
     long renderTargetSampler(int glFilter) {
-        return sampler(glFilter, glFilter, 33071, 33071, 0);
+        return sampler(new SamplerKey(glFilter, glFilter, 33071, 33071, 0));
     }
 
     /**
@@ -695,13 +754,11 @@ final class VulkanTextures implements AutoCloseable {
      * regardless of what the filter asks for: a sampler that offers levels an image does not have is undefined
      * behaviour, and the four filters above are also what a one-level texture wants anyway.</p>
      */
-    private long sampler(int minFilter, int magFilter, int wrapS, int wrapT, int maxLevel) {
-        // GL's defaults for the parameters the game never set.
-        int min = minFilter == TextureImage.UNSET ? 9986 : minFilter;
-        int mag = magFilter == TextureImage.UNSET ? 9729 : magFilter;
-        boolean mipmapped = mipmapped(min) && maxLevel > 0;
+    private long sampler(SamplerKey key) {
+        int min = key.minFilter();
+        int mag = key.magFilter();
+        boolean mipmapped = mipmapped(min) && key.maxLevel() > 0;
 
-        SamplerKey key = new SamplerKey(min, mag, wrapS, wrapT, mipmapped ? maxLevel : 0);
         Long existing = samplers.get(key);
         if (existing != null) {
             return existing;
@@ -713,11 +770,11 @@ final class VulkanTextures implements AutoCloseable {
                     .minFilter(vkFilter(min))
                     .mipmapMode(mipmapped && interLevelLinear(min)
                             ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST)
-                    .addressModeU(addressMode(wrapS))
-                    .addressModeV(addressMode(wrapT))
+                    .addressModeU(addressMode(key.wrapS()))
+                    .addressModeV(addressMode(key.wrapT()))
                     .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                     .borderColor(VK_BORDER_COLOR_INT_OPAQUE_BLACK);
-            info.minLod(0.0f).maxLod(mipmapped ? maxLevel : 0.0f);
+            info.minLod(0.0f).maxLod(mipmapped ? key.maxLevel() : 0.0f);
             LongBuffer out = stack.mallocLong(1);
             VkCheck.check(vkCreateSampler(context.device(), info, null, out), "vkCreateSampler");
             long sampler = out.get(0);
@@ -771,6 +828,9 @@ final class VulkanTextures implements AutoCloseable {
         stagingPool.clear();
         for (Entry entry : entries.values()) {
             entry.image().close();
+            for (Long2LongMap.Entry named : entry.setsBySampler().long2LongEntrySet()) {
+                descriptors.free(named.getLongValue());
+            }
         }
         entries.clear();
         // The images behind these belong to render targets, which destroy them; only the sets go with the pool.
