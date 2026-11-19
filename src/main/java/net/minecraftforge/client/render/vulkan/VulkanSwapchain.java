@@ -166,13 +166,23 @@ final class VulkanSwapchain {
     private int depthFormat;
     private int extentWidth;
 
-    /** The screenshot the game asked for, taken at the start of the frame that will satisfy it. */
+    /**
+     * The picture the game asked for, taken at the start of the frame that will satisfy it.
+     *
+     * <p>One channel for two requests, because both are the window copied out of the frame that is about to be
+     * presented and only one such copy fits in a frame. A screenshot and a save's icon never arrive together in
+     * practice - one is a key press and the other is the first frames of a world - and if they ever do, the
+     * screenshot goes first and the icon is served by the frame after: {@code createWorldIcon} keeps asking until
+     * the server reports the icon as set.</p>
+     */
     private net.minecraftforge.client.render.screenshot.Screenshots.Request pendingScreenshot;
-    /** The screenshot the frame being recorded is copying out, until its fence has been waited on. */
+    private net.minecraftforge.client.render.screenshot.WorldIcon.Request pendingWorldIcon;
+    /** The picture the frame being recorded is copying out, until its fence has been waited on. */
     private net.minecraftforge.client.render.screenshot.Screenshots.Request screenshotRequest;
-    private VulkanBuffer screenshotBuffer;
-    private int screenshotWidth;
-    private int screenshotHeight;
+    private net.minecraftforge.client.render.screenshot.WorldIcon.Request worldIconRequest;
+    private VulkanBuffer pictureBuffer;
+    private int pictureWidth;
+    private int pictureHeight;
 
     /**
      * What a frame spent, accumulated for the shutdown report.
@@ -383,7 +393,7 @@ final class VulkanSwapchain {
             present(imageIndex, stack);
             // The frame's fence is the only thing that says the copy has landed; the image is already on screen, so
             // waiting here costs the player nothing.
-            finishScreenshot(frame);
+            finishPicture(frame);
             finishReads(frame);
         }
 
@@ -424,21 +434,32 @@ final class VulkanSwapchain {
      * are - the window's format is BGRA on every driver measured - and the swizzle and the flip happen on the CPU,
      * where a screenshot is not on any hot path.</p>
      */
-    private void recordScreenshotCopy(VkCommandBuffer commandBuffer, int imageIndex,
-                                      net.minecraftforge.client.render.screenshot.Screenshots.Request request,
-                                      MemoryStack stack) {
-        int width = Math.min(request.width(), extentWidth);
-        int height = Math.min(request.height(), extentHeight);
+    private void recordPictureCopy(VkCommandBuffer commandBuffer, int imageIndex, int requestedWidth,
+                                   int requestedHeight,
+                                   net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot,
+                                   net.minecraftforge.client.render.screenshot.WorldIcon.Request icon,
+                                   MemoryStack stack) {
+        int width = Math.min(requestedWidth, extentWidth);
+        int height = Math.min(requestedHeight, extentHeight);
         long bytes = (long) width * height * 4L;
+        String reason = null;
         if (bytes <= 0 || bytes > Integer.MAX_VALUE) {
-            net.minecraftforge.client.render.screenshot.Screenshots.failed(request,
-                    "a " + width + "x" + height + " picture is not a size this backend can read back");
+            reason = "a " + width + "x" + height + " picture is not a size this backend can read back";
+        }
+        if (reason != null) {
+            if (screenshot != null) {
+                net.minecraftforge.client.render.screenshot.Screenshots.failed(screenshot, reason);
+            }
+            if (icon != null) {
+                net.minecraftforge.client.render.screenshot.WorldIcon.failed(icon, reason);
+            }
             return;
         }
-        screenshotWidth = width;
-        screenshotHeight = height;
-        screenshotRequest = request;
-        screenshotBuffer = VulkanBuffer.createReadback(device, context, (int) bytes);
+        pictureWidth = width;
+        pictureHeight = height;
+        screenshotRequest = screenshot;
+        worldIconRequest = icon;
+        pictureBuffer = VulkanBuffer.createReadback(device, context, (int) bytes);
 
         VkImageMemoryBarrier2.Buffer toTransfer = VkImageMemoryBarrier2.calloc(1, stack);
         toTransfer.get(0)
@@ -461,7 +482,7 @@ final class VulkanSwapchain {
         region.get(0).imageOffset().set(0, 0, 0);
         region.get(0).imageExtent().set(width, height, 1);
         vkCmdCopyImageToBuffer(commandBuffer, images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                screenshotBuffer.handle(), region);
+                pictureBuffer.handle(), region);
     }
 
     /**
@@ -482,24 +503,32 @@ final class VulkanSwapchain {
         textures.finishReads(frame);
     }
 
-    /** Writes out the screenshot whose copy the submitted frame contains, if there is one. */
-    private void finishScreenshot(int frame) {
-        if (screenshotRequest == null || screenshotBuffer == null) {
+    /** Hands over the picture whose copy the submitted frame contains, if there is one. */
+    private void finishPicture(int frame) {
+        if (pictureBuffer == null) {
             return;
         }
-        net.minecraftforge.client.render.screenshot.Screenshots.Request request = screenshotRequest;
+        net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot = screenshotRequest;
+        net.minecraftforge.client.render.screenshot.WorldIcon.Request icon = worldIconRequest;
         screenshotRequest = null;
+        worldIconRequest = null;
         try {
-            RenderWatchdog.blockingOn("waiting for screenshot frame " + frame + "'s fence");
+            RenderWatchdog.blockingOn("waiting for picture frame " + frame + "'s fence");
             VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
-            byte[] bgra = screenshotBuffer.read(screenshotWidth * screenshotHeight * 4);
+            byte[] bgra = pictureBuffer.read(pictureWidth * pictureHeight * 4);
             byte[] rgba = net.minecraftforge.client.render.screenshot.Screenshots.swizzleBgra(
-                    java.nio.ByteBuffer.wrap(bgra), screenshotWidth, screenshotHeight);
-            net.minecraftforge.client.render.screenshot.Screenshots.deliver(request, rgba, screenshotWidth,
-                    screenshotHeight);
+                    java.nio.ByteBuffer.wrap(bgra), pictureWidth, pictureHeight);
+            if (screenshot != null) {
+                net.minecraftforge.client.render.screenshot.Screenshots.deliver(screenshot, rgba, pictureWidth,
+                        pictureHeight);
+            }
+            if (icon != null) {
+                net.minecraftforge.client.render.screenshot.WorldIcon.deliver(icon, rgba, pictureWidth,
+                        pictureHeight);
+            }
         } finally {
-            screenshotBuffer.close();
-            screenshotBuffer = null;
+            pictureBuffer.close();
+            pictureBuffer = null;
         }
     }
 
@@ -584,6 +613,9 @@ final class VulkanSwapchain {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
+        // Only when there is no screenshot: both requests are the whole window, and one copy goes in a frame.
+        pendingWorldIcon = pendingScreenshot == null
+                ? net.minecraftforge.client.render.screenshot.WorldIcon.take() : null;
         RenderInstance.resetOpened();
         int copiesBefore = VulkanImage.copyCount();
         int binds = 0;
@@ -675,25 +707,32 @@ final class VulkanSwapchain {
 
         vkCmdEndRendering(commandBuffer);
 
-        // A screenshot asks for the frame the player is looking at, which is this one: it is taken here, after the
-        // last draw and before the image becomes presentable. The copy has to be outside the rendering instance,
-        // which is why the request is satisfied at this point rather than where the game asked.
+        // A picture asks for the frame the player is looking at, which is this one: it is taken here, after the last
+        // draw and before the image becomes presentable. The copy has to be outside the rendering instance, which is
+        // why the request is satisfied at this point rather than where the game asked.
         net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot = pendingScreenshot;
+        net.minecraftforge.client.render.screenshot.WorldIcon.Request icon = pendingWorldIcon;
         pendingScreenshot = null;
+        pendingWorldIcon = null;
+        boolean picture = screenshot != null || icon != null;
         if (screenshot != null) {
-            recordScreenshotCopy(commandBuffer, imageIndex, screenshot, stack);
+            recordPictureCopy(commandBuffer, imageIndex, screenshot.width(), screenshot.height(), screenshot, null,
+                    stack);
+        } else if (icon != null) {
+            // The icon is the largest square of the window, which is the whole window as far as the copy goes.
+            recordPictureCopy(commandBuffer, imageIndex, extentWidth, extentHeight, null, icon, stack);
         }
 
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);
         presentBarrier.get(0)
                 .sType$Default()
-                .srcStageMask(screenshot != null ? VK_PIPELINE_STAGE_2_TRANSFER_BIT
+                .srcStageMask(picture ? VK_PIPELINE_STAGE_2_TRANSFER_BIT
                         : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-                .srcAccessMask(screenshot != null ? VK_ACCESS_2_TRANSFER_READ_BIT
+                .srcAccessMask(picture ? VK_ACCESS_2_TRANSFER_READ_BIT
                         : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
                 .dstStageMask(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                 .dstAccessMask(0)
-                .oldLayout(screenshot != null ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                .oldLayout(picture ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                         : VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL)
                 .newLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
                 .image(images[imageIndex])

@@ -28,6 +28,37 @@ class TexturePixelsTest {
     private static final int[] ARGB = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFFFF};
 
     @Test
+    void theIntFormIsTheSameRowsThroughAnIntBuffer() {
+        // ScreenShotHelper.createScreenshot's own call: GL_BGRA + GL_UNSIGNED_BYTE into an IntBuffer. Four bytes per
+        // texel through an int buffer is 0xAARRGGBB on little-endian, which is what the backend already stores, so
+        // GL_BGRA has to come out identical to the stored texels - just bottom-up.
+        java.nio.IntBuffer out = java.nio.IntBuffer.allocate(4);
+        assertTrue(TexturePixels.writeInts(ARGB, 2, 2, BGRA, UNSIGNED_BYTE, out, 0));
+        assertArrayEquals(new int[] {0xFF0000FF, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00},
+                new int[] {out.get(0), out.get(1), out.get(2), out.get(3)},
+                "bottom row first, and the texels themselves unchanged");
+    }
+
+    @Test
+    void theIntFormPacksRgbaTheWayLittleEndianDoes() {
+        java.nio.IntBuffer out = java.nio.IntBuffer.allocate(1);
+        // One texel, GL_RGBA: the bytes go out R,G,B,A, so the int holding them is 0xAABBGGRR.
+        assertTrue(TexturePixels.writeInts(new int[] {0x11223344}, 1, 1, RGBA, UNSIGNED_BYTE, out, 0));
+        org.junit.jupiter.api.Assertions.assertEquals(0x11443322, out.get(0),
+                "R=0x11 G=0x22 B=0x33 A=0x44 packs as A,B,G,R little-endian");
+    }
+
+    @Test
+    void theIntFormRefusesWhatItDoesNotConvert() {
+        java.nio.IntBuffer out = java.nio.IntBuffer.allocate(4);
+        assertFalse(TexturePixels.writeInts(ARGB, 2, 2, RGB, UNSIGNED_BYTE, out, 0),
+                "three channels do not fit one int per texel the way a caller means it");
+        // And it is loud when the destination is too small, rather than writing past the end.
+        assertThrows(IllegalArgumentException.class,
+                () -> TexturePixels.writeInts(ARGB, 2, 2, BGRA, UNSIGNED_BYTE, java.nio.IntBuffer.allocate(3), 0));
+    }
+
+    @Test
     void rowsComeOutBottomUp() {
         ByteBuffer out = ByteBuffer.allocate(2 * 2 * 4);
         assertTrue(TexturePixels.write(ARGB, 2, 2, RGBA, UNSIGNED_BYTE, out, 0));

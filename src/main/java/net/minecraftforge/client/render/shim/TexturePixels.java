@@ -3,6 +3,7 @@ package net.minecraftforge.client.render.shim;
 import org.jspecify.annotations.Nullable;
 
 import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 
 /**
  * Converts a texture's pixels into the byte layout {@code glGetTexImage} promises for a (format, type) pair.
@@ -85,6 +86,48 @@ final class TexturePixels {
      *
      * @return whether the pair is one this method converts; {@code false} leaves {@code out} untouched
      */
+    /**
+     * Writes {@code argb} (rows top-down) into an int buffer, one texel per int, in GL's row order.
+     *
+     * <p><b>Why this exists at all.</b> {@code ScreenShotHelper.createScreenshot} reads the framebuffer with
+     * {@code glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, IntBuffer)}: four bytes per texel delivered
+     * through an int buffer, which is exactly the {@code 0xAARRGGBB} this backend already stores, so
+     * {@code GL_BGRA} is a row-flipped copy and nothing more. That call used to be answered with a blank buffer (on
+     * the grounds that "vanilla's callers are routed earlier"), which is the black {@code icon.png} in every save.</p>
+     *
+     * @return whether the pair is one this method converts; {@code false} leaves {@code out} untouched
+     */
+    static boolean writeInts(int[] argb, int width, int height, int format, int type, IntBuffer out, int at) {
+        if (type != GL_UNSIGNED_BYTE || (format != GL_RGBA && format != GL_BGRA)) {
+            return false;
+        }
+        int needed = width * height;
+        if (out.limit() - at < needed) {
+            throw new IllegalArgumentException("glGetTexImage needs " + needed + " ints for " + width + "x" + height
+                    + ", the destination has " + (out.limit() - at) + " from position " + at);
+        }
+        boolean bgra = format == GL_BGRA;
+        for (int row = 0; row < height; row++) {
+            // GL's origin is the bottom-left and the stored image's is the top-left, the same flip the byte form
+            // documents.
+            int source = (height - 1 - row) * width;
+            for (int column = 0; column < width; column++) {
+                int pixel = argb[source + column];
+                if (bgra) {
+                    out.put(at + row * width + column, pixel);
+                } else {
+                    int red = (pixel >>> 16) & 0xFF;
+                    int green = (pixel >>> 8) & 0xFF;
+                    int blue = pixel & 0xFF;
+                    int alpha = (pixel >>> 24) & 0xFF;
+                    // GL_RGBA + GL_UNSIGNED_BYTE packs the bytes R,G,B,A, which little-endian is 0xAABBGGRR.
+                    out.put(at + row * width + column, (alpha << 24) | (blue << 16) | (green << 8) | red);
+                }
+            }
+        }
+        return true;
+    }
+
     static boolean write(int[] argb, int width, int height, int format, int type, ByteBuffer out, int at) {
         if (type != GL_UNSIGNED_BYTE || (format != GL_RGBA && format != GL_BGRA && format != GL_RGB)) {
             return false;

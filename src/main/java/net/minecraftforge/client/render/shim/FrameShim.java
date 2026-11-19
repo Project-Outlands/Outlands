@@ -1665,10 +1665,27 @@ public final class FrameShim implements ShimGl.Impl {
             ShimGl.REAL_GL.glGetTexImage(target, level, format, type, pixels);
             return;
         }
-        // The int form asks for 32-bit components. GL_UNSIGNED_INT_8_8_8_8 packs one texel per int, which is what
-        // this backend already holds; anything else would need a widening this code has no user for.
-        FrameStates.reportSkippedOnce("glGetTexImage(IntBuffer)",
-                "the int form is only used for GL_UNSIGNED_INT_8_8_8_8, and no mod in the pack asks for it");
+        if (pixels == null) {
+            return;
+        }
+        net.minecraftforge.client.render.texture.TextureBackend textures =
+                net.minecraftforge.client.render.texture.TextureBackends.forNonGl();
+        net.minecraftforge.client.render.texture.TextureImage image =
+                textures == null ? null : textures.image(textures.boundTexture());
+        if (image == null || level < 0 || level >= image.levelCount()) {
+            // A render target's attachment is not one of these: its pixels were written by drawing, so they are only
+            // on the device. The world icon is the caller that hits this, and it is routed earlier for exactly that
+            // reason - see WorldIcon.
+            FrameStates.reportSkippedOnce("glGetTexImage(IntBuffer, level " + level + ")",
+                    "these pixels were written by drawing rather than uploaded, so they are only on the device");
+            return;
+        }
+        if (!TexturePixels.writeInts(image.level(level), image.levelWidth(level), image.levelHeight(level),
+                format, type, pixels, pixels.position())) {
+            FrameStates.reportSkippedOnce("glGetTexImage(IntBuffer, format " + format + ", type " + type + ")",
+                    "only the BGRA and RGBA byte forms are converted here, which is what the game's own screenshot"
+                            + " helper and the pack's exporters ask for");
+        }
     }
     /**
      * {@code glReadBuffer}: which attachment a later {@code glReadPixels} reads from.
