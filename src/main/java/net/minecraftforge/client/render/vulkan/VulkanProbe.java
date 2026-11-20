@@ -36,8 +36,10 @@ import static org.lwjgl.vulkan.VK13.VK_API_VERSION_1_3;
  *
  * <p><b>Why 1.3 and not 1.4.</b> 1.3 is what the backend's features actually are: dynamic rendering,
  * synchronization2 and demote-to-helper-invocation. The 1.4 additions (push descriptors, host image copy,
- * maintenance5) are wanted for the parts of the GL shim that do not exist yet, so they are enabled when a device
- * has them and never required - see {@link VulkanContext}. Requiring them turned "this GPU can run the backend"
+ * maintenance5) were once "wanted for the parts of the GL shim that do not exist yet"; they are now judged not worth
+ * implementing at all (plan §4.1, v5: three of them do not match a mechanism this backend has, one contradicts the
+ * BGRA pixel contract, three solve problems nothing here has), so what remains is a capability report in the startup
+ * log and no branch, ever - see {@link VulkanContext}. Requiring them turned "this GPU can run the backend"
  * into "this GPU is new enough to also have three features nothing calls yet", which is how a working Turnip 1.3
  * device got rejected.</p>
  *

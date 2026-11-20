@@ -514,9 +514,11 @@ final class VulkanContext {
         // ignored, which is legal but means the answers are all "false" for a reason that has nothing to do with
         // the features themselves - and a caller reading that would draw the wrong conclusion.
         boolean vulkan14 = deviceApiVersion >= VK_API_VERSION_1_4;
-        // The three 1.4 features are for shim work that does not exist yet, so they are enabled when a device has
-        // them and simply absent otherwise. Nothing branches on the version: a future caller asks the device what
-        // it enabled, not what version it reports.
+        // The three 1.4 features are reported, not used, and plan §4.1 (v5) judged that the shim work they were
+        // held for should not be written: push descriptors are strictly more work than the per-texture sets bound on
+        // change, host image copy would add a second, synchronous upload path for a stall nothing has, and
+        // maintenance5's A8_UNORM contradicts the BGRA pixel contract. They stay as a capability report - a device
+        // that has them is one where a future trigger (same section) could be met - and never as a branch.
         VkPhysicalDeviceVulkan14Features enable14 = null;
         if (vulkan14) {
             VkPhysicalDeviceVulkan14Features supported14 = VkPhysicalDeviceVulkan14Features.calloc(stack)
