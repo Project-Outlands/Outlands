@@ -166,20 +166,10 @@ final class VulkanSwapchain {
     private int depthFormat;
     private int extentWidth;
 
-    /**
-     * The picture the game asked for, taken at the start of the frame that will satisfy it.
-     *
-     * <p>One channel for two requests, because both are the window copied out of the frame that is about to be
-     * presented and only one such copy fits in a frame. A screenshot and a save's icon never arrive together in
-     * practice - one is a key press and the other is the first frames of a world - and if they ever do, the
-     * screenshot goes first and the icon is served by the frame after: {@code createWorldIcon} keeps asking until
-     * the server reports the icon as set.</p>
-     */
+    /** The screenshot the game asked for, taken at the start of the frame that will satisfy it. */
     private net.minecraftforge.client.render.screenshot.Screenshots.Request pendingScreenshot;
-    private net.minecraftforge.client.render.screenshot.WorldIcon.Request pendingWorldIcon;
-    /** The picture the frame being recorded is copying out, until its fence has been waited on. */
+    /** The screenshot the frame being recorded is copying out, until its fence has been waited on. */
     private net.minecraftforge.client.render.screenshot.Screenshots.Request screenshotRequest;
-    private net.minecraftforge.client.render.screenshot.WorldIcon.Request worldIconRequest;
     private VulkanBuffer pictureBuffer;
     private int pictureWidth;
     private int pictureHeight;
@@ -436,29 +426,19 @@ final class VulkanSwapchain {
      */
     private void recordPictureCopy(VkCommandBuffer commandBuffer, int imageIndex, int requestedWidth,
                                    int requestedHeight,
-                                   net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot,
-                                   net.minecraftforge.client.render.screenshot.WorldIcon.Request icon,
+                                   net.minecraftforge.client.render.screenshot.Screenshots.Request request,
                                    MemoryStack stack) {
         int width = Math.min(requestedWidth, extentWidth);
         int height = Math.min(requestedHeight, extentHeight);
         long bytes = (long) width * height * 4L;
-        String reason = null;
         if (bytes <= 0 || bytes > Integer.MAX_VALUE) {
-            reason = "a " + width + "x" + height + " picture is not a size this backend can read back";
-        }
-        if (reason != null) {
-            if (screenshot != null) {
-                net.minecraftforge.client.render.screenshot.Screenshots.failed(screenshot, reason);
-            }
-            if (icon != null) {
-                net.minecraftforge.client.render.screenshot.WorldIcon.failed(icon, reason);
-            }
+            net.minecraftforge.client.render.screenshot.Screenshots.failed(request,
+                    "a " + width + "x" + height + " picture is not a size this backend can read back");
             return;
         }
         pictureWidth = width;
         pictureHeight = height;
-        screenshotRequest = screenshot;
-        worldIconRequest = icon;
+        screenshotRequest = request;
         pictureBuffer = VulkanBuffer.createReadback(device, context, (int) bytes);
 
         VkImageMemoryBarrier2.Buffer toTransfer = VkImageMemoryBarrier2.calloc(1, stack);
@@ -509,23 +489,15 @@ final class VulkanSwapchain {
             return;
         }
         net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot = screenshotRequest;
-        net.minecraftforge.client.render.screenshot.WorldIcon.Request icon = worldIconRequest;
         screenshotRequest = null;
-        worldIconRequest = null;
         try {
             RenderWatchdog.blockingOn("waiting for picture frame " + frame + "'s fence");
             VkCheck.check(vkWaitForFences(device, fences[frame], true, Long.MAX_VALUE), "vkWaitForFences");
             byte[] bgra = pictureBuffer.read(pictureWidth * pictureHeight * 4);
             byte[] rgba = net.minecraftforge.client.render.screenshot.Screenshots.swizzleBgra(
                     java.nio.ByteBuffer.wrap(bgra), pictureWidth, pictureHeight);
-            if (screenshot != null) {
-                net.minecraftforge.client.render.screenshot.Screenshots.deliver(screenshot, rgba, pictureWidth,
-                        pictureHeight);
-            }
-            if (icon != null) {
-                net.minecraftforge.client.render.screenshot.WorldIcon.deliver(icon, rgba, pictureWidth,
-                        pictureHeight);
-            }
+            net.minecraftforge.client.render.screenshot.Screenshots.deliver(screenshot, rgba, pictureWidth,
+                    pictureHeight);
         } finally {
             pictureBuffer.close();
             pictureBuffer = null;
@@ -613,9 +585,6 @@ final class VulkanSwapchain {
         // Whatever the game asked for while building this frame belongs to it: the frame in flight is the picture the
         // player was looking at when they pressed the key.
         pendingScreenshot = net.minecraftforge.client.render.screenshot.Screenshots.take();
-        // Only when there is no screenshot: both requests are the whole window, and one copy goes in a frame.
-        pendingWorldIcon = pendingScreenshot == null
-                ? net.minecraftforge.client.render.screenshot.WorldIcon.take() : null;
         RenderInstance.resetOpened();
         int copiesBefore = VulkanImage.copyCount();
         int binds = 0;
@@ -707,20 +676,14 @@ final class VulkanSwapchain {
 
         vkCmdEndRendering(commandBuffer);
 
-        // A picture asks for the frame the player is looking at, which is this one: it is taken here, after the last
-        // draw and before the image becomes presentable. The copy has to be outside the rendering instance, which is
-        // why the request is satisfied at this point rather than where the game asked.
+        // A screenshot asks for the frame the player is looking at, which is this one: it is taken here, after the
+        // last draw and before the image becomes presentable. The copy has to be outside the rendering instance,
+        // which is why the request is satisfied at this point rather than where the game asked.
         net.minecraftforge.client.render.screenshot.Screenshots.Request screenshot = pendingScreenshot;
-        net.minecraftforge.client.render.screenshot.WorldIcon.Request icon = pendingWorldIcon;
         pendingScreenshot = null;
-        pendingWorldIcon = null;
-        boolean picture = screenshot != null || icon != null;
+        boolean picture = screenshot != null;
         if (screenshot != null) {
-            recordPictureCopy(commandBuffer, imageIndex, screenshot.width(), screenshot.height(), screenshot, null,
-                    stack);
-        } else if (icon != null) {
-            // The icon is the largest square of the window, which is the whole window as far as the copy goes.
-            recordPictureCopy(commandBuffer, imageIndex, extentWidth, extentHeight, null, icon, stack);
+            recordPictureCopy(commandBuffer, imageIndex, screenshot.width(), screenshot.height(), screenshot, stack);
         }
 
         VkImageMemoryBarrier2.Buffer presentBarrier = VkImageMemoryBarrier2.calloc(1, stack);

@@ -358,7 +358,7 @@
                  }
                  catch (Throwable throwable)
                  {
-@@ -1213,6 +1232,15 @@
+@@ -1213,6 +1232,16 @@
                  && this.mc.renderGlobal.hasNoChunkUpdates()
                  && !this.mc.getIntegratedServer().isWorldIconSet())
          {
@@ -366,7 +366,8 @@
 +            // there is nothing to read back at this point: the shim's glGetTexImage is a no-op and the icon came out
 +            // black. The backend takes the request and answers it with the next frame; on the GL path this returns
 +            // false and vanilla's own readback below runs unchanged.
-+            if (net.minecraftforge.client.render.screenshot.WorldIcon.request(this.mc.getIntegratedServer().getWorldIconFile()))
++            if (net.minecraftforge.client.render.screenshot.WorldIcon.request(
++                    this.mc.getIntegratedServer().getWorldIconFile(), this.mc.displayWidth, this.mc.displayHeight))
 +            {
 +                return;
 +            }
@@ -374,7 +375,7 @@
              BufferedImage bufferedimage = ScreenShotHelper.createScreenshot(
                                                this.mc.displayWidth, this.mc.displayHeight, this.mc.getFramebuffer()
                                            );
-@@ -1241,7 +1269,7 @@
+@@ -1241,7 +1270,7 @@
              }
              catch (IOException ioexception)
              {
@@ -383,7 +384,7 @@
              }
          }
      }
-@@ -1273,7 +1301,7 @@
+@@ -1273,7 +1302,7 @@
  
                      if (this.mc.playerController.getCurrentGameType() == GameType.SPECTATOR)
                      {
@@ -392,7 +393,7 @@
                      }
                      else
                      {
-@@ -1331,7 +1359,7 @@
+@@ -1331,7 +1360,7 @@
          GlStateManager.clear(16640);
          this.mc.profiler.endStartSection("camera");
          this.setupCameraTransform(partialTicks, pass);
@@ -401,7 +402,7 @@
          this.mc.profiler.endStartSection("frustum");
          ClippingHelperImpl.getInstance();
          this.mc.profiler.endStartSection("culling");
-@@ -1391,7 +1419,9 @@
+@@ -1391,7 +1420,9 @@
          GlStateManager.disableAlpha();
          renderglobal.renderBlockLayer(BlockRenderLayer.SOLID, partialTicks, pass, entity);
          GlStateManager.enableAlpha();
@@ -411,7 +412,7 @@
          this.mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).setBlurMipmap(false, false);
          renderglobal.renderBlockLayer(BlockRenderLayer.CUTOUT, partialTicks, pass, entity);
          this.mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).restoreLastBlurMipmap();
-@@ -1405,7 +1435,9 @@
+@@ -1405,7 +1436,9 @@
              GlStateManager.pushMatrix();
              RenderHelper.enableStandardItemLighting();
              this.mc.profiler.endStartSection("entities");
@@ -421,7 +422,7 @@
              RenderHelper.disableStandardItemLighting();
              this.disableLightmap();
          }
-@@ -1418,6 +1450,7 @@
+@@ -1418,6 +1451,7 @@
              EntityPlayer entityplayer = (EntityPlayer)entity;
              GlStateManager.disableAlpha();
              this.mc.profiler.endStartSection("outline");
@@ -429,7 +430,7 @@
              renderglobal.drawSelectionBox(entityplayer, this.mc.objectMouseOver, 0, partialTicks);
              GlStateManager.enableAlpha();
          }
-@@ -1468,6 +1501,17 @@
+@@ -1468,6 +1502,17 @@
          GlStateManager.shadeModel(7425);
          this.mc.profiler.endStartSection("translucent");
          renderglobal.renderBlockLayer(BlockRenderLayer.TRANSLUCENT, partialTicks, pass, entity);
@@ -447,7 +448,7 @@
          GlStateManager.shadeModel(7424);
          GlStateManager.depthMask(true);
          GlStateManager.enableCull();
-@@ -1480,6 +1524,9 @@
+@@ -1480,6 +1525,9 @@
              this.renderCloudsCheck(renderglobal, partialTicks, pass, d0, d1, d2);
          }
  
@@ -457,7 +458,7 @@
          this.mc.profiler.endStartSection("hand");
  
          if (this.renderHand)
-@@ -1624,6 +1671,13 @@
+@@ -1624,6 +1672,13 @@
  
      protected void renderRainSnow(float partialTicks)
      {
@@ -471,7 +472,7 @@
          float f = this.mc.world.getRainStrength(partialTicks);
  
          if (!(f <= 0.0F))
-@@ -1691,7 +1745,7 @@
+@@ -1691,7 +1746,7 @@
  
                          int i3 = j2;
  
@@ -480,7 +481,7 @@
                          {
                              i3 = l;
                          }
-@@ -1897,29 +1951,16 @@
+@@ -1897,29 +1952,16 @@
              this.fogColorGreen = (float)vec3d3.y;
              this.fogColorBlue = (float)vec3d3.z;
          }
@@ -520,7 +521,7 @@
          }
  
          float f13 = this.fogColor2 + (this.fogColor1 - this.fogColor2) * partialTicks;
-@@ -1978,6 +2019,9 @@
+@@ -1978,6 +2020,9 @@
                  f6 = 1.0F / this.fogColorBlue;
              }
  
@@ -530,7 +531,7 @@
              this.fogColorRed = this.fogColorRed * (1.0F - f15) + this.fogColorRed * f6 * f15;
              this.fogColorGreen = this.fogColorGreen * (1.0F - f15) + this.fogColorGreen * f6 * f15;
              this.fogColorBlue = this.fogColorBlue * (1.0F - f15) + this.fogColorBlue * f6 * f15;
-@@ -1993,6 +2037,13 @@
+@@ -1993,6 +2038,13 @@
              this.fogColorBlue = f7;
          }
  
@@ -544,7 +545,7 @@
          GlStateManager.clearColor(this.fogColorRed, this.fogColorGreen, this.fogColorBlue, 0.0F);
      }
  
-@@ -2003,7 +2054,9 @@
+@@ -2003,7 +2055,9 @@
          GlStateManager.glNormal3f(0.0F, -1.0F, 0.0F);
          GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
          IBlockState iblockstate = ActiveRenderInfo.getBlockStateAtEntityViewpoint(this.mc.world, entity, partialTicks);
@@ -555,7 +556,7 @@
          if (entity instanceof EntityLivingBase && ((EntityLivingBase)entity).isPotionActive(MobEffects.BLINDNESS))
          {
              float f1 = 5.0F;
-@@ -2089,6 +2142,7 @@
+@@ -2089,6 +2143,7 @@
                  GlStateManager.setFogStart(f * 0.05F);
                  GlStateManager.setFogEnd(Math.min(f, 192.0F) * 0.5F);
              }

@@ -595,6 +595,11 @@ def universalJar = tasks.register('universalJar', Jar) {
     doFirst { loaderNames = loaderClassNames() }
     // lazy: the renamed jar only exists once 'reobf' ran
     from { zipTree(reobf.get().output.get().asFile) }
+    // Declared as an input as well as a dependency. The content arrives through a lazy zipTree, which Gradle cannot
+    // hash on its own: without this the task reports UP-TO-DATE while reobf has written a different jar inside it, and
+    // the shipped artifact keeps the previous build's classes. Measured twice in one evening - the jar installed into
+    // the test instance was hours old while the sources on disk had moved.
+    inputs.file(reobf.flatMap { it.output })
     // loader classes only, every Minecraft class comes from the patches at runtime
     exclude { entry -> entry.path.endsWith('.class') && !isClassOf(loaderNames, entry.path) }
     // see jarForReobf: the vanilla resource tree is a dev-run convenience, the loader's own assets stay. The

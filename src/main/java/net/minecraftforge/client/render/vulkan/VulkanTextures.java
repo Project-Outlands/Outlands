@@ -606,6 +606,10 @@ final class VulkanTextures implements AutoCloseable {
                 byte[] bgra = readback.buffer().read(readback.width() * readback.height() * 4);
                 net.minecraftforge.client.render.shim.FramebufferPixels.write(bgra, readback.width(),
                         readback.height(), readback.request());
+                // A save's icon is read back at the game's own point in the frame - after the world, before the HUD -
+                // so its pixels arrive through this path rather than through the window copy the screenshots use.
+                net.minecraftforge.client.render.screenshot.WorldIcon.consume(
+                        readback.request().destination(), readback.width(), readback.height());
             } finally {
                 readback.buffer().close();
             }
