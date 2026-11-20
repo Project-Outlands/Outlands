@@ -562,17 +562,13 @@ final class VulkanStream implements AutoCloseable {
                 long headStartedAt = SPLIT ? System.nanoTime() : 0L;
                 FrameDraws.Draw draw = (FrameDraws.Draw) op;
                 indexOfOp++;
-                if (textures.isFramebufferTarget(draw.state().texture()) && draw.vertexCount() == 12) {
-                    // The main menu's seven blur passes are twelve-vertex quads that sample the copy and draw it back
-                    // into the same corner of the framebuffer they were copied from. That feedback loop is a GL-era
-                    // technique: GL's copy is a snapshot, so each pass blurs the picture one texel further and the
-                    // result stays a picture. Here the frame is not one rendering instance - every copy closes it and
-                    // reopens with LOAD - and the loop converges to the mean colour of the region instead. Measured
-                    // over four runs: without these draws the background is the panorama at every frame, with them it
-                    // is a flat colour by the third frame. They are skipped until the blur is a real post-process the
-                    // backend owns, which is where a screen-space effect belongs anyway.
-                    continue;
-                }
+                // The main menu's seven blur passes used to be skipped here: twelve-vertex quads that sample the copy
+                // and draw it back into the corner of the framebuffer they came from, which was measured to turn the
+                // background into one flat colour. That measurement was made before this path was right. The copy is
+                // a snapshot - it goes framebuffer -> staging -> texture, with a barrier between the draws that read
+                // the texture and the next copy that overwrites it - so each pass blurs the picture a step further,
+                // as GL's does. Skipping them left the raw 256x256 panorama magnified to the window, which is the
+                // visible block grid that gave the main menu its moire.
                 PrimitiveShape shape = PrimitiveShape.ofGlMode(draw.mode());
                 VulkanPipeline.VK10Topology topo = VulkanPipeline.VK10Topology.of(shape.topology());
                 DrawState ds = draw.state();
