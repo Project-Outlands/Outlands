@@ -78,14 +78,8 @@
       labels: ["dependencies", "outlands"]
     },
 
-    // cleanmix and the Forge installer change behaviour, not just numbers (mixin internals, the GUI the players see),
-    // so they wait for a checkbox on the dependency dashboard instead of arriving as an ordinary PR.
-    {
-      matchPackageNames: ["com.cleanroommc:cleanmix"],
-      groupName: "outlands-cleanmix",
-      dependencyDashboardApproval: true,
-      labels: ["dependencies", "needs-decision"]
-    },
+    // The Forge installer changes behaviour, not just numbers (the GUI the players see), so it waits for a checkbox on
+    // the dependency dashboard instead of arriving as an ordinary PR.
     {
       matchPackageNames: ["net.minecraftforge:installer"],
       groupName: "forge-installer",
@@ -93,8 +87,8 @@
       labels: ["dependencies", "needs-decision"]
     },
 
-    // Frozen upstreams, all three still linked against on purpose - disabling them here only silences lookups, it
-    // does not untrack anything:
+    // Not updated at all - these are left out of every lookup, so they do not reach a PR and do not sit on the
+    // dashboard either. Removing one of them here is all it takes to start tracking it again.
     //   asm-deprecated       - our fork of ASM 7.1's deprecated features, versioned off the upstream line on purpose
     //   java3d:vecmath 1.5.2 - what Forge's model API compiles against: 20 sources import javax.vecmath and 46
     //                          classes in the universal jar carry the reference
@@ -102,7 +96,12 @@
     //                          classpath on purpose: foundation's install step passes the jar that provides
     //                          LZMA/LzmaInputStream.class to the applier JVM, and install-time patchers in mods
     //                          (IC2Patcher) link the same class. Nothing to compare it against, nothing to bump.
-    { matchPackageNames: ["org.ow2.asm:asm-deprecated", "java3d:vecmath", "lzma:lzma"], enabled: false }
+    //   cleanmix 0.7.4       - upstream is 0.10.0: that is a mixin-internals jump with its own release notes, bumped
+    //                          by hand after reading them, not a version that should appear in a weekly PR
+    {
+      matchPackageNames: ["org.ow2.asm:asm-deprecated", "java3d:vecmath", "lzma:lzma", "com.cleanroommc:cleanmix"],
+      enabled: false
+    }
   ],
 
   // The Gradle manager cannot see through '$props.asm_version' - the version lives in gradle.properties and the
@@ -136,6 +135,7 @@
     },
     {
       // ext.cleanmixVersion in projects/outlands/dependencies.gradle, referenced by the dependency block below it.
+      // The package itself is frozen at the bottom of this file; the manager stays so re-enabling is one deletion.
       customType: "regex",
       fileMatch: ["^projects/outlands/dependencies\\.gradle$"],
       matchStrings: ["cleanmixVersion\\s*=\\s*'(?<currentValue>[^']+)'"],
