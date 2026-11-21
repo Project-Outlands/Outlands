@@ -1,0 +1,140 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // Renovate maintains two things here:
+  //   - the 'uses:' lines in .github/workflows
+  //   - the Gradle coordinates declared in build.gradle, buildSrc/build.gradle, projects/mcpbase/build.gradle,
+  //     projects/outlands/dependencies.gradle and gradle/wrapper/gradle-wrapper.properties
+  // Every update is a normal PR against main and is built by .github/workflows/BuildTest.yml, which runs on
+  // pull_request for exactly this reason. Nothing is automerged: these libraries land on the launcher classpath and
+  // version.json, where a minor bump is a runtime change, not a formatting one.
+  extends: ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
+
+  timezone: "Asia/Shanghai",
+  // Weekly, so a release is never blocked by a dependency PR nobody has looked at yet.
+  schedule: ["before 9am on monday"],
+  labels: ["dependencies"],
+  prConcurrentLimit: 4,
+  prHourlyLimit: 2,
+
+  // mavenLocal() is deliberately absent: a lookup must never depend on what a developer happens to have installed.
+  // maven.outlands.top carries our own artifacts (foundation, asm-deprecated), repo.cleanroommc.com cleanmix and
+  // mixinextras, Forge's maven the installer, and libraries.minecraft.net is left out on purpose - the 1.12.2
+  // leftovers it serves (java3d:vecmath, lzma) are disabled at the bottom of this file.
+  packageRules: [
+    {
+      matchDatasources: ["maven"],
+      registryUrls: [
+        "https://maven.outlands.top/releases/",
+        "https://repo.cleanroommc.com/releases/",
+        "https://maven.minecraftforge.net/",
+        "https://repo1.maven.org/maven2/"
+      ]
+    },
+
+    // Actions keep their floating major tags (v7, v5, ...). A hash pin would hide the version from the diff we read
+    // while preparing a release, and every action here is either first-party or a release helper we can drop.
+    {
+      matchManagers: ["github-actions"],
+      groupName: "github-actions",
+      pinDigests: false,
+      semanticCommitType: "ci",
+      semanticCommitScope: "actions"
+    },
+
+    // Gradle updates use the commit prefix the project already writes by hand ('build: Update deps',
+    // 'build: bump Gradle wrapper to 9.8.1').
+    {
+      matchManagers: ["gradle", "gradle-wrapper"],
+      semanticCommitType: "build",
+      semanticCommitScope: "deps"
+    },
+
+    // Families that must move together. installer.gradle builds version.json out of these and
+    // verifyNoStaleLibraries fails the build when a member of a family drifts; splitting them into separate PRs
+    // would only ever leave main in a broken intermediate state.
+    { matchDatasources: ["maven"], matchPackageNames: ["org.lwjgl:*"], groupName: "lwjgl" },
+    { matchDatasources: ["maven"], matchPackageNames: ["io.netty:*"], groupName: "netty" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.ow2.asm:*"], groupName: "asm" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.apache.httpcomponents*:*"], groupName: "httpcomponents" },
+    { matchDatasources: ["maven"], matchPackageNames: ["jakarta.*:*"], groupName: "jakarta" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.apache.logging.log4j:*"], groupName: "log4j" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.slf4j:*"], groupName: "slf4j" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.junit*:*"], groupName: "junit" },
+    { matchDatasources: ["maven"], matchPackageNames: ["com.github.oshi:*"], groupName: "oshi" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.jline:*"], groupName: "jline" },
+    { matchDatasources: ["maven"], matchPackageNames: ["net.java.dev.jna:*"], groupName: "jna" },
+    { matchDatasources: ["maven"], matchPackageNames: ["com.google.guava:*"], groupName: "guava" },
+    { matchDatasources: ["maven"], matchPackageNames: ["org.glassfish.jaxb:*", "com.sun.istack:*"], groupName: "jaxb" },
+    { matchDatasources: ["maven"], matchPackageNames: ["net.sf.trove4j:*"], groupName: "trove4j" },
+    { matchDatasources: ["maven"], matchPackageNames: ["net.lenni0451*:*"], groupName: "lenni0451" },
+
+    // foundation is ours and moves often, so it gets its own PR and is never gated behind the dashboard. It lives on
+    // maven.outlands.top, where the metadata is public and Renovate can read 'latest' itself.
+    {
+      matchPackageNames: ["top.outlands:foundation"],
+      enabled: true,
+      groupName: "outlands-foundation",
+      labels: ["dependencies", "outlands"]
+    },
+
+    // cleanmix and the Forge installer change behaviour, not just numbers (mixin internals, the GUI the players see),
+    // so they wait for a checkbox on the dependency dashboard instead of arriving as an ordinary PR.
+    {
+      matchPackageNames: ["com.cleanroommc:cleanmix"],
+      groupName: "outlands-cleanmix",
+      dependencyDashboardApproval: true,
+      labels: ["dependencies", "needs-decision"]
+    },
+    {
+      matchPackageNames: ["net.minecraftforge:installer"],
+      groupName: "forge-installer",
+      dependencyDashboardApproval: true,
+      labels: ["dependencies", "needs-decision"]
+    },
+
+    // No upstream to compare against, or no metadata to read: leaving these enabled only produces lookup warnings.
+    //   asm-deprecated  - our fork of ASM 7.1's deprecated features, versioned off the upstream line on purpose
+    //   java3d:vecmath, lzma - vanilla 1.12.2 leftovers, pinned by the game data, last published years ago
+    { matchPackageNames: ["org.ow2.asm:asm-deprecated", "java3d:vecmath", "lzma:lzma"], enabled: false }
+  ],
+
+  // The Gradle manager cannot see through '$props.asm_version' - the version lives in gradle.properties and the
+  // coordinates that use it are interpolated. These managers read the property directly, which is what keeps ASM,
+  // Netty and LWJGL orbiting something other than the 9.11.1 / 4.2.19 / 3.4.3 this file was written against.
+  //
+  // Not listed, and therefore never touched: mcp_version, mapping_version, minecraft_version, last_forge_version
+  // (upgraded by hand - they require a fresh './gradlew setup' and a patch rebase) and lwjgl_minimum_version (a
+  // compatibility floor checked by CapabilityFieldCompatibilityTest, not a dependency to keep current).
+  customManagers: [
+    {
+      customType: "regex",
+      fileMatch: ["(^|/)gradle\\.properties$"],
+      matchStrings: ["^asm_version\\s*=\\s*(?<currentValue>\\S+)"],
+      depNameTemplate: "org.ow2.asm:asm",
+      datasourceTemplate: "maven"
+    },
+    {
+      customType: "regex",
+      fileMatch: ["(^|/)gradle\\.properties$"],
+      matchStrings: ["^netty_version\\s*=\\s*(?<currentValue>\\S+)"],
+      depNameTemplate: "io.netty:netty-common",
+      datasourceTemplate: "maven"
+    },
+    {
+      customType: "regex",
+      fileMatch: ["(^|/)gradle\\.properties$"],
+      matchStrings: ["^lwjgl_version\\s*=\\s*(?<currentValue>\\S+)"],
+      depNameTemplate: "org.lwjgl:lwjgl",
+      datasourceTemplate: "maven"
+    },
+    {
+      // ext.cleanmixVersion in projects/outlands/dependencies.gradle, referenced by the dependency block below it.
+      customType: "regex",
+      fileMatch: ["^projects/outlands/dependencies\\.gradle$"],
+      matchStrings: ["cleanmixVersion\\s*=\\s*'(?<currentValue>[^']+)'"],
+      depNameTemplate: "com.cleanroommc:cleanmix",
+      datasourceTemplate: "maven"
+    }
+  ]
+}
