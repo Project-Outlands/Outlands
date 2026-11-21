@@ -102,6 +102,11 @@ dependencies {
     installer 'org.jline:jline-native:4.4.8'
     installer 'net.java.jinput:jinput:2.0.10'
 
+    // Not because our code reads it: LZMAInputSupplier, ClassPatchManager and PatchApplier did, and the first two
+    // now go through xz instead. It stays on the launcher classpath for the two consumers we do not compile:
+    // foundation's install step builds the applier JVM as 'loader jar + the jar that provides
+    // LZMA/LzmaInputStream.class' (ApplierProcess), and install-time patchers in mods (IC2Patcher) link the same
+    // class. Both keep resolving only as long as this entry is here.
     installer 'lzma:lzma:0.0.1'
     installer 'java3d:vecmath:1.5.2'
     installer 'net.sf.trove4j:core:3.1.0'

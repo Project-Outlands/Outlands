@@ -37,7 +37,11 @@ import net.minecraftforge.fml.repackage.com.nothome.delta.GDiffPatcher;
  * which would also shadow classes that differ by nothing but line tables.
  *
  * <p>The classpath of the JVM that runs this is just the loader jar and the LZMA decoder, so nothing here may touch
- * Guava, log4j or any other FML dependency.
+ * Guava, log4j or any other FML dependency. That decoder is the old LZMA SDK and not the xz jar the loader's own
+ * readers use: foundation builds this JVM's classpath by finding the jar that provides
+ * {@code LZMA/LzmaInputStream.class} and passing it down (see {@code top.outlands.foundation.install.ApplierProcess}),
+ * so moving this class to xz needs a foundation release that passes xz instead. {@code LZMAInputSupplier} and
+ * {@code ClassPatchManager} run inside the game and are free to use xz.
  *
  * <pre>
  *   java -cp outlands.jar:lzma.jar top.outlands.install.PatchApplier \

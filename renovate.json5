@@ -98,9 +98,10 @@
     //   asm-deprecated       - our fork of ASM 7.1's deprecated features, versioned off the upstream line on purpose
     //   java3d:vecmath 1.5.2 - what Forge's model API compiles against: 20 sources import javax.vecmath and 46
     //                          classes in the universal jar carry the reference
-    //   lzma:lzma 0.0.1      - the reader behind binpatches.pack.lzma and deobfuscation_data.lzma (FML's
-    //                          LZMAInputSupplier and ClassPatchManager, top.outlands.install.PatchApplier). The
-    //                          writer at build time is org.tukaani:xz, this is the reader at install/launch time.
+    //   lzma:lzma 0.0.1      - no longer read by our code (those readers use xz now), but it stays on the launcher
+    //                          classpath on purpose: foundation's install step passes the jar that provides
+    //                          LZMA/LzmaInputStream.class to the applier JVM, and install-time patchers in mods
+    //                          (IC2Patcher) link the same class. Nothing to compare it against, nothing to bump.
     { matchPackageNames: ["org.ow2.asm:asm-deprecated", "java3d:vecmath", "lzma:lzma"], enabled: false }
   ],
 
