@@ -1061,6 +1061,7 @@ public class Display {
                     sdlSharedWindow = NULL;
                 }
                 if (sdlWindow != NULL) {
+                    TextFieldHandler.onWindowDestroy();
                     SDL_DestroyWindow(sdlWindow);
                     sdlWindow = NULL;
                     sdlWindowId = 0;
