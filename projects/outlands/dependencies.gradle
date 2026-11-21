@@ -127,7 +127,7 @@ dependencies {
 
     installer 'com.google.guava:guava:33.7.2-jre'
     installer 'com.google.guava:failureaccess:1.0.3'
-    installer 'com.google.code.gson:gson:2.14.0'
+    installer 'com.google.code.gson:gson:2.15.0'
 
     // The installer program itself (see installer.gradle): Forge's installer is a standalone, published artifact -
     // the same convention ForgeGradle and Cleanroom use. 'fatjar' carries its own dependencies and the manifest with
