@@ -150,7 +150,12 @@ action 正是这么丢的。分节按 conventional commit 前缀：`feat` → Fe
 
 ### CI secrets
 
-只有一个：`OUTLANDS_MAVEN_TOKEN`（maven 发布令牌）。用户名 `fg` 不是秘密，直接写在 workflow 里。
+两个：
+
+* `OUTLANDS_MAVEN_TOKEN` —— maven 发布令牌。用户名 `fg` 不是秘密，直接写在 workflow 里。
+* `MDK_DISPATCH_TOKEN` —— 只够得着 `Project-Outlands/MDK-Unimined` 的 fine-grained PAT（`Contents: read and write`）。
+  `Release.yml` 最后一步用它发 `repository_dispatch`（`outlands-release`）：那个仓库据此更新 kit 的 loader pin、
+  打 `mdk/<version>` tag，再由它自己的 CI 打包发布 kit。没配或权限不对只会让最后那一步失败，发布会早已验证通过。
 
 ### 发布失败怎么办
 

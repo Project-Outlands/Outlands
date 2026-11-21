@@ -161,8 +161,14 @@ are dropped, and a breaking change is flagged with `[**breaking**]`.
 
 ### CI secrets
 
-Only one: `OUTLANDS_MAVEN_TOKEN` (the maven publishing token). The user name `fg` is not a secret and is used
-literally in the workflow.
+Two:
+
+* `OUTLANDS_MAVEN_TOKEN` — the maven publishing token. The user name `fg` is not a secret and is used literally in the
+  workflow.
+* `MDK_DISPATCH_TOKEN` — a fine-grained PAT that reaches `Project-Outlands/MDK-Unimined` and nothing else
+  (`Contents: read and write`). The last step of `Release.yml` sends it a `repository_dispatch` (`outlands-release`),
+  which bumps the kit's loader pin, tags `mdk/<version>` there and lets that repository's CI package and release the
+  kits. Unset or mis-scoped only that step fails; the release itself is already verified by then.
 
 ### When a release fails
 
