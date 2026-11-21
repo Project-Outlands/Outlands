@@ -78,7 +78,7 @@ dependencies {
     // any jar: config files are read before mods are constructed. The versions are inline: a property in
     // gradle.properties only earns its keep when several dependencies are upgraded together.
     installer 'org.tomlj:tomlj:2.2.0'
-    installer 'com.typesafe:config:1.4.9'
+    installer 'com.typesafe:config:1.4.10'
     installer 'org.snakeyaml:snakeyaml-engine:2.10'
 
     // ASM
