@@ -27,11 +27,11 @@ import java.util.Locale;
 import java.util.Map;
 
 import net.minecraft.launchwrapper.LaunchClassLoader;
+import net.minecraftforge.fml.common.asm.transformers.deobf.LZMAInputSupplier;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.repackage.com.nothome.delta.GDiffPatcher;
-import LZMA.LzmaInputStream;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
@@ -174,7 +174,7 @@ public class ClassPatchManager {
                 }
                 return;
             }
-            try (LzmaInputStream binpatchesDecompressedLzma = new LzmaInputStream(binpatchesCompressed))
+            try (InputStream binpatchesDecompressedLzma = LZMAInputSupplier.open(binpatchesCompressed))
             {
                 decompressed = ByteStreams.toByteArray(binpatchesDecompressedLzma);
             }
