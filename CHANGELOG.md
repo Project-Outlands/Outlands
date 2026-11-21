@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.20] - 2026-11-20
+
+### 🐛 Bug Fixes
+
+- [`097713d`](https://github.com/Project-Outlands/Outlands/commit/097713d18dd1effedaa4b1f454c7b23ea62832e8) - *(ime)* Refresh creative search after committed text *(PR [#59](https://github.com/Project-Outlands/Outlands/pull/59) by [@DHJComical](https://github.com/DHJComical))*
+- [`cc7b324`](https://github.com/Project-Outlands/Outlands/commit/cc7b32486472caf79299d14265cb9ab6d5a47a57) - Deobf transformer pre-check logic *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`8377ab0`](https://github.com/Project-Outlands/Outlands/commit/8377ab015b477295896a1772d2a51c13d597bb39) - Crash w/ lwjgl 3.4.0~3.4.2 *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚡ Performance
+
+- [`022126a`](https://github.com/Project-Outlands/Outlands/commit/022126a089b325b99307d17325c2df51516f30f3) - *(deobf)* Skip non vanilla class in DeobfuscationTransformer *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.16] - 2026-11-16
 
 ### 🐛 Bug Fixes
