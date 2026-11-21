@@ -139,7 +139,7 @@ dependencies {
     // it (what Cleanroom did with 'com.cleanroommc:installer:...:shrunk') is only worth it for the branding.
     installerApp 'net.minecraftforge:installer:2.2.17:fatjar'
 
-    installer 'org.apache.commons:commons-lang3:3.21.0'
+    installer 'org.apache.commons:commons-lang3:3.22.0'
     installer 'org.apache.commons:commons-compress:1.28.0'
     installer 'commons-codec:commons-codec:1.23.0'
     installer 'commons-io:commons-io:2.22.0'
