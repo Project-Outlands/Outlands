@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.21] - 2026-11-21
+
+### 🐛 Bug Fixes
+
+- [`ece0ee5`](https://github.com/Project-Outlands/Outlands/commit/ece0ee56a054cd05613c67a5181769c2715d4352) - *(input)* Prevent duplicate shifted characters *(PR [#60](https://github.com/Project-Outlands/Outlands/pull/60) by [@DHJComical](https://github.com/DHJComical))*
+
+### 🚜 Refactor
+
+- [`11537bb`](https://github.com/Project-Outlands/Outlands/commit/11537bba9fc6b49659989b992e37c188c8ad73d7) - *(lzma)* Read binpatch and deobf packs with xz *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`0c8e0bd`](https://github.com/Project-Outlands/Outlands/commit/0c8e0bd1f448521b6901edbbdef9e360432a1eed) - Remove discussion template *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`cf56e72`](https://github.com/Project-Outlands/Outlands/commit/cf56e72279b90c597e3bda69ac6d766dab624ada) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.20] - 2026-11-20
 
 ### 🐛 Bug Fixes
