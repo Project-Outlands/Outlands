@@ -1,6 +1,10 @@
 def props = project.properties
-def lwjglLibraries = project.lwjglLibraries
+def lwjglModules = project.lwjglModules
 def lwjglArch = project.lwjglArch
+// Module -> the natives classifiers it publishes. Everything not listed in lwjglNativeExceptions gets the full set.
+def classifiersFor = { String module ->
+    project.lwjglNativeExceptions[module] ?: project.lwjglNativeClassifiers
+}
 
 configurations {
     // 1.12.2 ships modules that were later renamed instead of upgraded, so Gradle cannot arbitrate them and both
@@ -35,12 +39,9 @@ configurations {
         transitive = false
     }
 
-    testCompile.extendsFrom(lwjglNatives)
-}
-
-// Plain LWJGL3 API jars (no classifier) for the table check and the upcoming compile-time API
-configurations {
-    lwjgl3Api {
+    // The field table of the oldest release the shims must run on: CapabilityFieldCompatibilityTest reads it, nothing
+    // launches against it, and only the OpenGL module is needed. It never reaches a launcher classpath.
+    lwjglMinimumApi {
         transitive = false
     }
 }
@@ -49,56 +50,19 @@ configurations {
 ext.cleanmixVersion = '0.7.4'
 
 dependencies {
-    lwjglLibraries[0].each {
-        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
-    }
+    lwjglMinimumApi "org.lwjgl:lwjgl-opengl:$props.lwjgl_minimum_version"
 
-    // LWJGL: the LWJGL2 API surface comes from the in-tree shims, so only LWJGL3 is compiled against.
-    lwjglLibraries[0].each {
-        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
-    }
-
-    // Vulkan, for the render backend. Unlike the modules above, these are needed at runtime, not only to compile:
-    // the backend loads org.lwjgl.vulkan.* when it initialises. So they go on 'installer', which is what ends up in
-    // the launcher JSON, as well as on the compile path.
-    //
-    // The natives cannot use the lwjglLibraries loop: lwjgl-vulkan publishes them for macOS only (MoltenVK), so
-    // asking for lwjgl-vulkan:natives-linux would fail resolution. On Windows and Linux it loads the system
-    // Vulkan loader instead, which is the driver's job to install.
-    project.vulkanLibraries.each {
-        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
-        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
-        installer "org.lwjgl:$it:$props.lwjgl_version"
-    }
-    // lwjgl-vma ships natives for every platform we support.
-    lwjglLibraries[1].each { arch ->
-        lwjglNatives "org.lwjgl:lwjgl-vma:$props.lwjgl_version:$arch"
-    }
-    project.vulkanVulkanNativeArches.each { arch ->
-        lwjglNatives "org.lwjgl:lwjgl-vulkan:$props.lwjgl_version:$arch"
-    }
-    runtimeOnly "org.lwjgl:lwjgl-vma:$props.lwjgl_version:$lwjglArch"
-    if (project.vulkanVulkanNativeArches.contains(lwjglArch)) {
-        runtimeOnly "org.lwjgl:lwjgl-vulkan:$props.lwjgl_version:$lwjglArch"
-    }
-    lwjglLibraries[0].each {
-        installer "org.lwjgl:$it:$props.lwjgl_version"
-        runtimeOnly "org.lwjgl:$it::$lwjglArch"
-
-        lwjglLibraries[1].each { arch ->
-            lwjglNatives "org.lwjgl:$it:$props.lwjgl_version:$arch"
-        }
-    }
-
-    // Runtime GLSL compilation. Needed at runtime, not only to compile the loader against: the backend calls shaderc
-    // when a mod or the game hands over shader source, so it goes wherever the other runtime LWJGL modules go.
-    project.shaderCompilerLibraries.each {
-        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
-        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
-        installer "org.lwjgl:$it:$props.lwjgl_version"
-        runtimeOnly "org.lwjgl:$it:$props.lwjgl_version:$lwjglArch"
-        lwjglLibraries[1].each { arch ->
-            lwjglNatives "org.lwjgl:$it:$props.lwjgl_version:$arch"
+    // LWJGL: the LWJGL2 API surface comes from the in-tree shims, so only LWJGL3 is compiled against. The Vulkan
+    // modules ride the same loop because they are needed at runtime as well, not only to compile: the backend loads
+    // org.lwjgl.vulkan.* when it initialises, so they belong on 'installer' too.
+    (lwjglModules + project.vulkanLibraries).each { module ->
+        compileOnly "org.lwjgl:$module:$props.lwjgl_version"
+        installer "org.lwjgl:$module:$props.lwjgl_version"
+        // The dev run and the tests only ever need this machine's natives; the launcher below gets the whole set.
+        if (classifiersFor(module).contains(lwjglArch))
+            runtimeOnly "org.lwjgl:$module:$props.lwjgl_version:$lwjglArch"
+        classifiersFor(module).each { classifier ->
+            lwjglNatives "org.lwjgl:$module:$props.lwjgl_version:$classifier"
         }
     }
 
@@ -106,8 +70,8 @@ dependencies {
     // any jar: config files are read before mods are constructed. The versions are inline: a property in
     // gradle.properties only earns its keep when several dependencies are upgraded together.
     installer 'org.tomlj:tomlj:2.2.0'
-    installer 'com.typesafe:config:1.4.9'
-    installer 'org.snakeyaml:snakeyaml-engine:2.10'
+    installer 'com.typesafe:config:1.4.10'
+    installer 'org.snakeyaml:snakeyaml-engine:3.2'
 
     // ASM
     installer "org.ow2.asm:asm:$props.asm_version"
@@ -125,11 +89,16 @@ dependencies {
     installer 'org.javassist:javassist:3.33.0-GA'
 
     // Regular deps
-    installer 'com.ibm.icu:icu4j:78.3'
-    installer 'org.jline:jline:4.4.8'
-    installer 'org.jline:jline-native:4.4.8'
+    installer 'com.ibm.icu:icu4j:79.1'
+    installer 'org.jline:jline:4.7.0'
+    installer 'org.jline:jline-native:4.7.0'
     installer 'net.java.jinput:jinput:2.0.10'
 
+    // Not because our code reads it: LZMAInputSupplier, ClassPatchManager and PatchApplier did, and the first two
+    // now go through xz instead. It stays on the launcher classpath for the two consumers we do not compile:
+    // foundation's install step builds the applier JVM as 'loader jar + the jar that provides
+    // LZMA/LzmaInputStream.class' (ApplierProcess), and install-time patchers in mods (IC2Patcher) link the same
+    // class. Both keep resolving only as long as this entry is here.
     installer 'lzma:lzma:0.0.1'
     installer 'java3d:vecmath:1.5.2'
     installer 'net.sf.trove4j:core:3.1.0'
@@ -137,8 +106,8 @@ dependencies {
 
     installer 'net.sf.jopt-simple:jopt-simple:5.0.4'
 
-    installer 'com.github.oshi:oshi-core-ffm:7.7.1'
-    installer 'com.github.oshi:oshi-common:7.7.1'
+    installer 'com.github.oshi:oshi-core-ffm:7.8.0'
+    installer 'com.github.oshi:oshi-common:7.8.0'
     installer 'net.java.dev.jna:jna:5.19.1'
     installer 'net.java.dev.jna:jna-platform:5.19.1'
 
@@ -150,7 +119,7 @@ dependencies {
 
     installer 'com.google.guava:guava:33.7.2-jre'
     installer 'com.google.guava:failureaccess:1.0.3'
-    installer 'com.google.code.gson:gson:2.14.0'
+    installer 'com.google.code.gson:gson:2.15.0'
 
     // The installer program itself (see installer.gradle): Forge's installer is a standalone, published artifact -
     // the same convention ForgeGradle and Cleanroom use. 'fatjar' carries its own dependencies and the manifest with
@@ -162,12 +131,12 @@ dependencies {
     // it (what Cleanroom did with 'com.cleanroommc:installer:...:shrunk') is only worth it for the branding.
     installerApp 'net.minecraftforge:installer:2.2.17:fatjar'
 
-    installer 'org.apache.commons:commons-lang3:3.21.0'
+    installer 'org.apache.commons:commons-lang3:3.22.0'
     installer 'org.apache.commons:commons-compress:1.28.0'
     installer 'commons-codec:commons-codec:1.23.0'
     installer 'commons-io:commons-io:2.22.0'
     installer 'commons-logging:commons-logging:1.4.0'
-    installer 'org.apache.maven:maven-artifact:3.9.16'
+    installer 'org.apache.maven:maven-artifact:3.10.1'
     installer 'org.apache.commons:commons-text:1.15.0' // Some old classes in lang3 moved to here, wtf
     
     // xz in common-compress need this to work
@@ -177,9 +146,9 @@ dependencies {
     installer 'org.jspecify:jspecify:1.0.1'
 
     // Apache HTTP, 4 and 5
-    installer 'org.apache.httpcomponents.core5:httpcore5:5.4.3'
-    installer 'org.apache.httpcomponents.core5:httpcore5-h2:5.4.3'
-    installer 'org.apache.httpcomponents.client5:httpclient5:5.6.1'
+    installer 'org.apache.httpcomponents.core5:httpcore5:5.5'
+    installer 'org.apache.httpcomponents.core5:httpcore5-h2:5.5'
+    installer 'org.apache.httpcomponents.client5:httpclient5:5.6.5'
 
     installer 'org.apache.httpcomponents:httpclient:4.5.14'
     installer 'org.apache.httpcomponents:httpcore:4.4.16'
@@ -208,20 +177,20 @@ dependencies {
     installer 'jakarta.inject:jakarta.inject-api:2.0.1'
 
     // Logging
-    installer 'org.apache.logging.log4j:log4j-api:2.26.0'
-    installer 'org.apache.logging.log4j:log4j-core:2.26.0'
-    installer 'org.apache.logging.log4j:log4j-slf4j2-impl:2.26.0'
-    installer 'org.slf4j:slf4j-api:2.0.18'
+    installer 'org.apache.logging.log4j:log4j-api:2.26.1'
+    installer 'org.apache.logging.log4j:log4j-core:2.26.1'
+    installer 'org.apache.logging.log4j:log4j-slf4j2-impl:2.26.1'
+    installer 'org.slf4j:slf4j-api:2.0.20'
 
     // Scripts
     installer 'org.glassfish.jaxb:jaxb-runtime:4.0.9'
     installer 'org.glassfish.jaxb:jaxb-core:4.0.9'
     installer 'com.sun.istack:istack-commons-runtime:4.2.0'
-    installer 'org.glassfish.corba:glassfish-corba-omgapi:5.0.2'
+    installer 'org.glassfish.corba:glassfish-corba-omgapi:5.0.3'
     installer 'org.openjdk.nashorn:nashorn-core:15.7'
 
     // Mac
-    installer 'ca.weblite:java-objc-bridge:1.2'
+    installer 'ca.weblite:java-objc-bridge:1.3.0'
 
     // Mixin
     installer "com.cleanroommc:cleanmix:$cleanmixVersion"

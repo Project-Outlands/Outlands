@@ -22,11 +22,18 @@ package net.minecraftforge.fml.common.asm.transformers.deobf;
 import java.io.IOException;
 import java.io.InputStream;
 
-import LZMA.LzmaInputStream;
+import org.tukaani.xz.LZMAInputStream;
 
 import com.google.common.io.ByteSource;
 
 public class LZMAInputSupplier extends ByteSource {
+    /**
+     * Upper bound on the dictionary an .lzma header may ask for, in KiB. What the build writes declares 8 MiB
+     * (commons-compress' default preset - the 1.8 MB binpatch pack needs 8214 KiB), so this leaves four times the
+     * headroom and still refuses a tampered header instead of allocating whatever it claims.
+     */
+    private static final int MEMORY_LIMIT_KB = 32 * 1024;
+
     private InputStream compressedData;
 
     public LZMAInputSupplier(InputStream compressedData)
@@ -34,10 +41,19 @@ public class LZMAInputSupplier extends ByteSource {
         this.compressedData = compressedData;
     }
 
+    /**
+     * Opens {@code compressed} as a decoded .lzma stream. ClassPatchManager reads its pack through this too, so the
+     * memory limit is stated once rather than at both call sites.
+     */
+    public static InputStream open(InputStream compressed) throws IOException
+    {
+        return new LZMAInputStream(compressed, MEMORY_LIMIT_KB);
+    }
+
     @Override
     public InputStream openStream() throws IOException
     {
-        return new LzmaInputStream(this.compressedData);
+        return open(this.compressedData);
     }
 
 }

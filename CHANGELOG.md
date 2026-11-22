@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.21] - 2026-11-21
+
+### 🐛 Bug Fixes
+
+- [`ece0ee5`](https://github.com/Project-Outlands/Outlands/commit/ece0ee56a054cd05613c67a5181769c2715d4352) - *(input)* Prevent duplicate shifted characters *(PR [#60](https://github.com/Project-Outlands/Outlands/pull/60) by [@DHJComical](https://github.com/DHJComical))*
+
+### 🚜 Refactor
+
+- [`11537bb`](https://github.com/Project-Outlands/Outlands/commit/11537bba9fc6b49659989b992e37c188c8ad73d7) - *(lzma)* Read binpatch and deobf packs with xz *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`0c8e0bd`](https://github.com/Project-Outlands/Outlands/commit/0c8e0bd1f448521b6901edbbdef9e360432a1eed) - Remove discussion template *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`cf56e72`](https://github.com/Project-Outlands/Outlands/commit/cf56e72279b90c597e3bda69ac6d766dab624ada) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.20] - 2026-11-20
+
+### 🐛 Bug Fixes
+
+- [`097713d`](https://github.com/Project-Outlands/Outlands/commit/097713d18dd1effedaa4b1f454c7b23ea62832e8) - *(ime)* Refresh creative search after committed text *(PR [#59](https://github.com/Project-Outlands/Outlands/pull/59) by [@DHJComical](https://github.com/DHJComical))*
+- [`cc7b324`](https://github.com/Project-Outlands/Outlands/commit/cc7b32486472caf79299d14265cb9ab6d5a47a57) - Deobf transformer pre-check logic *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`8377ab0`](https://github.com/Project-Outlands/Outlands/commit/8377ab015b477295896a1772d2a51c13d597bb39) - Crash w/ lwjgl 3.4.0~3.4.2 *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### ⚡ Performance
+
+- [`022126a`](https://github.com/Project-Outlands/Outlands/commit/022126a089b325b99307d17325c2df51516f30f3) - *(deobf)* Skip non vanilla class in DeobfuscationTransformer *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.16] - 2026-11-16
+
+### 🐛 Bug Fixes
+
+- [`05983c0`](https://github.com/Project-Outlands/Outlands/commit/05983c0437278087568ed3adadb54c69c7d6ffd9) - *(config)* ConfigManager crash on non-publich config classes *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.14] - 2026-11-14
 
 ### 🐛 Bug Fixes

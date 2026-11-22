@@ -261,11 +261,9 @@ public class Mouse {
         if (grabbed == grab) {
             return;
         }
-        if (grab) {
-            TextFieldHandler.resetTextInput();
-        }
         MainThread.runOnMainThread(() -> {
             Sys.checkSdl(SDLMouse.SDL_SetWindowRelativeMouseMode(Display.getWindow(), grab));
+            TextFieldHandler.onMouseGrabChanged(grab);
             if (!grab) {
                 try (MemoryStack stack = MemoryStack.stackPush()) {
                     final IntBuffer w = stack.ints(0);

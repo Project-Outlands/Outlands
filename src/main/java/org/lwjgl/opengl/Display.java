@@ -19,6 +19,14 @@ import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_MOVED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_RESIZED;
 import static org.lwjgl.sdl.SDLEvents.SDL_EVENT_WINDOW_RESTORED;
+import static org.lwjgl.sdl.SDLKeycode.SDLK_LALT;
+import static org.lwjgl.sdl.SDLKeycode.SDLK_RALT;
+import static org.lwjgl.sdl.SDLKeycode.SDLK_SPACE;
+import static org.lwjgl.sdl.SDLKeycode.SDLK_TILDE;
+import static org.lwjgl.sdl.SDLKeycode.SDL_KMOD_ALT;
+import static org.lwjgl.sdl.SDLKeycode.SDL_KMOD_CTRL;
+import static org.lwjgl.sdl.SDLKeycode.SDL_KMOD_GUI;
+import static org.lwjgl.sdl.SDLKeycode.SDL_KMOD_NONE;
 import static org.lwjgl.sdl.SDLProperties.SDL_CreateProperties;
 import static org.lwjgl.sdl.SDLProperties.SDL_DestroyProperties;
 import static org.lwjgl.sdl.SDLProperties.SDL_SetBooleanProperty;
@@ -740,12 +748,7 @@ public class Display {
         }
     }
 
-    /**
-     * Characters a key event in the current pump already carries. SDL reports a plain keystroke twice: as the
-     * character of {@code SDL_EVENT_KEY_DOWN} and as {@code SDL_EVENT_TEXT_INPUT} with the same text. The key event
-     * is what the field consumes (next frame), so the commit has to be stripped of those characters here, while a
-     * real input method commit - which has no key event behind it - passes through untouched.
-     */
+    // SDL can emit a separate text event for a key press that already carries the same character.
     private static final StringBuilder pumpedKeyCharacters = new StringBuilder(8);
 
     /** Polls and dispatches the pending SDL events. Runs on the first thread, marshalled by {@link #processMessages()}. */
@@ -892,8 +895,8 @@ public class Display {
             return false;
         }
         // Shift+Tab walks fields backwards and is just as lossy; no modifier is acceptable here.
-        return (mods & (org.lwjgl.sdl.SDLKeycode.SDL_KMOD_CTRL | org.lwjgl.sdl.SDLKeycode.SDL_KMOD_ALT
-            | org.lwjgl.sdl.SDLKeycode.SDL_KMOD_GUI)) == 0;
+        return (mods & (SDL_KMOD_CTRL | SDL_KMOD_ALT
+            | SDL_KMOD_GUI)) == 0;
     }
 
     private static void handleKeyEvent() {
@@ -929,9 +932,9 @@ public class Display {
         }
 
         if (isDown) {
-            if (keycode == org.lwjgl.sdl.SDLKeycode.SDLK_LALT) {
+            if (keycode == SDLK_LALT) {
                 lastAltIsRightAlt = false;
-            } else if (keycode == org.lwjgl.sdl.SDLKeycode.SDLK_RALT) {
+            } else if (keycode == SDLK_RALT) {
                 lastAltIsRightAlt = true;
             }
         }
@@ -940,13 +943,14 @@ public class Display {
             return;
         }
 
-        final int rawKeycode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) 0, false);
-        final char character = rawKeycode >= 32 && rawKeycode < 0xFFFF ? (char) rawKeycode : '\0';
+        final int baseKeycode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, (short) SDL_KMOD_NONE, false);
+        final int characterCode = SDLKeyboard.SDL_GetKeyFromScancode(scancode, mods, false);
+        final char character = characterCode >= 32 && characterCode < 0xFFFF ? (char) characterCode : '\0';
 
-        if (rawKeycode >= org.lwjgl.sdl.SDLKeycode.SDLK_SPACE
-            && rawKeycode <= org.lwjgl.sdl.SDLKeycode.SDLK_TILDE) {
+        // Test the base key so Shift does not change which Ctrl shortcuts produce escape codes.
+        if (baseKeycode >= SDLK_SPACE && baseKeycode <= SDLK_TILDE) {
             // AltGr sends ALT|CTRL, so disambiguate text input from combos by the last pressed Alt side.
-            final boolean isAlt = (mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_ALT) != 0;
+            final boolean isAlt = (mods & SDL_KMOD_ALT) != 0;
             final boolean isAltGr = lastAltIsRightAlt;
             final boolean ctrlGraphicalMode;
             if (isAlt) {
@@ -962,20 +966,18 @@ public class Display {
                 ctrlGraphicalMode = false;
             }
 
-            if ((mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_GUI) != 0) {
+            if ((mods & SDL_KMOD_GUI) != 0) {
                 queueKeyEvent(lwjglKey, character, state, isDown, lwjglScan, mods);
-            } else if ((mods & org.lwjgl.sdl.SDLKeycode.SDL_KMOD_CTRL) != 0 && !ctrlGraphicalMode) {
+            } else if ((mods & SDL_KMOD_CTRL) != 0 && !ctrlGraphicalMode) {
                 queueKeyEvent(lwjglKey, (char) (keycode & 0x1f), state, isDown, lwjglScan, mods);
             } else {
                 queueKeyEvent(lwjglKey, character, state, isDown, lwjglScan, mods);
             }
         } else {
-            // Other key with no char event associated
             queueKeyEvent(lwjglKey, character, state, isDown, lwjglScan, mods);
         }
     }
 
-    /** Queues one key event and remembers the character a press contributed to this pump's text. */
     private static void queueKeyEvent(int key, char character, KeyState state, boolean isDown, int scancode, short mods) {
         Keyboard.addSdlKeyEvent(key, character, state, scancode, mods);
         if (isDown && character >= ' ' && pumpedKeyCharacters.length() < 32) {
@@ -991,8 +993,6 @@ public class Display {
         if (FMLLog.log.isDebugEnabled()) {
             FMLLog.log.debug("TEXT_INPUT [{}]", text);
         }
-        // Handed straight to the focused field, minus the characters this pump already queued as key events, so a
-        // plain keystroke is typed exactly once and an input method commit - which has no key event - arrives whole.
         String commit = text;
         while (commit.length() > 0) {
             final int at = pumpedKeyCharacters.indexOf(String.valueOf(commit.charAt(0)));
@@ -1008,7 +1008,6 @@ public class Display {
     }
 
     private static void handleTextEditingEvent() {
-        // Composition is not committed text: record it for the field to draw, do not queue it as input.
         ImeComposition.update(sdlEditEvent.textString(), sdlEditEvent.start());
     }
 
@@ -1093,6 +1092,7 @@ public class Display {
                     sdlSharedWindow = NULL;
                 }
                 if (sdlWindow != NULL) {
+                    TextFieldHandler.onWindowDestroy();
                     SDL_DestroyWindow(sdlWindow);
                     sdlWindow = NULL;
                     sdlWindowId = 0;
