@@ -1,6 +1,10 @@
 def props = project.properties
-def lwjglLibraries = project.lwjglLibraries
+def lwjglModules = project.lwjglModules
 def lwjglArch = project.lwjglArch
+// Module -> the natives classifiers it publishes. Everything not listed in lwjglNativeExceptions gets the full set.
+def classifiersFor = { String module ->
+    project.lwjglNativeExceptions[module] ?: project.lwjglNativeClassifiers
+}
 
 configurations {
     // 1.12.2 ships modules that were later renamed instead of upgraded, so Gradle cannot arbitrate them and both
@@ -35,18 +39,9 @@ configurations {
         transitive = false
     }
 
-    testCompile.extendsFrom(lwjglNatives)
-
     // The field table of the oldest release the shims must run on: CapabilityFieldCompatibilityTest reads it, nothing
     // launches against it, and only the OpenGL module is needed. It never reaches a launcher classpath.
     lwjglMinimumApi {
-        transitive = false
-    }
-}
-
-// Plain LWJGL3 API jars (no classifier) for the table check and the upcoming compile-time API
-configurations {
-    lwjgl3Api {
         transitive = false
     }
 }
@@ -55,22 +50,17 @@ configurations {
 ext.cleanmixVersion = '0.7.4'
 
 dependencies {
-    lwjglLibraries[0].each {
-        lwjgl3Api "org.lwjgl:$it:$props.lwjgl_version"
-    }
-
     lwjglMinimumApi "org.lwjgl:lwjgl-opengl:$props.lwjgl_minimum_version"
 
     // LWJGL: the LWJGL2 API surface comes from the in-tree shims, so only LWJGL3 is compiled against.
-    lwjglLibraries[0].each {
-        compileOnly "org.lwjgl:$it:$props.lwjgl_version"
-    }
-    lwjglLibraries[0].each {
-        installer "org.lwjgl:$it:$props.lwjgl_version"
-        runtimeOnly "org.lwjgl:$it::$lwjglArch"
-
-        lwjglLibraries[1].each { arch ->
-            lwjglNatives "org.lwjgl:$it:$props.lwjgl_version:$arch"
+    lwjglModules.each { module ->
+        compileOnly "org.lwjgl:$module:$props.lwjgl_version"
+        installer "org.lwjgl:$module:$props.lwjgl_version"
+        // The dev run and the tests only ever need this machine's natives; the launcher below gets the whole set.
+        if (classifiersFor(module).contains(lwjglArch))
+            runtimeOnly "org.lwjgl:$module:$props.lwjgl_version:$lwjglArch"
+        classifiersFor(module).each { classifier ->
+            lwjglNatives "org.lwjgl:$module:$props.lwjgl_version:$classifier"
         }
     }
 

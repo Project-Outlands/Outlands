@@ -101,20 +101,26 @@ repositories {
 }
 
 ext {
+    // The natives jar this machine needs: the dev run and the test classpath resolve against it.
     lwjglArch = Util.getCurrentArch()
-    // Do not change the order unless it is required so
-    lwjglLibraries = [
-        [
-            'lwjgl-sdl', 'lwjgl-jemalloc', 'lwjgl-openal',
-            'lwjgl-opengl', 'lwjgl-shaderc', 'lwjgl-spvc', 'lwjgl-stb', 'lwjgl'
-        ],
 
-        [
-            'natives-linux-arm64', 'natives-linux-arm32', 'natives-linux',
-            'natives-macos-arm64', 'natives-macos',
-            'natives-windows-arm64', 'natives-windows-x86', 'natives-windows'
-        ]
+    // LWJGL3 modules compiled against and shipped to players. The architecture list is separate now, so the order of
+    // this one only serves readability.
+    lwjglModules = [
+        'lwjgl-sdl', 'lwjgl-jemalloc', 'lwjgl-openal',
+        'lwjgl-opengl', 'lwjgl-shaderc', 'lwjgl-spvc', 'lwjgl-stb', 'lwjgl'
     ]
+
+    // Every natives classifier we publish. Util.NATIVE_CLASSIFIERS turns each one into a launcher rule.
+    lwjglNativeClassifiers = [
+        'natives-linux', 'natives-linux-arm64',
+        'natives-macos', 'natives-macos-arm64',
+        'natives-windows', 'natives-windows-arm64',
+        'natives-freebsd'
+    ]
+
+    // Modules that do not publish the whole set. Everything else gets lwjglNativeClassifiers.
+    lwjglNativeExceptions = [:]
 }
 
 apply from: 'dependencies.gradle'

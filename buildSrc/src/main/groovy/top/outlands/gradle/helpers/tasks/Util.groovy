@@ -91,55 +91,40 @@ class Util {
 		return ret
 	}
 
-	static def getLWJGLNatives(nativeConfig, compileConfig, natives, arch) {
+	/**
+	 * The natives artifacts, as launcher-JSON library entries.
+	 *
+	 * <p>Read straight off the resolved configuration: every artifact already carries its module, version and
+	 * classifier. An earlier version reconstructed those by matching jar file names against separate module and
+	 * architecture lists, which made the order of those lists load-bearing ('lwjgl' is a substring of every module
+	 * name). A resolved artifact whose classifier has no rule is a packaging bug, not a file to skip: the launcher
+	 * would install everything except that one jar, and the failure would land on a player.
+	 */
+	static def getLWJGLNatives(nativeConfig) {
 		def ret = [:]
-		def data = [ '' : [:]]
-		nativeConfig.resolvedConfiguration.resolvedArtifacts.each {
-			data.putIfAbsent(it.moduleVersion.id.name, [
-					group    : it.moduleVersion.id.group,
-					version  : it.moduleVersion.id.version,
-					extension: it.extension,
-			])
-		}
-		compileConfig.files.each {file ->
-			try {
-				def name = natives.stream().filter(it -> file.getName().contains(it)).findFirst().get()
-				def classifier = arch.stream().filter(it -> file.getName().contains(it)).findFirst().get()
-				def art = [
-						name		  : name,
-						group     : data.get(name).get("group"),
-						version   : data.get(name).get("version"),
-						extension : data.get(name).get("extension"),
-						classifier: classifier
-				]
-				def key = art.group + ':' + art.name + ':' + art.classifier
-				def folder = "${art.group.replace('.', '/')}/${art.name}/${art.version}/"
-				def filename = "${art.name}-${art.version}"
-				if (art.classifier != null)
-					filename += "-${art.classifier}"
-				filename += ".${art.extension}"
-				def path = "${folder}${filename}"
-				def url = getNativeURL(path, filename)
-				ret[key] = [
-						name: "${art.group}:${art.name}:${art.version}" + ":${art.classifier}" + (art.extension == 'jar' ? '' : "@${art.extension}"),
-						downloads: [
-								artifact: [
-										path: path,
-										url : url,
-										sha1: sha1(file as File),
-										size: file.length()
-								]
-						],
-						rules    : [
-								[
-										action: "allow",
-										os    : [
-												name: getOSName(art.classifier)
-										]
-								]
-						]
-				]
-			} catch (ignored) {}
+		nativeConfig.resolvedConfiguration.resolvedArtifacts.each { art ->
+			def classifier = art.classifier
+			if (classifier == null || !NATIVE_CLASSIFIERS.containsKey(classifier))
+				throw new GradleException("${art.moduleVersion.id.group}:${art.name}:${art.moduleVersion.id.version}"
+						+ " has no launcher rule for natives classifier '${classifier}'")
+			def group = art.moduleVersion.id.group
+			def name = art.moduleVersion.id.name
+			def version = art.moduleVersion.id.version
+			def extension = art.extension
+			def path = "${group.replace('.', '/')}/${name}/${version}/${name}-${version}-${classifier}.${extension}"
+			def url = getNativeURL(path, "${name}-${version}-${classifier}.${extension}")
+			ret[(group + ":" + name + ":" + classifier).toString()] = [
+					name     : "${group}:${name}:${version}:${classifier}" + (extension == 'jar' ? '' : "@${extension}"),
+					downloads: [
+							artifact: [
+									path : path,
+									url  : url,
+									sha1 : sha1(art.file as File),
+									size : art.file.length()
+							]
+					],
+					rules    : nativeRules(classifier)
+			]
 		}
 		return ret
 	}
@@ -193,47 +178,86 @@ class Util {
 	}
 
 	/**
-	 * Maps a natives classifier onto the os name a launcher rule needs.
-	 * <p>
-	 * The architecture has to be part of the name for the non-x86 classifiers. Prism matches the precise
-	 * {@code [os]-[arch]} classifier on non-legacy architectures and only falls back to the bare {@code [os]} for
-	 * x86_64/x86, so giving {@code natives-macos-arm64} the bare {@code osx} rule would exclude it on Apple Silicon
-	 * while including it on Intel, where it would shadow the x86_64 natives on the classpath. Same for
-	 * linux-arm64/arm32 and windows-arm64/x86.
+	 * Every natives classifier we ship, and how a launcher is told to install it.
+	 *
+	 * <p><b>Why {@code os.name} is one of three vanilla names.</b> The official launcher deserialises {@code os.name}
+	 * into {@code com.mojang.launcher.OperatingSystem} through {@code LowerCaseEnumTypeAdapterFactory}, and a name it
+	 * does not know becomes {@code null} - which makes the restriction skip its own check, i.e. the rule matches on
+	 * <em>every</em> platform. A name such as {@code osx-arm64} is therefore not "unrecognised", it is a wildcard: that
+	 * was measured against the launcher's own classes, and it is why the architecture moved to {@code os.arch}.
+	 *
+	 * <p><b>Why {@code os.arch} is spelled the way it is.</b> The launcher compiles it as a regular expression and
+	 * matches the <em>raw</em> {@code System.getProperty("os.arch")}: {@code aarch64}, {@code arm}, {@code amd64},
+	 * {@code x86_64}, {@code x86}. {@code arm64} (the MultiMC spelling) never matches there, and {@code x86_64} is
+	 * {@code amd64} on Linux, so the x64 baseline deliberately carries no architecture at all.
+	 *
+	 * <p>Prism and every launcher that compares {@code os.name} only ignore {@code arch}, so an arm entry reads as "this
+	 * OS" to them: they install one jar more per OS. That is harmless - the jar carries only its own
+	 * {@code <os>/<arch>/} tree and LWJGL picks by platform at load time - and it is the price of never leaving an arm
+	 * machine without natives. The one name outside the enum is {@code freebsd}: the official launcher reports
+	 * {@code UNKNOWN} there, so that rule leaks to everyone, and it is still the only way Prism-on-FreeBSD gets natives.
 	 */
-	static def getOSName(nativeClassifier) {
-		if (nativeClassifier.contains('natives-linux')) {
-			if (nativeClassifier.contains('-arm64')) return 'linux-arm64'
-			if (nativeClassifier.contains('-arm32')) return 'linux-arm32'
-			return 'linux'
-		}
-		if (nativeClassifier.contains('natives-macos')) {
-			return nativeClassifier.contains('-arm64') ? 'osx-arm64' : 'osx'
-		}
-		if (nativeClassifier.contains('natives-windows')) {
-			if (nativeClassifier.contains('-arm64')) return 'windows-arm64'
-			if (nativeClassifier.contains('-x86')) return 'windows-x86'
-			return 'windows'
-		}
+	static final Map<String, Map<String, String>> NATIVE_CLASSIFIERS = [
+			'natives-linux'        : [name: 'linux'],
+			'natives-linux-arm64'  : [name: 'linux', arch: 'aarch64'],
+			'natives-macos'        : [name: 'osx'],
+			'natives-macos-arm64'  : [name: 'osx'],
+			'natives-windows'      : [name: 'windows'],
+			'natives-windows-arm64': [name: 'windows', arch: 'aarch64'],
+			'natives-freebsd'      : [name: 'freebsd'],
+	]
+
+	/** The launcher rule for one classifier: a single allow, never a disallow (see {@link #NATIVE_CLASSIFIERS}). */
+	static List nativeRules(String classifier) {
+		def spec = NATIVE_CLASSIFIERS.get(classifier)
+		if (spec == null)
+			throw new IllegalArgumentException("unknown natives classifier: ${classifier}")
+		def restriction = [name: spec.get('name')]
+		if (spec.get('arch') != null)
+			restriction.put('arch', spec.get('arch'))
+		return [[action: 'allow', os: restriction]]
 	}
 
+	/**
+	 * The natives classifier for the machine this build runs on, used by the dev run and the test classpath.
+	 *
+	 * <p>Anything not in this table fails the build by name instead of falling back to {@code natives-linux}: an
+	 * unsupported architecture used to load the x86_64 {@code .so} and fail much later, in {@code System.load}.
+	 */
+	static final Map<String, String> MACHINE_CLASSIFIERS = [
+			'linux/x64'    : 'natives-linux',
+			'linux/arm64'  : 'natives-linux-arm64',
+			'osx/x64'      : 'natives-macos',
+			'osx/arm64'    : 'natives-macos-arm64',
+			'windows/x64'  : 'natives-windows',
+			'windows/arm64': 'natives-windows-arm64',
+			'freebsd/x64'  : 'natives-freebsd',
+	]
+
 	static def getCurrentArch() {
-		def osName = System.getProperty("os.name").toLowerCase();
-		if (osName.contains("linux")) {
-			def osArch = System.getProperty("os.arch")
-			return osArch.startsWith("arm") || osArch.startsWith("aarch64")
-					? "natives-linux-${osArch.contains("64") || osArch.startsWith("armv8") ? "arm64" : "arm32"}"
-					: "natives-linux"
+		def osName = System.getProperty("os.name").toLowerCase()
+		def rawArch = System.getProperty("os.arch")
+		def system
+		if (osName.contains("linux")) system = "linux"
+		else if (osName.contains("win")) system = "windows"
+		else if (osName.contains("mac") || osName.contains("darwin")) system = "osx"
+		else if (osName.contains("freebsd")) system = "freebsd"
+
+		// Normalised the way MultiMC does it, so 'amd64' on Linux and 'x86_64' on macOS land on the same key.
+		def arch
+		switch (rawArch) {
+			case "amd64": case "x86_64": case "x64": arch = "x64"; break
+			case "aarch64": case "arm64": arch = "arm64"; break
+			case "x86": case "i386": case "i686": arch = "x86"; break
+			case "arm": case "armhf": case "arm32": arch = "arm32"; break
+			default: arch = rawArch
 		}
-		if (osName.contains("mac os x") || osName.contains("darwin") || osName.contains("osx")) {
-			return System.getProperty("os.arch").startsWith("aarch64") ? "natives-macos-arm64" : "natives-macos"
-		}
-		if (osName.contains("windows")) {
-			def osArch = System.getProperty("os.arch")
-			return osArch.contains("64")
-					? "natives-windows${osArch.startsWith("aarch64") ? "-arm64" : ""}"
-					: "natives-windows-x86"
-		}
+
+		def classifier = MACHINE_CLASSIFIERS.get((system + "/" + arch).toString())
+		if (classifier == null)
+			throw new GradleException("no LWJGL natives for os.name='${System.getProperty("os.name")}'" +
+					" os.arch='${rawArch}' (known: ${MACHINE_CLASSIFIERS.keySet().sort().join(', ')})")
+		return classifier
 	}
 
 	static def iso8601Now() {
