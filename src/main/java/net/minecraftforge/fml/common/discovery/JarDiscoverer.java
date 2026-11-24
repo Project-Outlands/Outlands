@@ -42,6 +42,7 @@ import net.minecraftforge.fml.common.DeclarativeModContainer;
 import net.minecraftforge.fml.common.ModMetadata;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.index.LoadIndex;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.discovery.json.JsonAnnotationLoader;
 
@@ -97,6 +98,7 @@ public class JarDiscoverer implements ITypeDiscoverer
         JarScanRecord scan = candidate.getScanRecord();
         if (scan != null)
         {
+            LoadIndex.registerIfActive(candidate.getModContainer(), scan);
             replayScan(scan, candidate, table, jar, foundMods, mc);
             if (!scan.fromDisk())
             {
@@ -161,6 +163,7 @@ public class JarDiscoverer implements ITypeDiscoverer
         {
             // Fresh scan for this jar; the fingerprint covers the entries it was taken from.
             scan = JarScanRecord.of(JarFingerprint.compute(entries), indices, records);
+            LoadIndex.registerIfActive(candidate.getModContainer(), scan);
             RecordFile.write(cacheFile, scan);
         }
     }

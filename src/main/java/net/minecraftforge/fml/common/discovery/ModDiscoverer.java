@@ -41,6 +41,7 @@ import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.index.LoadIndex;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.launcher.FMLTweaker;
 import net.minecraftforge.fml.relauncher.CoreModManager;
@@ -294,6 +295,19 @@ public final class ModDiscoverer {
             } catch (URISyntaxException ignored) { }
         }
 
+        // The class index answers from the scans taken above and, for anything this run did not scan, from the
+        // cached records; its order is the class path order, so a name resolves to the class the loader defines.
+        final List<File> classPathOrder = new ArrayList<>();
+        for (File candidate : LibraryManager.getCandidates()) {
+            classPathOrder.add(candidate.getAbsoluteFile());
+        }
+        for (URL url : Launch.classLoader.getURLs()) {
+            try {
+                classPathOrder.add(new File(url.toURI()).getAbsoluteFile());
+            } catch (URISyntaxException ignored) { }
+        }
+        LoadIndex.activate(new LoadIndex(Launch.minecraftHome, classPathOrder));
+
         long elapsedMillis = (System.nanoTime() - startTime) / 1_000_000L;
         FMLLog.log.info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);
         FMLLog.log.debug("Discovered mod ids: {}", String.join(", ", modIdToFiles.keySet()));
@@ -410,6 +424,7 @@ public final class ModDiscoverer {
             }
             if (scan != null) {
                 scanRecords.put(absolute, scan);
+                LoadIndex.registerIfActive(absolute, scan);
             }
             for (String modId : modIds) {
                 if (recordMod(modId, absolute)) {
