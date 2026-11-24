@@ -47,8 +47,13 @@ public final class LoadIndex {
     }
 
     private final File gameDir;
-    /** Class path order: the first archive that has a class is the one the class loader uses. */
-    private final List<File> order;
+    /**
+     * The loader's own search order, read on demand: mods are added to the class loader after discovery starts, so a
+     * snapshot taken at construction would order them before the jars they actually come after.
+     */
+    private final java.util.function.Supplier<List<File>> orderSource;
+    private List<File> order = List.of();
+    private int orderSignature;
 
     /** Scans discovery produced in this run, by absolute file. */
     private final Map<File, JarScanRecord> scans = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -60,8 +65,30 @@ public final class LoadIndex {
     private final Set<String> misses = ConcurrentHashMap.newKeySet();
 
     public LoadIndex(File gameDir, List<File> order) {
-        this.gameDir = gameDir;
+        this(gameDir, () -> order);
         this.order = List.copyOf(order);
+    }
+
+    public LoadIndex(File gameDir, java.util.function.Supplier<List<File>> orderSource) {
+        this.gameDir = gameDir;
+        this.orderSource = orderSource;
+        refreshOrder();
+    }
+
+    /**
+     * Re-reads the search order and drops what was answered under the old one. Mods reach the class loader as
+     * discovery proceeds, so an archive that was not on the class path yet can appear here later.
+     */
+    private void refreshOrder() {
+        final List<File> current = List.copyOf(orderSource.get());
+        final int signature = current.hashCode();
+        if (signature == orderSignature && current.size() == order.size()) {
+            return;
+        }
+        order = current;
+        orderSignature = signature;
+        hits.clear();
+        misses.clear();
     }
 
     /** Registers the scan of one archive; a later scan of the same file replaces it. */
@@ -91,6 +118,7 @@ public final class LoadIndex {
      * @return whether an archive was indexed
      */
     public boolean indexMinecraftJar(java.util.function.UnaryOperator<String> nameMapper, String salt) {
+        refreshOrder();
         for (File archive : order) {
             if (!archive.isFile() || !VanillaIndex.looksLikeMinecraftJar(archive)) {
                 continue;
@@ -142,6 +170,7 @@ public final class LoadIndex {
 
     /** @return the archives this index searches, in class path order */
     public List<File> order() {
+        refreshOrder();
         return order;
     }
 
@@ -151,6 +180,7 @@ public final class LoadIndex {
      */
     @Nullable
     public ClassScanRecord classInfo(String internalName) {
+        refreshOrder();
         final ClassScanRecord cached = hits.get(internalName);
         if (cached != null) {
             return cached;
@@ -204,6 +234,7 @@ public final class LoadIndex {
      * @return the classes directly in that package, first archive first, one entry per name
      */
     public List<ClassScanRecord> classesInPackage(String packagePrefix) {
+        refreshOrder();
         final Map<String, ClassScanRecord> found = new LinkedHashMap<>();
         for (File archive : order) {
             final ClassIndex index = indexOf(archive);

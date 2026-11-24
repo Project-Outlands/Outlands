@@ -298,18 +298,11 @@ public final class ModDiscoverer {
             } catch (URISyntaxException ignored) { }
         }
 
-        // The class index answers from the scans taken above and, for anything this run did not scan, from the
-        // cached records; its order is the class path order, so a name resolves to the class the loader defines.
-        final List<File> classPathOrder = new ArrayList<>();
-        for (File candidate : LibraryManager.getCandidates()) {
-            classPathOrder.add(candidate.getAbsoluteFile());
-        }
-        for (URL url : Launch.classLoader.getURLs()) {
-            try {
-                classPathOrder.add(new File(url.toURI()).getAbsoluteFile());
-            } catch (URISyntaxException ignored) { }
-        }
-        final LoadIndex loadIndex = new LoadIndex(Launch.minecraftHome, classPathOrder);
+        // The class index answers from the scans taken above and, for anything this run did not scan, from the cached
+        // records. Its order is the loader's own search order - the class path first, then every jar added to the
+        // loader as discovery went on - so a name resolves to the class the loader would define for it.
+        final LoadIndex loadIndex = new LoadIndex(Launch.minecraftHome,
+                () -> LoadIndex.filesOf(Launch.classLoader.getSources()));
         LoadIndex.activate(loadIndex);
         indexMinecraftJar(loadIndex);
 

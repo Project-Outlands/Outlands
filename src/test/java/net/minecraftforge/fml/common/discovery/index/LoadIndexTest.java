@@ -125,6 +125,61 @@ class LoadIndexTest {
         assertEquals(0, found.get(0).interfaces().length, "the first archive's version of a name is the one reported");
     }
 
+    @Test
+    void theLoaderOrderDecidesAndItIsReadOnDemand(@TempDir Path dir) throws Exception {
+        final File gameDir = Files.createDirectories(dir.resolve("game")).toFile();
+        final File mods = Files.createDirectories(gameDir.toPath().resolve("mods")).toFile();
+        // The class path jar is what the loader had first; the mod is added to the loader afterwards.
+        final File classPathJar = jar(mods, "classpath.jar",
+                Map.of("dup/Target", clazz("dup/Target", "java/lang/Object", new String[0])));
+        final File modJar = jar(mods, "mod.jar",
+                Map.of("dup/Target", clazz("dup/Target", "java/lang/Object", new String[] {"dup/Marker"})));
+
+        final List<File> loaderOrder = new ArrayList<>(List.of(classPathJar));
+        final LoadIndex index = new LoadIndex(gameDir, () -> loaderOrder);
+        index.register(classPathJar, scanOf(classPathJar));
+        index.register(modJar, scanOf(modJar));
+
+        final ClassScanRecord before = index.classInfo("dup/Target");
+        assertNotNull(before);
+        assertEquals(0, before.interfaces().length, "the class path jar is the one the loader searches first");
+
+        // the mod reaches the loader later; the order is read again, not snapshotted
+        loaderOrder.add(modJar);
+        assertEquals(2, index.order().size(), "the order is read again, not snapshotted");
+        assertNotNull(index.classInfo("dup/Target"), "the same name still resolves");
+        assertEquals(0, index.classInfo("dup/Target").interfaces().length,
+                "the class path jar still wins after the mod was added");
+    }
+
+    @Test
+    void aModAddedAfterwardsDoesNotShadowTheClassPath(@TempDir Path dir) throws Exception {
+        final File gameDir = Files.createDirectories(dir.resolve("game")).toFile();
+        final File mods = Files.createDirectories(gameDir.toPath().resolve("mods")).toFile();
+        final File classPathJar = jar(mods, "lib.jar", Map.of(
+                "shared/Util", clazz("shared/Util", "java/lang/Object", new String[0]),
+                "shared/OnlyInLib", clazz("shared/OnlyInLib", "java/lang/Object", new String[0])));
+        final File modJar = jar(mods, "mod.jar", Map.of(
+                "shared/Util", clazz("shared/Util", "java/lang/Object", new String[] {"shared/Bundled"}),
+                "shared/OnlyInMod", clazz("shared/OnlyInMod", "java/lang/Object", new String[0])));
+
+        final List<File> loaderOrder = new ArrayList<>(List.of(classPathJar, modJar));
+        final LoadIndex index = new LoadIndex(gameDir, () -> loaderOrder);
+        index.register(classPathJar, scanOf(classPathJar));
+        index.register(modJar, scanOf(modJar));
+
+        assertEquals(0, index.classInfo("shared/Util").interfaces().length,
+                "a mod that bundles a library class must not shadow the library the loader already had");
+        assertNotNull(index.classInfo("shared/OnlyInMod"), "the mod still answers for its own classes");
+        assertNotNull(index.classInfo("shared/OnlyInLib"));
+
+        final List<String> names = index.classesInPackage("shared/").stream()
+                .map(ClassScanRecord::internalName)
+                .toList();
+        assertEquals(List.of("shared/OnlyInLib", "shared/Util", "shared/OnlyInMod"), names,
+                "archive order first, name order within an archive, and no duplicates");
+    }
+
     private static JarScanRecord scanOf(File jar) throws IOException {
         final List<ZipEntry> entries = new ArrayList<>();
         final List<Integer> indices = new ArrayList<>();
