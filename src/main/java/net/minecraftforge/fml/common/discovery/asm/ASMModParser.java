@@ -43,6 +43,7 @@ public class ASMModParser
 {
     private Type asmType;
     private int classVersion;
+    private int classAccess;
     private Type asmSuperType;
     private final LinkedList<ModAnnotation> annotations = Lists.newLinkedList();
     private final Set<String> interfaces = Sets.newHashSet();
@@ -66,10 +67,11 @@ public class ASMModParser
         }
     }
 
-    public void beginNewTypeName(String typeQName, int classVersion, String superClassQName, String[] interfaces)
+    public void beginNewTypeName(String typeQName, int classVersion, int classAccess, String superClassQName, String[] interfaces)
     {
         this.asmType = Type.getObjectType(typeQName);
         this.classVersion = classVersion;
+        this.classAccess = classAccess;
         this.asmSuperType = !Strings.isNullOrEmpty(superClassQName) ? Type.getObjectType(superClassQName) : null;
         this.interfaces.addAll(Arrays.asList(interfaces));
     }
@@ -193,6 +195,8 @@ public class ASMModParser
         return new ClassScanRecord(
                 asmType.getInternalName(),
                 classVersion,
+                asmSuperType == null ? null : asmSuperType.getInternalName(),
+                classAccess,
                 interfaces.toArray(new String[0]),
                 collected);
     }

@@ -770,10 +770,8 @@ public final class ModDiscoverer {
             ASMModParser parser = result.parser();
             parser.validate();
             ClassScanRecord record = parser.toRecord();
-            if (JarScanRecord.hasContent(record)) {
-                indices.add(ordinal);
-                out.add(record);
-            }
+            indices.add(ordinal);
+            out.add(record);
         }
         return complete;
     }

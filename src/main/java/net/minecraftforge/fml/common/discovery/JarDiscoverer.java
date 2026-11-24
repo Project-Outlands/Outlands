@@ -148,12 +148,10 @@ public class JarDiscoverer implements ITypeDiscoverer
             modParser.sendToTable(table, candidate);
             if (cacheable)
             {
-                ClassScanRecord record = modParser.toRecord();
-                if (JarScanRecord.hasContent(record))
-                {
-                    indices.add(ordinal);
-                    records.add(record);
-                }
+                // every scanned class is recorded, not only the ones with annotations: the index answers
+                // questions about plain classes as well
+                indices.add(ordinal);
+                records.add(modParser.toRecord());
             }
             ModContainer container = ModContainerFactory.instance().build(modParser, candidate.getModContainer(), candidate);
             addContainer(container, table, foundMods, mc, modParser.getClassVersion());
@@ -190,9 +188,12 @@ public class JarDiscoverer implements ITypeDiscoverer
             if (next < indices.length && indices[next] == ordinal)
             {
                 ClassScanRecord record = records[next++];
-                record.sendToTable(candidate, table);
-                ModContainer container = ModContainerFactory.instance().build(record, candidate.getModContainer(), candidate);
-                addContainer(container, table, foundMods, mc, record.classVersion());
+                if (record.hasContent())
+                {
+                    record.sendToTable(candidate, table);
+                    ModContainer container = ModContainerFactory.instance().build(record, candidate.getModContainer(), candidate);
+                    addContainer(container, table, foundMods, mc, record.classVersion());
+                }
             }
         }
     }

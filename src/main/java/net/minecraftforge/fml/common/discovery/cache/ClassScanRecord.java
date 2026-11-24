@@ -7,7 +7,19 @@ import javax.annotation.Nullable;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
 
-public record ClassScanRecord(String internalName, int classVersion, String[] interfaces, Annotation[] annotations) {
+/**
+ * What one class file contributes to the index: its header (name, version, flags, super type, interfaces) and its
+ * annotations. Every scanned class has one, not only the ones with annotations, so that the index can answer
+ * questions about plain classes too; {@link #hasContent()} says whether the class also contributes to the
+ * {@link ASMDataTable} and can be the entry point of a container.
+ */
+public record ClassScanRecord(
+        String internalName,
+        int classVersion,
+        @Nullable String superName,
+        int access,
+        String[] interfaces,
+        Annotation[] annotations) {
 
     public record Annotation(
             String annotationName,
@@ -16,6 +28,11 @@ public record ClassScanRecord(String internalName, int classVersion, String[] in
 
     public String className() {
         return internalName.replace('/', '.');
+    }
+
+    /** Whether the class has something to say to the annotation table or can start a container. */
+    public boolean hasContent() {
+        return annotations.length > 0 || interfaces.length > 0;
     }
 
     public void sendToTable(ModCandidate candidate, ASMDataTable table) {
