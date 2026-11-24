@@ -82,6 +82,64 @@ public final class LoadIndex {
         }
     }
 
+    /**
+     * Indexes the archive of the class path whose names the loader renames (the minecraft jar), from the cache when it
+     * still matches the archive and otherwise by reading its class headers. One pass, once per install.
+     *
+     * @param nameMapper the mapping the loader applies to class names
+     * @param salt         a token that changes when the mapping does, so an index of another mapping is not reused
+     * @return whether an archive was indexed
+     */
+    public boolean indexMinecraftJar(java.util.function.UnaryOperator<String> nameMapper, String salt) {
+        for (File archive : order) {
+            if (!archive.isFile() || !VanillaIndex.looksLikeMinecraftJar(archive)) {
+                continue;
+            }
+            final JarScanRecord scan = scanWithCache(archive, nameMapper, salt);
+            if (scan != null) {
+                register(archive, scan);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Nullable
+    private JarScanRecord scanWithCache(File archive, java.util.function.UnaryOperator<String> nameMapper, String salt) {
+        final JarFingerprint fingerprint = fingerprintOf(archive);
+        if (fingerprint == null) {
+            return null;
+        }
+        final File cacheFile = vanillaCacheFile(archive, fingerprint, salt);
+        final JarScanRecord cached = cacheFile == null ? null : RecordFile.read(cacheFile, fingerprint);
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            final JarScanRecord scan = VanillaIndex.scan(archive, nameMapper);
+            if (cacheFile != null) {
+                RecordFile.write(cacheFile, scan);
+            }
+            return scan;
+        } catch (IOException | RuntimeException e) {
+            FMLLog.log.warn("Could not build the class index of {}", archive, e);
+            return null;
+        }
+    }
+
+    /**
+     * The minecraft jar lives outside the game directory, so {@link RecordFile#fileFor} does not place it; it gets a
+     * file of its own next to the per-jar records, named by the fingerprint it was taken from and the mapping salt.
+     */
+    @Nullable
+    private File vanillaCacheFile(File archive, JarFingerprint fingerprint, String salt) {
+        if (gameDir == null) {
+            return null;
+        }
+        final File root = new File(RecordFile.cacheDir(gameDir), "vanilla");
+        return new File(root, salt + "-" + Long.toHexString(fingerprint.value()) + "-" + fingerprint.classEntryCount() + ".bin");
+    }
+
     /** @return the archives this index searches, in class path order */
     public List<File> order() {
         return order;

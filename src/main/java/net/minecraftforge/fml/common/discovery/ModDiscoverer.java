@@ -41,7 +41,10 @@ import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.discovery.index.LoadIndex;
+import net.minecraftforge.fml.common.asm.transformers.deobf.FMLDeobfuscatingRemapper;
+import net.minecraftforge.fml.relauncher.FMLInjectionData;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.launcher.FMLTweaker;
 import net.minecraftforge.fml.relauncher.CoreModManager;
@@ -306,7 +309,9 @@ public final class ModDiscoverer {
                 classPathOrder.add(new File(url.toURI()).getAbsoluteFile());
             } catch (URISyntaxException ignored) { }
         }
-        LoadIndex.activate(new LoadIndex(Launch.minecraftHome, classPathOrder));
+        final LoadIndex loadIndex = new LoadIndex(Launch.minecraftHome, classPathOrder);
+        LoadIndex.activate(loadIndex);
+        indexMinecraftJar(loadIndex);
 
         long elapsedMillis = (System.nanoTime() - startTime) / 1_000_000L;
         FMLLog.log.info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);
@@ -639,6 +644,20 @@ public final class ModDiscoverer {
             }
         }
         return modList;
+    }
+
+    /**
+     * Adds the minecraft jar to the class index. Its classes are named for the class loader's mapping and are not part
+     * of any mod candidate; the pass is cached, so after the first start it costs a file read.
+     */
+    private static void indexMinecraftJar(LoadIndex loadIndex) {
+        try {
+            loadIndex.indexMinecraftJar(
+                    FMLDeobfuscatingRemapper.INSTANCE::map,
+                    "v" + RecordFile.CACHE_REV + "-" + FMLInjectionData.data()[4]);
+        } catch (RuntimeException | LinkageError e) {
+            FMLLog.log.debug("Not indexing the minecraft jar", e);
+        }
     }
 
     private void addCandidate(List<ModCandidate> modCandidates, Set<File> seen, ModCandidate candidate) {
