@@ -53,12 +53,14 @@ public class ModClassVisitor extends ClassVisitor
     @Override
     public FieldVisitor visitField(int access, String name, String desc, String signature, Object value)
     {
+        discoverer.addMember(name, desc, access, false);
         return new ModFieldVisitor(name, discoverer);
     }
 
     @Override
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
     {
+        discoverer.addMember(name, desc, access, true);
         return new ModMethodVisitor(name, desc, discoverer);
     }
 }

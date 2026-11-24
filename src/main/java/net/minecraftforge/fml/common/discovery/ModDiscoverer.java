@@ -42,10 +42,15 @@ import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
+import net.minecraftforge.fml.common.discovery.index.ClassNaming;
 import net.minecraftforge.fml.common.discovery.index.LoadIndex;
 import net.minecraftforge.fml.common.asm.transformers.deobf.FMLDeobfuscatingRemapper;
 import net.minecraftforge.fml.relauncher.FMLInjectionData;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.launcher.FMLTweaker;
 import net.minecraftforge.fml.relauncher.CoreModManager;
 import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
@@ -411,8 +416,10 @@ public final class ModDiscoverer {
             if (scan == null && needClasses) {
                 List<ClassScanRecord> records = new ArrayList<>();
                 List<Integer> indices = new ArrayList<>();
-                if (collectRecords(entries, jarFile, records, indices) && readCache) {
+                Map<String, MemberRecord[]> members = new HashMap<>();
+                if (collectRecords(entries, jarFile, records, indices, members) && readCache) {
                     scan = JarScanRecord.of(fingerprint, indices, records);
+                    MemberFile.write(MemberFile.fileFor(Launch.minecraftHome, absolute), fingerprint, members);
                 }
                 if (modIds.isEmpty()) {
                     collectModIds(records, modIds);
@@ -643,10 +650,33 @@ public final class ModDiscoverer {
      * Adds the minecraft jar to the class index. Its classes are named for the class loader's mapping and are not part
      * of any mod candidate; the pass is cached, so after the first start it costs a file read.
      */
+    /** The loader's own renaming, expressed as the three operations the class index needs. */
+    private static ClassNaming remapperNaming() {
+        final FMLDeobfuscatingRemapper remapper = FMLDeobfuscatingRemapper.INSTANCE;
+        return new ClassNaming() {
+            @Override
+            public String type(String internalName) {
+                return remapper.map(internalName);
+            }
+
+            @Override
+            public String member(String ownerInternalName, String name, String descriptor, boolean method) {
+                return method
+                        ? remapper.mapMethodName(ownerInternalName, name, descriptor)
+                        : remapper.mapFieldName(ownerInternalName, name, descriptor);
+            }
+
+            @Override
+            public String descriptor(String descriptor) {
+                return remapper.mapDesc(descriptor);
+            }
+        };
+    }
+
     private static void indexMinecraftJar(LoadIndex loadIndex) {
         try {
             loadIndex.indexMinecraftJar(
-                    FMLDeobfuscatingRemapper.INSTANCE::map,
+                    remapperNaming(),
                     "v" + RecordFile.CACHE_REV + "-" + FMLInjectionData.data()[4]);
         } catch (RuntimeException | LinkageError e) {
             FMLLog.log.debug("Not indexing the minecraft jar", e);
@@ -775,7 +805,8 @@ public final class ModDiscoverer {
         }
     }
 
-    private static boolean collectRecords(List<JarEntry> entries, JarFile jar, List<ClassScanRecord> out, List<Integer> indices) {
+    private static boolean collectRecords(List<JarEntry> entries, JarFile jar, List<ClassScanRecord> out,
+            List<Integer> indices, Map<String, MemberRecord[]> members) {
         List<JarEntry> scanned = new ArrayList<>();
         for (JarEntry entry : entries) {
             if (ITypeDiscoverer.shouldScan(entry.getName())) {
@@ -799,6 +830,8 @@ public final class ModDiscoverer {
             ClassScanRecord record = parser.toRecord();
             indices.add(ordinal);
             out.add(record);
+            // the same visit that produced the header also saw the members; keeping them costs nothing here
+            members.put(record.internalName(), parser.toMembers());
         }
         return complete;
     }

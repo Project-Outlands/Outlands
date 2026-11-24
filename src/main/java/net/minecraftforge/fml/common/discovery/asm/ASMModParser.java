@@ -22,6 +22,7 @@ package net.minecraftforge.fml.common.discovery.asm;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.List;
 import java.util.LinkedList;
 import java.util.Set;
 
@@ -30,6 +31,7 @@ import net.minecraftforge.fml.common.LoaderException;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
@@ -47,6 +49,8 @@ public class ASMModParser
     private Type asmSuperType;
     private final LinkedList<ModAnnotation> annotations = Lists.newLinkedList();
     private final Set<String> interfaces = Sets.newHashSet();
+    /** The members as the class file declares them; the parse already walks them, keeping them is what costs. */
+    private final List<MemberRecord> members = Lists.newArrayList();
 
     public enum AnnotationType
     {
@@ -65,6 +69,24 @@ public class ASMModParser
             FMLLog.log.error("Unable to read a class file correctly", ex);
             throw new LoaderException(ex);
         }
+    }
+
+    /** Records one member of the class being parsed. */
+    public void addMember(String name, String descriptor, int access, boolean method)
+    {
+        members.add(new MemberRecord(name, descriptor, access, method));
+    }
+
+    /** @return the internal name of the class, once its header has been visited */
+    public String internalName()
+    {
+        return asmType.getInternalName();
+    }
+
+    /** @return the members this parse saw */
+    public MemberRecord[] toMembers()
+    {
+        return members.toArray(new MemberRecord[0]);
     }
 
     public void beginNewTypeName(String typeQName, int classVersion, int classAccess, String superClassQName, String[] interfaces)

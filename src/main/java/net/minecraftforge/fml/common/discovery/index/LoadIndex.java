@@ -17,6 +17,8 @@ import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 
 /**
@@ -34,6 +36,8 @@ import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 public final class LoadIndex {
 
     private static volatile LoadIndex active;
+
+    private static final MemberRecord[] NO_MEMBERS = new MemberRecord[0];
 
     /** @return the index discovery populated, or null when discovery has not started */
     @Nullable
@@ -61,8 +65,14 @@ public final class LoadIndex {
     /** Archives that answered with no record; asking again would only cost a file read. */
     private final Set<File> withoutRecord = ConcurrentHashMap.newKeySet();
 
-    private final Map<String, ClassScanRecord> hits = new ConcurrentHashMap<>();
+    /** name -> the archive whose class the loader would define; what a member query starts from. */
+    private final Map<String, File> origins = new ConcurrentHashMap<>();
     private final Set<String> misses = ConcurrentHashMap.newKeySet();
+    /** Per-archive member tables, read on demand: a full table is an order of magnitude larger than the headers. */
+    private final Map<File, Map<String, MemberRecord[]>> memberTables = new ConcurrentHashMap<>();
+    private final Set<File> withoutMembers = ConcurrentHashMap.newKeySet();
+    /** Archives indexed from a file outside the per-jar cache tree, mapped to the index file that was used. */
+    private final Map<File, File> vanillaIndexFiles = new ConcurrentHashMap<>();
 
     public LoadIndex(File gameDir, List<File> order) {
         this(gameDir, () -> order);
@@ -79,16 +89,17 @@ public final class LoadIndex {
      * Re-reads the search order and drops what was answered under the old one. Mods reach the class loader as
      * discovery proceeds, so an archive that was not on the class path yet can appear here later.
      */
-    private void refreshOrder() {
+    private boolean refreshOrder() {
         final List<File> current = List.copyOf(orderSource.get());
         final int signature = current.hashCode();
         if (signature == orderSignature && current.size() == order.size()) {
-            return;
+            return false;
         }
         order = current;
         orderSignature = signature;
-        hits.clear();
+        origins.clear();
         misses.clear();
+        return true;
     }
 
     /** Registers the scan of one archive; a later scan of the same file replaces it. */
@@ -97,7 +108,9 @@ public final class LoadIndex {
         scans.put(key, scan);
         indexes.remove(key);
         withoutRecord.remove(key);
-        hits.clear();
+        memberTables.remove(key);
+        withoutMembers.remove(key);
+        origins.clear();
         misses.clear();
     }
 
@@ -113,17 +126,17 @@ public final class LoadIndex {
      * Indexes the archive of the class path whose names the loader renames (the minecraft jar), from the cache when it
      * still matches the archive and otherwise by reading its class headers. One pass, once per install.
      *
-     * @param nameMapper the mapping the loader applies to class names
+     * @param naming the mapping the loader applies to names and descriptors
      * @param salt         a token that changes when the mapping does, so an index of another mapping is not reused
      * @return whether an archive was indexed
      */
-    public boolean indexMinecraftJar(java.util.function.UnaryOperator<String> nameMapper, String salt) {
+    public boolean indexMinecraftJar(ClassNaming naming, String salt) {
         refreshOrder();
         for (File archive : order) {
             if (!archive.isFile() || !VanillaIndex.looksLikeMinecraftJar(archive)) {
                 continue;
             }
-            final JarScanRecord scan = scanWithCache(archive, nameMapper, salt);
+            final JarScanRecord scan = scanWithCache(archive, naming, salt);
             if (scan != null) {
                 register(archive, scan);
                 return true;
@@ -133,22 +146,31 @@ public final class LoadIndex {
     }
 
     @Nullable
-    private JarScanRecord scanWithCache(File archive, java.util.function.UnaryOperator<String> nameMapper, String salt) {
+    private JarScanRecord scanWithCache(File archive, ClassNaming naming, String salt) {
         final JarFingerprint fingerprint = fingerprintOf(archive);
         if (fingerprint == null) {
             return null;
         }
         final File cacheFile = vanillaCacheFile(archive, fingerprint, salt);
+        if (cacheFile != null) {
+            vanillaIndexFiles.put(archive.getAbsoluteFile(), cacheFile);
+        }
         final JarScanRecord cached = cacheFile == null ? null : RecordFile.read(cacheFile, fingerprint);
         if (cached != null) {
             return cached;
         }
         try {
-            final JarScanRecord scan = VanillaIndex.scan(archive, nameMapper);
+            final VanillaIndex.Scanned scanned = VanillaIndex.scan(archive, naming);
             if (cacheFile != null) {
-                RecordFile.write(cacheFile, scan);
+                RecordFile.write(cacheFile, scanned.index());
+                final File memberFile = memberFileTarget(archive, cacheFile);
+                if (memberFile != null) {
+                    MemberFile.write(memberFile, scanned.index().fingerprint(), scanned.members());
+                }
             }
-            return scan;
+            // keep the table this pass produced, so the first query after it does not read it back
+            memberTables.put(archive.getAbsoluteFile(), scanned.members());
+            return scanned.index();
         } catch (IOException | RuntimeException e) {
             FMLLog.log.warn("Could not build the class index of {}", archive, e);
             return null;
@@ -159,6 +181,10 @@ public final class LoadIndex {
      * The minecraft jar lives outside the game directory, so {@link RecordFile#fileFor} does not place it; it gets a
      * file of its own next to the per-jar records, named by the fingerprint it was taken from and the mapping salt.
      */
+    private static File memberCacheFile(File indexFile) {
+        return new File(indexFile.getPath() + ".members");
+    }
+
     @Nullable
     private File vanillaCacheFile(File archive, JarFingerprint fingerprint, String salt) {
         if (gameDir == null) {
@@ -180,27 +206,100 @@ public final class LoadIndex {
      */
     @Nullable
     public ClassScanRecord classInfo(String internalName) {
-        refreshOrder();
-        final ClassScanRecord cached = hits.get(internalName);
-        if (cached != null) {
-            return cached;
+        final File origin = archiveOf(internalName);
+        if (origin == null) {
+            return null;
+        }
+        final ClassIndex index = indexOf(origin);
+        return index == null ? null : index.byName(internalName);
+    }
+
+    /**
+     * @param internalName a name such as {@code net/minecraft/world/World}
+     * @return the members that class declares, or an empty array when the class or its member table is unknown
+     */
+    public MemberRecord[] membersOf(String internalName) {
+        final File origin = archiveOf(internalName);
+        if (origin == null) {
+            return NO_MEMBERS;
+        }
+        final Map<String, MemberRecord[]> table = memberTableOf(origin);
+        final MemberRecord[] members = table == null ? null : table.get(internalName);
+        return members == null ? NO_MEMBERS : members;
+    }
+
+    /** @return the archive whose class the loader would define for {@code internalName}, or null */
+    @Nullable
+    private File archiveOf(String internalName) {
+        final File known = origins.get(internalName);
+        if (known != null) {
+            return known;
         }
         if (misses.contains(internalName)) {
             return null;
         }
-        for (File archive : order) {
-            final ClassIndex index = indexOf(archive);
-            if (index == null) {
-                continue;
-            }
-            final ClassScanRecord record = index.byName(internalName);
-            if (record != null) {
-                hits.put(internalName, record);
-                return record;
+        final File found = search(internalName);
+        if (found != null) {
+            origins.put(internalName, found);
+            return found;
+        }
+        // Nothing answered under the order that was current. A jar added since then sits at the end of the search
+        // order, so it can only answer names that had no answer before: re-read the order once before giving up.
+        if (refreshOrder()) {
+            final File late = search(internalName);
+            if (late != null) {
+                origins.put(internalName, late);
+                return late;
             }
         }
         misses.add(internalName);
         return null;
+    }
+
+    @Nullable
+    private File search(String internalName) {
+        for (File archive : order) {
+            final ClassIndex index = indexOf(archive);
+            if (index != null && index.byName(internalName) != null) {
+                return archive;
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private Map<String, MemberRecord[]> memberTableOf(File archive) {
+        final File key = archive.getAbsoluteFile();
+        final Map<String, MemberRecord[]> known = memberTables.get(key);
+        if (known != null) {
+            return known;
+        }
+        if (withoutMembers.contains(key)) {
+            return null;
+        }
+        final JarFingerprint fingerprint = fingerprintOf(key);
+        final File file = fingerprint == null ? null
+                : memberFileTarget(key, vanillaIndexFiles.get(key.getAbsoluteFile()));
+        Map<String, MemberRecord[]> table = file == null ? null : MemberFile.read(file, fingerprint);
+        if (table == null) {
+            withoutMembers.add(key);
+            return null;
+        }
+        memberTables.put(key, table);
+        return table;
+    }
+
+    /**
+     * @return where an archive's member table belongs: beside its record when it has one, and beside its index file
+     *         otherwise, which is the case for the minecraft jar outside the game directory
+     */
+    @Nullable
+    private File memberFileTarget(File archive, @Nullable File indexFile) {
+        final File record = RecordFile.fileFor(gameDir, archive);
+        if (record != null) {
+            return new File(record.getPath() + ".members");
+        }
+        return indexFile == null ? null : memberCacheFile(indexFile);
     }
 
     /**

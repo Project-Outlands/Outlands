@@ -23,6 +23,8 @@ import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -178,6 +180,35 @@ class LoadIndexTest {
                 .toList();
         assertEquals(List.of("shared/OnlyInLib", "shared/Util", "shared/OnlyInMod"), names,
                 "archive order first, name order within an archive, and no duplicates");
+    }
+
+    @Test
+    void theMembersOfAClassComeFromItsOwnArchive(@TempDir Path dir) throws Exception {
+        final File gameDir = Files.createDirectories(dir.resolve("game")).toFile();
+        final File mods = Files.createDirectories(gameDir.toPath().resolve("mods")).toFile();
+        final File first = jar(mods, "first.jar", Map.of("dup/Target", clazz("dup/Target", "java/lang/Object", new String[0])));
+        final File second = jar(mods, "second.jar", Map.of("dup/Target", clazz("dup/Target", "java/lang/Object", new String[0])));
+
+        final LoadIndex index = new LoadIndex(gameDir, List.of(first, second));
+        index.register(first, scanOf(first));
+        index.register(second, scanOf(second));
+
+        // write the tables the scan would have written, with different content per archive
+        for (File archive : List.of(first, second)) {
+            final JarScanRecord scan = scanOf(archive);
+            MemberFile.write(MemberFile.fileFor(gameDir, archive), scan.fingerprint(),
+                    Map.of("dup/Target", membersFor(archive)));
+        }
+
+        final MemberRecord[] fromFirst = index.membersOf("dup/Target");
+        assertEquals(1, fromFirst.length, "the first archive's table is the one that answers");
+        assertEquals("fromFirst", fromFirst[0].name());
+        assertEquals(0, index.membersOf("dup/Missing").length);
+    }
+
+    private static MemberRecord[] membersFor(File archive) {
+        return new MemberRecord[] {new MemberRecord(archive.getName().startsWith("first") ? "fromFirst" : "fromSecond",
+                "()V", Opcodes.ACC_PUBLIC, true)};
     }
 
     private static JarScanRecord scanOf(File jar) throws IOException {

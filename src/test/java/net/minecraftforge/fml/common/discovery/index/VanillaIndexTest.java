@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.UnaryOperator;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -18,6 +17,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,7 +36,28 @@ class VanillaIndexTest {
             "b", "net/minecraft/Itf",
             "c", "net/minecraft/Base");
 
-    private static final UnaryOperator<String> MAPPER = name -> MAPPING.getOrDefault(name, name);
+    private static final ClassNaming MAPPER = new ClassNaming() {
+        @Override
+        public String type(String internalName) {
+            return MAPPING.getOrDefault(internalName, internalName);
+        }
+
+        @Override
+        public String member(String ownerInternalName, String name, String descriptor, boolean method) {
+            // the fake mapping renames the single letter members the way the real one does
+            return MEMBERS.getOrDefault(ownerInternalName + "#" + name, name);
+        }
+
+        @Override
+        public String descriptor(String descriptor) {
+            return descriptor;
+        }
+    };
+
+    /** The members an obfuscated class declares, mapped to their readable names. */
+    private static final Map<String, String> MEMBERS = Map.of(
+            "a#x", "getValue",
+            "a#y", "field_1");
 
     @Test
     void theMinecraftJarIsRecognisedByItsMarker(@TempDir Path dir) throws Exception {
@@ -64,6 +85,12 @@ class VanillaIndexTest {
         assertEquals(List.of("net/minecraft/Base", "net/minecraft/Itf"), index.supertypes("net/minecraft/Alpha"));
         assertNull(index.classInfo("a"), "the obfuscated spelling is not what the loader defines");
         assertNotNull(index.classInfo("pkg/Plain"), "classes the mapper leaves alone are indexed too");
+
+        final List<String> names = java.util.Arrays.stream(index.membersOf("net/minecraft/Alpha"))
+                .map(MemberRecord::name)
+                .toList();
+        assertTrue(names.contains("field_1"), "a field name is mapped too, not only the class name: " + names);
+        assertTrue(names.contains("getValue"), "a method name is mapped too: " + names);
     }
 
     @Test
@@ -104,14 +131,50 @@ class VanillaIndexTest {
     private static Map<String, byte[]> minecraftClasses() {
         return Map.of(
                 "net/minecraft/client/ClientBrandRetriever", clazz("net/minecraft/client/ClientBrandRetriever", "java/lang/Object", new String[0]),
-                "a", clazz("a", "c", new String[] {"b"}),
+                "a", withMembers(clazz("a", "c", new String[] {"b"})),
                 "pkg/Plain", clazz("pkg/Plain", "java/lang/Object", new String[0]));
     }
 
-    private static UnaryOperator<String> counting(AtomicInteger calls) {
-        return name -> {
-            calls.incrementAndGet();
-            return MAPPING.getOrDefault(name, name);
+    /** Adds the field {@code x} and the method {@code y} to a class, which the fake mapping renames. */
+    private static byte[] withMembers(byte[] bytes) {
+        final ClassWriter writer = new ClassWriter(0);
+        new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public void visitEnd() {
+                final org.objectweb.asm.FieldVisitor field =
+                        cv.visitField(Opcodes.ACC_PUBLIC, "x", "I", null, null);
+                if (field != null) {
+                    field.visitEnd();
+                }
+                final org.objectweb.asm.MethodVisitor method =
+                        cv.visitMethod(Opcodes.ACC_PUBLIC, "y", "()V", null, null);
+                method.visitCode();
+                method.visitInsn(Opcodes.RETURN);
+                method.visitMaxs(0, 1);
+                method.visitEnd();
+                super.visitEnd();
+            }
+        }, 0);
+        return writer.toByteArray();
+    }
+
+    private static ClassNaming counting(AtomicInteger calls) {
+        return new ClassNaming() {
+            @Override
+            public String type(String internalName) {
+                calls.incrementAndGet();
+                return MAPPING.getOrDefault(internalName, internalName);
+            }
+
+            @Override
+            public String member(String ownerInternalName, String name, String descriptor, boolean method) {
+                return MEMBERS.getOrDefault(ownerInternalName + "#" + name, name);
+            }
+
+            @Override
+            public String descriptor(String descriptor) {
+                return descriptor;
+            }
         };
     }
 
