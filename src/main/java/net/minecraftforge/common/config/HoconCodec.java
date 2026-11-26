@@ -20,6 +20,9 @@ import net.minecraftforge.fml.common.FMLLog;
  */
 public final class HoconCodec implements IConfigCodec {
 
+    /** Long arrays are easier to scan one element per line; short ones stay on the property line. */
+    private static final int MAX_INLINE_ARRAY_LENGTH = 100;
+
     @Override
     public boolean rewriteable() {
         return false;
@@ -30,6 +33,10 @@ public final class HoconCodec implements IConfigCodec {
         StringBuilder out = new StringBuilder("# Configuration file\n");
 
         for (String categoryName : cfg.getCategoryNames()) {
+            // getCategoryNames() contains the children as well; writeCategory() recurses into them.
+            if (categoryName.contains(Configuration.CATEGORY_SPLITTER))
+                continue;
+
             ConfigCategory category = cfg.getCategory(categoryName);
             writeCategory(category, out, 0);
         }
@@ -39,21 +46,15 @@ public final class HoconCodec implements IConfigCodec {
 
     private void writeCategory(ConfigCategory category, StringBuilder out, int indent) {
         String padding = "    ".repeat(indent);
-        out.append('\n').append(padding).append(key(category.getQualifiedName())).append(" {\n");
+        out.append('\n').append(padding).append(key(category.getName())).append(" {\n");
 
         for (Property property : category.getOrderedValues()) {
             writeComment(property.getComment(), out, padding + "    ");
-            out.append(padding).append("    ").append(key(property.getName())).append(" = ");
+            String prefix = padding + "    " + key(property.getName()) + " = ";
+            out.append(prefix);
 
             if (property.isList()) {
-                String[] values = property.getSavedStringList();
-                out.append('[');
-                for (int i = 0; i < values.length; i++) {
-                    if (i > 0)
-                        out.append(", ");
-                    out.append(scalar(property.getType(), values[i]));
-                }
-                out.append("]\n");
+                writeArray(property, out, prefix.length(), padding + "        ", padding + "    ");
             } else {
                 out.append(scalar(property.getType(), property.getSavedString())).append('\n');
             }
@@ -63,6 +64,32 @@ public final class HoconCodec implements IConfigCodec {
             writeCategory(child, out, indent + 1);
 
         out.append(padding).append("}\n");
+    }
+
+    private static void writeArray(Property property, StringBuilder out, int prefixLength,
+            String elementIndent, String closingIndent) {
+        String[] values = property.getSavedStringList();
+        StringBuilder inline = new StringBuilder(values.length * 8 + 2).append('[');
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0)
+                inline.append(", ");
+            inline.append(scalar(property.getType(), values[i]));
+        }
+        inline.append(']');
+
+        if (prefixLength + inline.length() <= MAX_INLINE_ARRAY_LENGTH) {
+            out.append(inline).append('\n');
+            return;
+        }
+
+        out.append("[\n");
+        for (int i = 0; i < values.length; i++) {
+            out.append(elementIndent).append(scalar(property.getType(), values[i]));
+            if (i + 1 < values.length)
+                out.append(',');
+            out.append('\n');
+        }
+        out.append(closingIndent).append("]\n");
     }
 
     private static void writeComment(String comment, StringBuilder out, String padding) {

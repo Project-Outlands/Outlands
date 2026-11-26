@@ -32,6 +32,10 @@ public final class YamlCodec implements IConfigCodec {
         StringBuilder out = new StringBuilder("# Configuration file\n");
 
         for (String categoryName : cfg.getCategoryNames()) {
+            // getCategoryNames() contains the children as well; writeCategory() recurses into them.
+            if (categoryName.contains(Configuration.CATEGORY_SPLITTER))
+                continue;
+
             ConfigCategory category = cfg.getCategory(categoryName);
             writeCategory(category, out, "");
         }
@@ -43,7 +47,7 @@ public final class YamlCodec implements IConfigCodec {
         if (out.length() > 0 && !out.toString().endsWith("\n\n"))
             out.append('\n');
 
-        out.append(indent).append(key(category.getQualifiedName())).append(":\n");
+        out.append(indent).append(key(category.getName())).append(":\n");
 
         for (Property property : category.getOrderedValues()) {
             writeComment(property.getComment(), out, indent + "  ");

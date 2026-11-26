@@ -8,8 +8,11 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.tomlj.Toml;
+import org.tomlj.TomlParseResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -121,6 +124,96 @@ class ConfigFormatsTest {
         assertEquals("false", property(reread, "client", "enabled").getString());
     }
 
+    /**
+     * A nested category is written by the parent's recursive pass. It must not also be written by the top-level
+     * loop: TOML rejects a table that is defined twice, so the old output could be saved but never loaded again.
+     */
+    @Test
+    void tomlNestedCategoriesAreWrittenOnce(@TempDir Path root) throws IOException {
+        File target = root.resolve("nested.toml").toFile();
+        Configuration cfg = new Configuration(target, Config.Format.TOML);
+        cfg.get("general", "count", 1).setValue("5");
+        cfg.get("general.advanced", "ratio", 0.25).setValue("0.25");
+        cfg.get("general.advanced", "name", "x").setValue("x");
+        cfg.save();
+
+        String text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+        TomlParseResult parsed = Toml.parse(text);
+        assertFalse(parsed.hasErrors(), () -> "saved TOML must parse: " + parsed.errors());
+        assertEquals(1, occurrences(text, "[general]"), text);
+        assertEquals(1, occurrences(text, "[general.advanced]"), text);
+
+        Configuration reread = new Configuration(target, Config.Format.TOML);
+        reread.load();
+        assertEquals(5, property(reread, "general", "count").getInt());
+        assertEquals(0.25, property(reread, "general.advanced", "ratio").getDouble(), 1e-9);
+        assertEquals("x", property(reread, "general.advanced", "name").getString());
+    }
+
+    /** Class-name lists used by the patcher are long; one element per line keeps the file editable. */
+    @Test
+    void tomlLongArraysAreWrittenOneElementPerLine(@TempDir Path root) throws IOException {
+        String[] names = new String[12];
+        for (int i = 0; i < names.length; i++)
+            names[i] = "some.long.package.Class" + i;
+
+        File target = root.resolve("arrays.toml").toFile();
+        Configuration cfg = new Configuration(target, Config.Format.TOML);
+        cfg.get("general", "names", names);
+        cfg.save();
+
+        String text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("names = [\n"), text);
+        assertTrue(text.contains("    \"some.long.package.Class0\",\n"), text);
+        TomlParseResult parsed = Toml.parse(text);
+        assertFalse(parsed.hasErrors(), () -> "saved TOML must parse: " + parsed.errors());
+
+        Configuration reread = new Configuration(target, Config.Format.TOML);
+        reread.load();
+        assertEquals(names.length, property(reread, "general", "names").getStringList().length);
+        assertEquals(names[names.length - 1], property(reread, "general", "names").getStringList()[names.length - 1]);
+    }
+
+    /** YAML nesting is indentation, so the child key is its simple name under the parent, not a dotted path. */
+    @Test
+    void yamlNestedCategoriesAreNestedNotDuplicated(@TempDir Path root) throws IOException {
+        File target = root.resolve("nested.yml").toFile();
+        Configuration cfg = new Configuration(target, Config.Format.YAML);
+        cfg.get("general", "count", 1).setValue("5");
+        cfg.get("general.advanced", "ratio", 0.25).setValue("0.25");
+        cfg.save();
+
+        String text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("  advanced:\n"), text);
+        assertFalse(text.contains("general.advanced"), text);
+        assertEquals(1, occurrences(text, "general:"), text);
+
+        Configuration reread = new Configuration(target, Config.Format.YAML);
+        reread.load();
+        assertEquals(5, property(reread, "general", "count").getInt());
+        assertEquals(0.25, property(reread, "general.advanced", "ratio").getDouble(), 1e-9);
+    }
+
+    /** The same rule in HOCON: nested objects use their simple name inside the parent block. */
+    @Test
+    void hoconNestedCategoriesAreNestedNotDuplicated(@TempDir Path root) throws IOException {
+        File target = root.resolve("nested.conf").toFile();
+        Configuration cfg = new Configuration(target, Config.Format.HOCON);
+        cfg.get("general", "count", 1).setValue("5");
+        cfg.get("general.advanced", "ratio", 0.25).setValue("0.25");
+        cfg.save();
+
+        String text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("advanced {\n"), text);
+        assertFalse(text.contains("general.advanced"), text);
+        assertEquals(1, occurrences(text, "general {"), text);
+
+        Configuration reread = new Configuration(target, Config.Format.HOCON);
+        reread.load();
+        assertEquals(5, property(reread, "general", "count").getInt());
+        assertEquals(0.25, property(reread, "general.advanced", "ratio").getDouble(), 1e-9);
+    }
+
     /** A property legitimately named with a dot must be quoted on the way out, or it would reread as a table. */
     @Test
     void tomlWritesDottedPropertyNamesQuoted(@TempDir Path root) throws IOException {
@@ -210,6 +303,30 @@ class ConfigFormatsTest {
         assertEquals(3, property(reread, "general", "count").getInt());
     }
 
+    /** HOCON has the same long-list problem as TOML, with one more level of indentation. */
+    @Test
+    void hoconLongArraysAreWrittenOneElementPerLine(@TempDir Path root) throws IOException {
+        String[] names = new String[12];
+        for (int i = 0; i < names.length; i++)
+            names[i] = "some.long.package.Class" + i;
+
+        File target = root.resolve("arrays.conf").toFile();
+        Configuration cfg = new Configuration(target, Config.Format.HOCON);
+        cfg.get("general", "names", names).setComment("A list long enough that it must not stay on one line.");
+        cfg.get("general", "short", new String[] { "a", "b" });
+        cfg.save();
+
+        String text = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("names = [\n"), text);
+        assertTrue(text.contains("        \"some.long.package.Class0\",\n"), text);
+        assertTrue(text.contains("short = [\"a\", \"b\"]"), text);
+
+        Configuration reread = new Configuration(target, Config.Format.HOCON);
+        reread.load();
+        assertEquals(names.length, property(reread, "general", "names").getStringList().length);
+        assertEquals(names[names.length - 1], property(reread, "general", "names").getStringList()[names.length - 1]);
+    }
+
     /**
      * HOCON can include other files and read the environment; dumping the parsed result would freeze those
      * substitutions into the file. So it is materialised once and then left alone.
@@ -257,5 +374,12 @@ class ConfigFormatsTest {
         Configuration reread = new Configuration(target);
         reread.load();
         assertEquals(5, property(reread, "general", "count").getInt());
+    }
+
+    private static int occurrences(String text, String needle) {
+        int count = 0;
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + needle.length()))
+            count++;
+        return count;
     }
 }

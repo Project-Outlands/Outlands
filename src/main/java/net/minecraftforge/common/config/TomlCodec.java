@@ -28,12 +28,20 @@ import net.minecraftforge.fml.common.FMLLog;
  */
 public final class TomlCodec implements IConfigCodec {
 
+    /** Long arrays are easier to scan one element per line; short ones stay on the property line. */
+    private static final int MAX_INLINE_ARRAY_LENGTH = 100;
+
     @Override
     public String write(Configuration cfg) {
         StringBuilder out = new StringBuilder();
         out.append("# Configuration file\n");
 
         for (String categoryName : cfg.getCategoryNames()) {
+            // getCategoryNames() contains the children as well; writeCategory() recurses into them. Writing every
+            // name here would emit each nested table twice, which TOML rejects as a duplicate definition.
+            if (categoryName.contains(Configuration.CATEGORY_SPLITTER))
+                continue;
+
             ConfigCategory category = cfg.getCategory(categoryName);
             if (category.getValues().isEmpty() && category.getChildren().isEmpty())
                 continue;
@@ -50,16 +58,10 @@ public final class TomlCodec implements IConfigCodec {
         for (Property property : category.getOrderedValues()) {
             writeComment(property.getComment(), out);
 
-            out.append(key(property.getName())).append(" = ");
+            String name = key(property.getName());
+            out.append(name).append(" = ");
             if (property.isList()) {
-                out.append('[');
-                String[] values = property.getSavedStringList();
-                for (int i = 0; i < values.length; i++) {
-                    if (i > 0)
-                        out.append(", ");
-                    out.append(value(property.getType(), values[i]));
-                }
-                out.append(']');
+                writeArray(name, property, out);
             } else {
                 out.append(value(property.getType(), property.getSavedString()));
             }
@@ -71,6 +73,27 @@ public final class TomlCodec implements IConfigCodec {
             out.append('[').append(categoryPath(child.getQualifiedName())).append("]\n");
             writeCategory(child, out);
         }
+    }
+
+    private static void writeArray(String key, Property property, StringBuilder out) {
+        String[] values = property.getSavedStringList();
+        StringBuilder inline = new StringBuilder(values.length * 8 + 2).append('[');
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0)
+                inline.append(", ");
+            inline.append(value(property.getType(), values[i]));
+        }
+        inline.append(']');
+
+        if (key.length() + 3 + inline.length() <= MAX_INLINE_ARRAY_LENGTH) {
+            out.append(inline);
+            return;
+        }
+
+        out.append("[\n");
+        for (String element : values)
+            out.append("    ").append(value(property.getType(), element)).append(",\n");
+        out.append(']');
     }
 
     private static void writeComment(String comment, StringBuilder out) {
