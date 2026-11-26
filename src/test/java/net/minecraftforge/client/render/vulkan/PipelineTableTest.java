@@ -1,6 +1,7 @@
 package net.minecraftforge.client.render.vulkan;
 
 import org.junit.jupiter.api.Test;
+import org.lwjgl.vulkan.VK10;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,6 +32,16 @@ class PipelineTableTest {
         assertEquals(org.lwjgl.vulkan.VK10.VK_BLEND_OP_SUBTRACT, VulkanPipeline.blendOp(GL_FUNC_SUBTRACT));
         assertEquals(org.lwjgl.vulkan.VK10.VK_BLEND_OP_REVERSE_SUBTRACT,
                 VulkanPipeline.blendOp(GL_FUNC_REVERSE_SUBTRACT));
+
+        // the four constant factors read glBlendColor, the four SRC1 factors are what glBlendFuncSeparate adds
+        assertEquals(VK10.VK_BLEND_FACTOR_CONSTANT_ALPHA, VulkanPipeline.blendFactor(32771));
+        assertEquals(VK10.VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA, VulkanPipeline.blendFactor(32772));
+        assertEquals(VK10.VK_BLEND_FACTOR_SRC1_COLOR, VulkanPipeline.blendFactor(35065));
+        assertEquals(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR, VulkanPipeline.blendFactor(35066));
+        assertEquals(VK10.VK_BLEND_FACTOR_SRC1_ALPHA, VulkanPipeline.blendFactor(34185));
+        assertEquals(VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA, VulkanPipeline.blendFactor(35067));
+        assertThrows(IllegalArgumentException.class, () -> VulkanPipeline.blendFactor(777),
+                "777 is not a GL blend factor; the recorder used to accept it and leave the crash for here");
 
         assertThrows(IllegalArgumentException.class, () -> VulkanPipeline.blendOp(32777),
                 "32777 is not a GL blend equation; it was listed as one until the table was corrected");

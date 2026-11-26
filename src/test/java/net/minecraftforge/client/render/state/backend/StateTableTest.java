@@ -37,13 +37,17 @@ class StateTableTest {
     @Test
     void everySpecBlendFactorIsAccepted() {
         FrameStateVk state = new FrameStateVk();
-        // ZERO, ONE, the eight source/destination factors, SRC_ALPHA_SATURATE and the four constants.
-        int[] all = {0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 32769, 32770, 32771, 32772};
+        // ZERO, ONE, the eight source/destination factors, SRC_ALPHA_SATURATE, the four constants, the four SRC1s.
+        // 777 is not one of them: the list used to run 768..777 as if the eight source/destination factors plus
+        // SRC_ALPHA_SATURATE filled that range, but the range is 768..776 and 777 is nothing at all.
+        int[] all = {0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776,
+                32769, 32770, 32771, 32772, 34185, 35065, 35066, 35067};
         for (int factor : all) {
             state.blendFunc(factor, factor);
             assertEquals(factor, state.blendSource(), "accepted: " + factor);
         }
         assertThrows(IllegalArgumentException.class, () -> state.blendFunc(1234, 1));
+        assertThrows(IllegalArgumentException.class, () -> state.blendFunc(777, 1));
     }
 
     @Test
