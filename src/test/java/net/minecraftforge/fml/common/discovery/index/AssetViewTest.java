@@ -30,9 +30,9 @@ class AssetViewTest {
         final File vanilla = jar(dir, "vanilla.jar", Map.of("assets/minecraft/textures/blocks/stone.png", "v"));
         final File mod = jar(dir, "mod.jar", Map.of("assets/minecraft/textures/blocks/stone.png", "m"));
 
-        final AssetView view = new AssetView(List.of(mod, vanilla));
+        final AssetView view = AssetView.archives(List.of(mod, vanilla));
 
-        assertEquals(mod, view.winner("assets/minecraft/textures/blocks/stone.png"));
+        assertEquals(mod, view.winner("assets/minecraft/textures/blocks/stone.png").file());
         assertArrayEquals("m".getBytes(StandardCharsets.UTF_8), view.read("assets/minecraft/textures/blocks/stone.png"));
     }
 
@@ -42,17 +42,17 @@ class AssetViewTest {
         final File mod = jar(dir, "mod.jar", Map.of("assets/minecraft/lang/en_us.lang", "m"));
         final File pack = jar(dir, "pack.zip", Map.of("assets/minecraft/lang/en_us.lang", "p"));
 
-        final AssetView view = new AssetView(List.of(vanilla, mod, pack));
+        final AssetView view = AssetView.archives(List.of(vanilla, mod, pack));
 
-        assertEquals(List.of(vanilla, mod, pack), view.layersOf("assets/minecraft/lang/en_us.lang"));
-        assertEquals(vanilla, view.winner("assets/minecraft/lang/en_us.lang"),
+        assertEquals(List.of(vanilla, mod, pack), view.layersOf("assets/minecraft/lang/en_us.lang").stream().map(AssetLayer::file).toList());
+        assertEquals(vanilla, view.winner("assets/minecraft/lang/en_us.lang").file(),
                 "the first layer is the winner; a caller that wants a pack to override puts it first");
     }
 
     @Test
     void aPathNoLayerHasIsNotAWinner(@TempDir Path dir) throws Exception {
         final File vanilla = jar(dir, "vanilla.jar", Map.of("assets/minecraft/textures/blocks/stone.png", "v"));
-        final AssetView view = new AssetView(List.of(vanilla));
+        final AssetView view = AssetView.archives(List.of(vanilla));
 
         assertNull(view.winner("assets/minecraft/textures/blocks/missing.png"));
         assertNull(view.read("assets/minecraft/textures/blocks/missing.png"));
@@ -65,9 +65,9 @@ class AssetViewTest {
         Files.writeString(broken.toPath(), "not a zip");
         final File mod = jar(dir, "mod.jar", Map.of("assets/x/y.png", "m"));
 
-        final AssetView view = new AssetView(List.of(broken, mod));
+        final AssetView view = AssetView.archives(List.of(broken, mod));
 
-        assertEquals(mod, view.winner("assets/x/y.png"));
+        assertEquals(mod, view.winner("assets/x/y.png").file());
     }
 
     @Test
