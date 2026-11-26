@@ -140,7 +140,8 @@ public class JarDiscoverer implements ITypeDiscoverer
                 if (failure instanceof LoaderException)
                 {
                     FMLLog.log.error("There was a problem reading the entry {} in the jar {} - probably a corrupt zip", entryName, candidate.getModContainer().getPath(), failure);
-                    jar.close();
+                    // the handle is the class loader's when it already had this jar, so it is the borrow that decides
+                    // whether anything gets closed, not this error path
                     throw (LoaderException) failure;
                 }
                 if (failure instanceof IOException)

@@ -542,13 +542,10 @@ public final class ModDiscoverer {
         } catch (IOException ioe) {
             FMLLog.log.error("Unable to read the jar file {} - ignoring", file.getName(), ioe);
             return;
-        } finally {
-            try {
-                if (jar != null) {
-                    jar.close();
-                }
-            } catch (IOException ignored) { }
         }
+        // No close here: when the jar declares access transformers the handle above is the class loader's own, taken
+        // from the process wide ArchiveSet, and this jar is added to the class path a few lines below. Closing it would
+        // close the class path entry the loader is about to use - the jar is the same file, so it is the same handle.
 
         try {
             addDeclaredLibrariesToClasspath(classLoader, file);
