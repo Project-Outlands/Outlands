@@ -23,12 +23,18 @@ public record JarFingerprint(long value, int classEntryCount) {
 
     /** Folds the entries selected by {@link ITypeDiscoverer#shouldScan}, in central directory order. */
     public static JarFingerprint compute(Collection<? extends ZipEntry> entries) {
+        return compute(java.util.Collections.enumeration(entries));
+    }
+
+    /** @see #compute(Collection) */
+    public static JarFingerprint compute(java.util.Enumeration<? extends ZipEntry> entries) {
         CRC32C crc32c = new CRC32C();
         CRC32 crc32 = new CRC32();
         ByteBuffer buffer = ByteBuffer.allocate(BUFFER_BYTES).order(ByteOrder.LITTLE_ENDIAN);
 
         int count = 0;
-        for (ZipEntry entry : entries) {
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
             String name = entry.getName();
             if (!ITypeDiscoverer.shouldScan(name)) {
                 continue;
