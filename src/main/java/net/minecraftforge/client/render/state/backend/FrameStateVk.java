@@ -1441,13 +1441,24 @@ final class FrameStateVk implements FrameState {
         };
     }
 
+    /**
+     * Rejects a value that is not a GL blend factor at the call that passed it, rather than keeping it in the recorded
+     * state for the pipeline table to trip over mid-frame.
+     *
+     * <p>The set is the one {@code glBlendFunc} and {@code glBlendFuncSeparate} accept, in full: the twelve core
+     * factors, the four constant ones (32769-32772, which read {@code glBlendColor}), and the four {@code SRC1}
+     * factors that only {@code glBlendFuncSeparate} allows. Immersive Intelligence draws its particle stages with
+     * {@code GL_ONE_MINUS_CONSTANT_ALPHA}, which this table used to reject.
+     *
+     * <p>777 sat in this list next to 776 ({@code GL_SRC_ALPHA_SATURATE}) for a while. It is not a GL blend factor,
+     * and the pipeline table has never translated it, so a mod that passed it got past the recorder and crashed at
+     * draw time instead of here.
+     */
     private static int blendFactor(int glFactor) {
         return switch (glFactor) {
-            // 32769..32772 are GL_CONSTANT_COLOR, GL_ONE_MINUS_CONSTANT_COLOR, GL_CONSTANT_ALPHA and
-            // GL_ONE_MINUS_CONSTANT_ALPHA - the factors that read glBlendColor. Immersive Intelligence's particle
-            // stages use the alpha ones, and this table used to reject them, which crashed the creative inventory
-            // the first time a gun with a particle effect was drawn.
-            case 0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 32769, 32770, 32771, 32772 -> glFactor;
+            case 0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776,
+                 32769, 32770, 32771, 32772,
+                 34185, 35065, 35066, 35067 -> glFactor;
             default -> throw new IllegalArgumentException("not a GL blend factor: " + glFactor);
         };
     }

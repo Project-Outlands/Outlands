@@ -24,6 +24,10 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_CONSTANT_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_SRC1_ALPHA;
+import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_SRC1_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_CONSTANT_COLOR;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
 import static org.lwjgl.vulkan.VK10.VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
@@ -587,7 +591,7 @@ final class VulkanPipeline implements AutoCloseable {
      * @throws IllegalArgumentException for a factor this renderer does not translate, rather than silently
      *                                  substituting one, which would show up as a wrong picture
      */
-    private static int blendFactor(int glFactor) {
+    static int blendFactor(int glFactor) {
         return switch (glFactor) {
             case 0 -> VK_BLEND_FACTOR_ZERO;                              // GL_ZERO
             case 1 -> VK_BLEND_FACTOR_ONE;                               // GL_ONE
@@ -606,6 +610,13 @@ final class VulkanPipeline implements AutoCloseable {
             case 32770 -> VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;      // GL_ONE_MINUS_CONSTANT_COLOR
             case 32771 -> VK_BLEND_FACTOR_CONSTANT_ALPHA;                // GL_CONSTANT_ALPHA
             case 32772 -> VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;      // GL_ONE_MINUS_CONSTANT_ALPHA
+            // The SRC1 family: glBlendFuncSeparate accepts it with EXT_blend_func_extended, and Vulkan names the same
+            // four factors. 34185 is GL_SRC1_ALPHA, which LWJGL does not expose under that name because it shares its
+            // value with an older header's alias.
+            case 35065 -> VK_BLEND_FACTOR_SRC1_COLOR;                    // GL_SRC1_COLOR
+            case 35066 -> VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;          // GL_ONE_MINUS_SRC1_COLOR
+            case 34185 -> VK_BLEND_FACTOR_SRC1_ALPHA;                    // GL_SRC1_ALPHA
+            case 35067 -> VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;          // GL_ONE_MINUS_SRC1_ALPHA
             default -> throw new IllegalArgumentException("blend factor " + glFactor + " is not translated");
         };
     }

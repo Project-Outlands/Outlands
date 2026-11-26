@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.FloatBuffer;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -181,7 +182,25 @@ class FrameStateVkTest {
         assertThrows(IllegalArgumentException.class, () -> state.matrixMode(1234));
         assertThrows(IllegalArgumentException.class, () -> state.depthFunc(1234));
         assertThrows(IllegalArgumentException.class, () -> state.blendFunc(1234, 1));
+        assertThrows(IllegalArgumentException.class, () -> state.blendFunc(777, 1),
+                "777 is not a GL blend factor; it sat next to 776 (GL_SRC_ALPHA_SATURATE) in this table and let a "
+                        + "value through that the pipeline could not translate");
         assertThrows(IllegalArgumentException.class, () -> state.polygonMode(1029, 1234));
+    }
+
+    @Test
+    void theWholeGlBlendFactorSetIsAccepted() {
+        // the factors the game and mods actually use: the core set, the constant set that reads glBlendColor, and the
+        // SRC1 set that only glBlendFuncSeparate allows
+        FrameStateVk state = new FrameStateVk();
+        for (int factor : new int[] {0, 1, 768, 769, 770, 771, 772, 773, 774, 775, 776,
+                32769, 32770, 32771, 32772, 34185, 35065, 35066, 35067}) {
+            state.blendFunc(factor, 771);
+            assertEquals(factor, state.blendSource(), "GL factor " + factor);
+        }
+
+        state.blendFuncSeparate(35065, 35066, 34185, 35067);
+        assertArrayEquals(new int[] {35065, 35066, 34185, 35067}, state.blendFactors());
     }
 
     @Test
