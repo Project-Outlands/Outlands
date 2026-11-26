@@ -239,7 +239,7 @@ public final class LoadIndex {
 
     /** @return a view over the current search order, which is the class path and not the resource pack stack */
     public AssetView assets() {
-        return new AssetView(order);
+        return AssetView.archives(order);
     }
 
     /**
@@ -247,7 +247,7 @@ public final class LoadIndex {
      * @return a view over exactly those layers
      */
     public AssetView assets(List<File> layers) {
-        return new AssetView(layers);
+        return AssetView.archives(layers);
     }
 
     /**
