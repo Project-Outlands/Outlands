@@ -29,6 +29,15 @@ public interface AssetLayer {
         return new ArchiveLayer(jar);
     }
 
+    static AssetLayer directory(File dir) {
+        return new DirectoryLayer(dir);
+    }
+
+    /** @return a layer for whichever of the two {@code source} is; a development run's mods are directories */
+    static AssetLayer of(File source) {
+        return source.isDirectory() ? directory(source) : archive(source);
+    }
+
     static AssetLayer objects(AssetObjects objects) {
         return new ObjectsLayer(objects);
     }
@@ -68,9 +77,72 @@ final class ArchiveLayer implements AssetLayer {
     public byte[] read(String path) throws IOException {
         try (BorrowedArchive archive = BorrowedArchive.of(jar, false)) {
             return archive.index().read(archive.index().find(path));
-        } catch (RuntimeException e) {
-            throw new IOException("Could not read " + path + " from " + jar, e);
+        } catch (IOException | RuntimeException e) {
+            // unreadable is a miss, exactly what has() answers for the same layer: one broken jar in a stack must not
+            // take the query down when the next layer may well have the file
+            return null;
         }
+    }
+
+    @Override
+    public String toString() {
+        return describe();
+    }
+}
+
+/** A directory that holds {@code assets/} or {@code data/} at its root, which is how a development run ships them. */
+final class DirectoryLayer implements AssetLayer {
+
+    private final File dir;
+
+    DirectoryLayer(File dir) {
+        this.dir = Objects.requireNonNull(dir, "dir").getAbsoluteFile();
+    }
+
+    @Override
+    public String describe() {
+        return dir.getName() + "/";
+    }
+
+    @Override
+    public File file() {
+        return dir;
+    }
+
+    @Override
+    public boolean has(String path) {
+        return resolve(path) != null;
+    }
+
+    @Override
+    @Nullable
+    public byte[] read(String path) throws IOException {
+        final java.nio.file.Path file = resolve(path);
+        if (file == null) {
+            return null;
+        }
+        try {
+            return java.nio.file.Files.readAllBytes(file);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * @return the file under this directory, or null when it is not there
+     */
+    @Nullable
+    private java.nio.file.Path resolve(String path) {
+        if (path.isEmpty() || path.indexOf('\0') >= 0) {
+            return null;
+        }
+        final java.nio.file.Path root = dir.toPath().normalize();
+        final java.nio.file.Path file = root.resolve(path).normalize();
+        // a path in an archive cannot walk out of it, and one asked for here must not either
+        if (!file.startsWith(root) || !java.nio.file.Files.isRegularFile(file)) {
+            return null;
+        }
+        return file;
     }
 
     @Override

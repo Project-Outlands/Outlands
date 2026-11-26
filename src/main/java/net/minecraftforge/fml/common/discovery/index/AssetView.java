@@ -38,7 +38,7 @@ public final class AssetView {
     public static AssetView archives(List<File> archives) {
         final List<AssetLayer> wrapped = new ArrayList<>(archives.size());
         for (File archive : archives) {
-            wrapped.add(AssetLayer.archive(archive));
+            wrapped.add(AssetLayer.of(archive));
         }
         return new AssetView(wrapped, true);
     }
@@ -53,7 +53,7 @@ public final class AssetView {
      */
     public static AssetView vanilla(File jar, AssetObjects objects) {
         return objects.available()
-                ? AssetView.of(List.of(AssetLayer.objects(objects), AssetLayer.archive(jar)))
+                ? AssetView.of(List.of(AssetLayer.objects(objects), AssetLayer.of(jar)))
                 : AssetView.archives(List.of(jar));
     }
 
