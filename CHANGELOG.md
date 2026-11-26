@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.26-2] - 2026-11-26
+
+### 🐛 Bug Fixes
+
+- [`35a05ed`](https://github.com/Project-Outlands/Outlands/commit/35a05eda4d56149c7deee5170f3a150f1f256d65) - Stop closing the class loader's jar handle from discovery *(PR [#79](https://github.com/Project-Outlands/Outlands/pull/79) by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.26] - 2026-11-26
 
 ### 🐛 Bug Fixes
