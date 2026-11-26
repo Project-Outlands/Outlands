@@ -21,6 +21,9 @@ import net.minecraftforge.fml.common.discovery.cache.MemberFile;
 import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 
+import top.outlands.foundation.boot.ArchiveIndex;
+import top.outlands.foundation.boot.ArchiveSet;
+
 /**
  * Answers questions about any loaded archive's classes without loading them: {@code classInfo} resolves a name
  * through the archives in class path order, so the answer is the class the class loader would define, and
@@ -230,6 +233,74 @@ public final class LoadIndex {
         final Map<String, MemberRecord[]> table = memberTableOf(origin);
         final MemberRecord[] members = table == null ? null : table.get(internalName);
         return members == null ? NO_MEMBERS : members;
+    }
+
+    // ---- 资源：同一个 L0，按层序回答"玩家看到的是哪一份" ----
+
+    /** @return a view over the current search order, which is the class path and not the resource pack stack */
+    public AssetView assets() {
+        return new AssetView(order);
+    }
+
+    /**
+     * @param layers the order to resolve in, first wins
+     * @return a view over exactly those layers
+     */
+    public AssetView assets(List<File> layers) {
+        return new AssetView(layers);
+    }
+
+    /**
+     * Calls {@code sink} with every entry under {@code pathPrefix}, archive by archive, in search order.
+     *
+     * <p>This is the enumeration a class graph library pays for by opening every jar it was pointed at; here the
+     * archives are the ones the class loader already has open, so a full pass costs one walk of each central
+     * directory and nothing else.
+     *
+     * @param classesOnly whether to skip everything that is not a class file
+     * @return how many entries matched
+     */
+    public int scan(String pathPrefix, boolean classesOnly, EntrySink sink) {
+        int found = 0;
+        for (File archive : order) {
+            // a scan enumerates; it does not look anything up, so an archive the class loader does not have is opened
+            // for its entry list and closed again rather than indexed (the index would walk the entries a second time
+            // to build the package table)
+            final ArchiveIndex shared = ArchiveSet.classPath().of(archive.toPath());
+            if (shared != null) {
+                found += scan(archive, shared.jarFile(), pathPrefix, classesOnly, sink);
+                continue;
+            }
+            try (java.util.jar.JarFile jar = new java.util.jar.JarFile(archive, false)) {
+                found += scan(archive, jar, pathPrefix, classesOnly, sink);
+            } catch (IOException | RuntimeException e) {
+                FMLLog.log.debug("Could not scan {}", archive, e);
+            }
+        }
+        return found;
+    }
+
+    private static int scan(File archive, java.util.jar.JarFile jar, String pathPrefix, boolean classesOnly,
+            EntrySink sink) {
+        int found = 0;
+        for (java.util.jar.JarEntry entry : Collections.list(jar.entries())) {
+            final String name = entry.getName();
+            if (!name.startsWith(pathPrefix) || name.endsWith("/")) {
+                continue;
+            }
+            if (classesOnly && !name.endsWith(".class")) {
+                continue;
+            }
+            sink.accept(archive, name);
+            found++;
+        }
+        return found;
+    }
+
+    /** Receives one entry of a scan: the archive it is in and its path inside it. */
+    @FunctionalInterface
+    public interface EntrySink {
+        void accept(File archive, String name);
     }
 
     // ---- 名字视图：SRG 是索引里的名字，MCP 是查询时的投影 ----
