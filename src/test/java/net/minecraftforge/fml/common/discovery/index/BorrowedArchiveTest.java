@@ -56,6 +56,23 @@ class BorrowedArchiveTest {
         assertThrows(IllegalStateException.class, handle::size, "the private handle is this reader's to close");
     }
 
+    @Test
+    void aJarThatIsRetainedIsTheOneTheClassPathWillUse(@TempDir Path dir) throws Exception {
+        // this is the jar of a coremod that declares access transformers: it is retained by the transformer before the
+        // jar is added to the class loader, and the class loader must then find it already open. Closing the retained
+        // handle closed the class path entry with it, which is a launch crash rather than a leak.
+        final Path jar = jar(dir, "coremod-with-at.jar");
+
+        final java.util.jar.JarFile retained = BorrowedArchive.retained(jar.toFile()).jarFile();
+        assertSame(java.util.jar.JarFile.class, retained.getClass());
+
+        final ClassPathIndex classPath = new ClassPathIndex(new java.net.URL[] {jar.toUri().toURL()}, new ArchiveSet());
+        assertEquals("b", new String((byte[]) classPath.read("a/B.class"), StandardCharsets.UTF_8),
+                "the jar is still readable after the transformer took it");
+        assertSame(ArchiveSet.classPath().of(jar).jarFile(), retained,
+                "and the class path is reading through the very handle the transformer holds");
+    }
+
     private static Path jar(Path dir, String name) throws IOException {
         final Path file = dir.resolve(name);
         try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(file))) {
