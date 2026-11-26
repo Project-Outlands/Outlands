@@ -138,6 +138,11 @@ public final class Mappings {
         return Optional.ofNullable(srgToMcp.get(srgName));
     }
 
+    /** @return the MCP name, or null when there is none; the same answer as {@link #mcpNameOf} without an Optional */
+    public String mcpNameOrNull(String srgName) {
+        return srgToMcp.get(srgName);
+    }
+
     /**
      * Records, once, that a name could not be resolved because there is no table. The alternative is a warning per
      * lookup, which on a script that resolves thousands of names is a log nobody can read.
