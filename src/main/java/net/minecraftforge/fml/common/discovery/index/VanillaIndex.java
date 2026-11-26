@@ -48,9 +48,9 @@ final class VanillaIndex {
 
     /** @return whether {@code archive} is the minecraft jar, wherever its classes come from */
     static boolean looksLikeMinecraftJar(File archive) {
-        try (ZipFile zip = new ZipFile(archive)) {
+        try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
             for (String marker : MARKERS) {
-                if (zip.getEntry(marker) != null) {
+                if (borrow.jar().getEntry(marker) != null) {
                     return true;
                 }
             }
@@ -71,7 +71,8 @@ final class VanillaIndex {
         final List<Integer> indices = new ArrayList<>();
         final List<ClassScanRecord> records = new ArrayList<>();
         final Map<String, MemberRecord[]> members = new HashMap<>();
-        try (ZipFile zip = new ZipFile(archive)) {
+        try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
+            final java.util.jar.JarFile zip = borrow.jar();
             int ordinal = -1;
             for (ZipEntry entry : Collections.list(zip.entries())) {
                 entries.add(entry);

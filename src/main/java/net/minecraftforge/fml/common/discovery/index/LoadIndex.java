@@ -389,8 +389,9 @@ public final class LoadIndex {
 
     @Nullable
     private JarFingerprint fingerprintOf(File archive) {
-        try (JarFile jar = new JarFile(archive, false)) {
-            return JarFingerprint.compute(Collections.list(jar.entries()));
+        // the class loader already has most of these open; asking it first is what keeps this a read, not a reopen
+        try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
+            return JarFingerprint.compute(Collections.list(borrow.jar().entries()));
         } catch (IOException | RuntimeException e) {
             FMLLog.log.debug("Could not fingerprint {}", archive, e);
             return null;

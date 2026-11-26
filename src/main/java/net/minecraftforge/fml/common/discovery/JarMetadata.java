@@ -15,6 +15,7 @@ import javax.annotation.Nullable;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.LoaderException;
 import net.minecraftforge.fml.common.MetadataCollection;
+import net.minecraftforge.fml.common.discovery.index.BorrowedArchive;
 
 /**
  * One jar's {@code mcmod.info}, read once per launch.
@@ -74,8 +75,8 @@ public final class JarMetadata {
             return known;
         }
         return BY_FILE.computeIfAbsent(absolute, key -> {
-            try (JarFile jar = new JarFile(key)) {
-                return new JarMetadata(key.getName(), readEntry(jar));
+            try (BorrowedArchive borrow = BorrowedArchive.of(key)) {
+                return new JarMetadata(key.getName(), readEntry(borrow.jar()));
             } catch (IOException e) {
                 FMLLog.log.debug("Could not read the mcmod.info of {}", key.getName(), e);
                 return new JarMetadata(key.getName(), null);

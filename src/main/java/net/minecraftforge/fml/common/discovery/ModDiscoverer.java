@@ -40,6 +40,7 @@ import net.minecraftforge.fml.common.asm.transformers.ModAccessTransformer;
 import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
+import net.minecraftforge.fml.common.discovery.index.BorrowedArchive;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.discovery.cache.MemberFile;
@@ -339,7 +340,8 @@ public final class ModDiscoverer {
         boolean modernMetadata = false;
         boolean hasMixinManifestAttributes = false, mixinTweakerForceMod = false, coreModContainsMod = false;
 
-        try (JarFile jarFile = new JarFile(absolute)) {
+        try (BorrowedArchive borrow = BorrowedArchive.of(absolute)) {
+            JarFile jarFile = borrow.jar();
             attributes = readManifestAttributes(absolute, jarFile);
             if (attributes != null) {
                 modType = attributes.getValue(ManifestAttributes.MODTYPE);
@@ -496,7 +498,8 @@ public final class ModDiscoverer {
             if (!accessTransformers.isEmpty()) {
                 // addJar takes the space-separated form the manifest key had; joining keeps one implementation of "which
                 // files are this jar's access transformers" for both sources.
-                jar = new JarFile(file);
+                // the transformer keeps this handle for the life of the process, so it is the shared one
+                jar = BorrowedArchive.retained(file).jarFile();
                 ModAccessTransformer.addJar(jar, String.join(" ", accessTransformers));
             }
 

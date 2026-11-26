@@ -42,6 +42,7 @@ import net.minecraftforge.fml.common.DeclarativeModContainer;
 import net.minecraftforge.fml.common.ModMetadata;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.index.BorrowedArchive;
 import net.minecraftforge.fml.common.discovery.index.LoadIndex;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
 import net.minecraftforge.fml.common.discovery.cache.MemberFile;
@@ -65,8 +66,9 @@ public class JarDiscoverer implements ITypeDiscoverer
     {
         List<ModContainer> foundMods = Lists.newArrayList();
         FMLLog.log.debug("Examining file {} for potential mods", candidate.getModContainer().getName());
-        try (JarFile jar = new JarFile(candidate.getModContainer()))
+        try (BorrowedArchive borrow = BorrowedArchive.of(candidate.getModContainer()))
         {
+            JarFile jar = borrow.jar();
             // Parsed by the discovery phase already; the fallback goes through the same shared read, for the jars it
             // did not look at at all.
             MetadataCollection mc = candidate.getMetadata();
