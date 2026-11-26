@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.26-3] - 2026-11-26
+
+### 🐛 Bug Fixes
+
+- [`0b67b17`](https://github.com/Project-Outlands/Outlands/commit/0b67b172f414c871a64a0a2aae137bdef082e179) - DeobfuscationTransformer crash EnderIO *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.26-2] - 2026-11-26
 
 ### 🐛 Bug Fixes
