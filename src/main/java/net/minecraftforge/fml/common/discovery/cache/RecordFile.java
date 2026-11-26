@@ -43,7 +43,7 @@ import com.google.common.collect.Maps;
 public final class RecordFile {
 
     /** Bump when what is collected, the name conventions, or the payload meaning change (ASM upgrades included). */
-    public static final int CACHE_REV = 1;
+    public static final int CACHE_REV = 2;
 
     private static final int MAGIC = 0x4353; // 'C''S'
     private static final String CACHE_DIR = "mods/.cache/outlands-scan";
@@ -235,6 +235,12 @@ public final class RecordFile {
     private static void writeRecord(DataOutputStream out, Pool pool, ClassScanRecord record) throws IOException {
         writeVInt(out, pool.intern(record.internalName()));
         writeVInt(out, record.classVersion());
+        writeVInt(out, record.access());
+        String superName = record.superName();
+        out.writeBoolean(superName != null);
+        if (superName != null) {
+            writeVInt(out, pool.intern(superName));
+        }
         String[] interfaces = record.interfaces();
         writeVInt(out, interfaces.length);
         for (String intf : interfaces) {
@@ -440,6 +446,8 @@ public final class RecordFile {
     private static ClassScanRecord readRecord(DataInputStream data, String[] pool) throws IOException {
         String internalName = pool[readVInt(data)];
         int classVersion = readVInt(data);
+        int access = readVInt(data);
+        String superName = data.readBoolean() ? pool[readVInt(data)] : null;
         String[] interfaces = new String[readVInt(data)];
         for (int i = 0; i < interfaces.length; i++) {
             interfaces[i] = pool[readVInt(data)];
@@ -464,7 +472,7 @@ public final class RecordFile {
             }
             annotations[i] = new ClassScanRecord.Annotation(name, member, values);
         }
-        return new ClassScanRecord(internalName, classVersion, interfaces, annotations);
+        return new ClassScanRecord(internalName, classVersion, superName, access, interfaces, annotations);
     }
 
     @Nullable

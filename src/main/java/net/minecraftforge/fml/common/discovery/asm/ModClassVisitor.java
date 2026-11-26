@@ -39,7 +39,7 @@ public class ModClassVisitor extends ClassVisitor
     @Override
     public void visit(int version, int access, String name, String signature, String superName, String[] interfaces)
     {
-        discoverer.beginNewTypeName(name, version, superName, interfaces);
+        discoverer.beginNewTypeName(name, version, access, superName, interfaces);
     }
 
     @Override
@@ -53,12 +53,14 @@ public class ModClassVisitor extends ClassVisitor
     @Override
     public FieldVisitor visitField(int access, String name, String desc, String signature, Object value)
     {
+        discoverer.addMember(name, desc, access, false);
         return new ModFieldVisitor(name, discoverer);
     }
 
     @Override
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
     {
+        discoverer.addMember(name, desc, access, true);
         return new ModMethodVisitor(name, desc, discoverer);
     }
 }

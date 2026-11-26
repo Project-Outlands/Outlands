@@ -63,14 +63,13 @@ public class JarScanCacheTest {
                 ASMModParser parser = parsed.get(ordinal).parser();
                 assertNotNull(parser, "sample jar is built from compiled classes");
                 parser.validate();
-                ClassScanRecord record = parser.toRecord();
-                if (JarScanRecord.hasContent(record)) {
-                    indices.add(ordinal);
-                    records.add(record);
-                }
+                indices.add(ordinal);
+                records.add(parser.toRecord());
             }
-            // interfaces alone are enough for a record to be stored, so the corpus must produce some
-            assertFalse(records.isEmpty(), "corpus should contain annotated classes or interfaces");
+            // every scanned class is recorded, whether or not it has annotations or interfaces
+            assertEquals(scanned.size(), records.size(), "every scanned class must be recorded");
+            assertTrue(records.stream().anyMatch(ClassScanRecord::hasContent),
+                    "corpus should contain annotated classes or interfaces");
         }
 
         File cacheFile = RecordFile.fileFor(gameDir, jar);
@@ -160,7 +159,8 @@ public class JarScanCacheTest {
 
     /** Deterministic rendering of a record; annotation value maps are ordered by key. */
     private static String describe(ClassScanRecord record) {
-        StringBuilder out = new StringBuilder(record.internalName()).append('|').append(record.classVersion());
+        StringBuilder out = new StringBuilder(record.internalName()).append('|').append(record.classVersion())
+                .append('|').append(record.superName()).append('|').append(record.access());
         for (String intf : record.interfaces()) {
             out.append("|i:").append(intf);
         }

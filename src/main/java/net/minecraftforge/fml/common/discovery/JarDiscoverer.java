@@ -42,7 +42,11 @@ import net.minecraftforge.fml.common.DeclarativeModContainer;
 import net.minecraftforge.fml.common.ModMetadata;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
+import net.minecraftforge.fml.common.discovery.index.BorrowedArchive;
+import net.minecraftforge.fml.common.discovery.index.LoadIndex;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.discovery.json.JsonAnnotationLoader;
 
 import java.util.Map;
@@ -62,8 +66,9 @@ public class JarDiscoverer implements ITypeDiscoverer
     {
         List<ModContainer> foundMods = Lists.newArrayList();
         FMLLog.log.debug("Examining file {} for potential mods", candidate.getModContainer().getName());
-        try (JarFile jar = new JarFile(candidate.getModContainer()))
+        try (BorrowedArchive borrow = BorrowedArchive.of(candidate.getModContainer()))
         {
+            JarFile jar = borrow.jar();
             // Parsed by the discovery phase already; the fallback goes through the same shared read, for the jars it
             // did not look at at all.
             MetadataCollection mc = candidate.getMetadata();
@@ -97,6 +102,7 @@ public class JarDiscoverer implements ITypeDiscoverer
         JarScanRecord scan = candidate.getScanRecord();
         if (scan != null)
         {
+            LoadIndex.registerIfActive(candidate.getModContainer(), scan);
             replayScan(scan, candidate, table, jar, foundMods, mc);
             if (!scan.fromDisk())
             {
@@ -121,6 +127,7 @@ public class JarDiscoverer implements ITypeDiscoverer
         boolean cacheable = cacheFile != null;
         List<Integer> indices = Lists.newArrayList();
         List<ClassScanRecord> records = Lists.newArrayList();
+        Map<String, MemberRecord[]> members = new java.util.HashMap<>();
 
         for (int ordinal = 0; ordinal < scanned.size(); ordinal++)
         {
@@ -148,12 +155,11 @@ public class JarDiscoverer implements ITypeDiscoverer
             modParser.sendToTable(table, candidate);
             if (cacheable)
             {
-                ClassScanRecord record = modParser.toRecord();
-                if (JarScanRecord.hasContent(record))
-                {
-                    indices.add(ordinal);
-                    records.add(record);
-                }
+                // every scanned class is recorded, not only the ones with annotations: the index answers
+                // questions about plain classes as well
+                indices.add(ordinal);
+                records.add(modParser.toRecord());
+                members.put(modParser.internalName(), modParser.toMembers());
             }
             ModContainer container = ModContainerFactory.instance().build(modParser, candidate.getModContainer(), candidate);
             addContainer(container, table, foundMods, mc, modParser.getClassVersion());
@@ -163,7 +169,10 @@ public class JarDiscoverer implements ITypeDiscoverer
         {
             // Fresh scan for this jar; the fingerprint covers the entries it was taken from.
             scan = JarScanRecord.of(JarFingerprint.compute(entries), indices, records);
+            LoadIndex.registerIfActive(candidate.getModContainer(), scan);
             RecordFile.write(cacheFile, scan);
+            MemberFile.write(MemberFile.fileFor(Launch.minecraftHome, candidate.getModContainer()),
+                    scan.fingerprint(), members);
         }
     }
 
@@ -190,9 +199,12 @@ public class JarDiscoverer implements ITypeDiscoverer
             if (next < indices.length && indices[next] == ordinal)
             {
                 ClassScanRecord record = records[next++];
-                record.sendToTable(candidate, table);
-                ModContainer container = ModContainerFactory.instance().build(record, candidate.getModContainer(), candidate);
-                addContainer(container, table, foundMods, mc, record.classVersion());
+                if (record.hasContent())
+                {
+                    record.sendToTable(candidate, table);
+                    ModContainer container = ModContainerFactory.instance().build(record, candidate.getModContainer(), candidate);
+                    addContainer(container, table, foundMods, mc, record.classVersion());
+                }
             }
         }
     }

@@ -22,6 +22,7 @@ package net.minecraftforge.fml.common.discovery.asm;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.List;
 import java.util.LinkedList;
 import java.util.Set;
 
@@ -30,6 +31,7 @@ import net.minecraftforge.fml.common.LoaderException;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
@@ -43,9 +45,12 @@ public class ASMModParser
 {
     private Type asmType;
     private int classVersion;
+    private int classAccess;
     private Type asmSuperType;
     private final LinkedList<ModAnnotation> annotations = Lists.newLinkedList();
     private final Set<String> interfaces = Sets.newHashSet();
+    /** The members as the class file declares them; the parse already walks them, keeping them is what costs. */
+    private final List<MemberRecord> members = Lists.newArrayList();
 
     public enum AnnotationType
     {
@@ -66,10 +71,29 @@ public class ASMModParser
         }
     }
 
-    public void beginNewTypeName(String typeQName, int classVersion, String superClassQName, String[] interfaces)
+    /** Records one member of the class being parsed. */
+    public void addMember(String name, String descriptor, int access, boolean method)
+    {
+        members.add(new MemberRecord(name, descriptor, access, method));
+    }
+
+    /** @return the internal name of the class, once its header has been visited */
+    public String internalName()
+    {
+        return asmType.getInternalName();
+    }
+
+    /** @return the members this parse saw */
+    public MemberRecord[] toMembers()
+    {
+        return members.toArray(new MemberRecord[0]);
+    }
+
+    public void beginNewTypeName(String typeQName, int classVersion, int classAccess, String superClassQName, String[] interfaces)
     {
         this.asmType = Type.getObjectType(typeQName);
         this.classVersion = classVersion;
+        this.classAccess = classAccess;
         this.asmSuperType = !Strings.isNullOrEmpty(superClassQName) ? Type.getObjectType(superClassQName) : null;
         this.interfaces.addAll(Arrays.asList(interfaces));
     }
@@ -193,6 +217,8 @@ public class ASMModParser
         return new ClassScanRecord(
                 asmType.getInternalName(),
                 classVersion,
+                asmSuperType == null ? null : asmSuperType.getInternalName(),
+                classAccess,
                 interfaces.toArray(new String[0]),
                 collected);
     }
