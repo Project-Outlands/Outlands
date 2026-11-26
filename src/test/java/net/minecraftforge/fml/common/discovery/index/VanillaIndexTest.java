@@ -76,7 +76,9 @@ class VanillaIndexTest {
         final File obfuscated = jar(new File(mods, "obf.jar").toPath(), minecraftClasses());
 
         final LoadIndex index = new LoadIndex(gameDir, List.of(obfuscated));
+        assertNull(index.vanillaArchive(), "nothing is vanilla until the marker is found");
         assertTrue(index.indexMinecraftJar(MAPPER, "salt"));
+        assertEquals(obfuscated, index.vanillaArchive(), "and the archive is remembered, for the asset view");
 
         final ClassScanRecord alpha = index.classInfo("net/minecraft/Alpha");
         assertNotNull(alpha, "the mapped name must be the one a query uses");

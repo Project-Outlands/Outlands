@@ -40,6 +40,7 @@ public class Main {
         }
 
         List<String> cleanArgs = parseArgs(args);
+        captureAssetPaths(cleanArgs);
 
         StringBuilder b = new StringBuilder();
         b.append('[');
@@ -106,6 +107,23 @@ public class Main {
         lst.addAll(extras);
 
         return lst;
+    }
+
+    /**
+     * Keeps the two paths the asset lookup needs, before the game is started: the launcher passes where the downloaded
+     * objects live and which index names them, and nothing else in the loader can see either one.
+     */
+    private static void captureAssetPaths(List<String> args) {
+        for (int i = 0; i + 1 < args.size(); i++) {
+            final String arg = args.get(i);
+            if ("--assetsDir".equals(arg) && System.getProperty("outlands.assets.dir") == null) {
+                System.setProperty("outlands.assets.dir", args.get(i + 1));
+                LOGGER.info("Assets directory: " + args.get(i + 1));
+            } else if ("--assetIndex".equals(arg) && System.getProperty("outlands.assets.index") == null) {
+                System.setProperty("outlands.assets.index", args.get(i + 1));
+                LOGGER.info("Asset index: " + args.get(i + 1));
+            }
+        }
     }
 
     protected String getenv(String name) {

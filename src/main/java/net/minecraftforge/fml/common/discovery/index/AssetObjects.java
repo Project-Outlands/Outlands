@@ -54,6 +54,15 @@ public final class AssetObjects {
      * @param assetsDir the launcher's {@code assets} directory, or null when it is not known
      * @return the table it holds, or {@link #absent()} when there is nothing readable there
      */
+    /**
+     * @return the table for the paths the launcher passed, which {@code net.minecraftforge.boot.Main} keeps before the
+     *         game starts; an absent directory or index is an empty table, as everywhere else here
+     */
+    public static AssetObjects fromLauncher() {
+        final String dir = System.getProperty("outlands.assets.dir");
+        return open(dir == null || dir.isBlank() ? null : Path.of(dir));
+    }
+
     public static AssetObjects open(@Nullable Path assetsDir) {
         final String configured = System.getProperty("outlands.assets.index");
         return open(assetsDir, configured == null || configured.isBlank() ? DEFAULT_INDEX : configured);

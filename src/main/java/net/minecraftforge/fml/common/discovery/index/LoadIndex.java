@@ -81,6 +81,11 @@ public final class LoadIndex {
     @Nullable
     private Mappings mappingTable;
 
+    /** Set when the minecraft jar is identified, so the asset view knows which archive is vanilla. */
+    private volatile File vanillaArchive;
+    /** Built once per index; vanilla's asset answer does not change while the process runs. */
+    private volatile AssetView vanillaAssets;
+
     public LoadIndex(File gameDir, List<File> order) {
         this(gameDir, () -> order);
         this.order = List.copyOf(order);
@@ -146,10 +151,39 @@ public final class LoadIndex {
             final JarScanRecord scan = scanWithCache(archive, naming, salt);
             if (scan != null) {
                 register(archive, scan);
+                vanillaArchive = archive.getAbsoluteFile();
+                vanillaAssets = null;
                 return true;
             }
         }
         return false;
+    }
+
+    /** @return the archive the minecraft classes were read from, or null when this run did not identify one */
+    @Nullable
+    public File vanillaArchive() {
+        return vanillaArchive;
+    }
+
+    /**
+     * @return vanilla's assets as one view, the downloaded objects first and the jar second, in the order the game
+     *         reads them; empty when neither half is known
+     */
+    public AssetView vanillaAssets() {
+        AssetView known = vanillaAssets;
+        if (known != null) {
+            return known;
+        }
+        final AssetObjects objects = AssetObjects.fromLauncher();
+        final File jar = vanillaArchive;
+        if (jar == null) {
+            // without the jar the downloaded half still answers for the sounds and languages it names
+            known = objects.available() ? AssetView.of(List.of(AssetLayer.objects(objects))) : AssetView.NONE;
+        } else {
+            known = AssetView.vanilla(jar, objects);
+        }
+        vanillaAssets = known;
+        return known;
     }
 
     @Nullable
