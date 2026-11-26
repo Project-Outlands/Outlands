@@ -25,8 +25,25 @@ public interface AssetLayer {
     @Nullable
     byte[] read(String path) throws IOException;
 
+    /** @return whether the file behind this layer changed since it was read; only a layer that owns a handle can say */
+    default boolean stale() {
+        return false;
+    }
+
+    /** Releases whatever this layer opened. A layer that borrows the class loader's handle releases nothing. */
+    default void close() {
+    }
+
     static AssetLayer archive(File jar) {
         return new ArchiveLayer(jar);
+    }
+
+    /**
+     * @return a layer that opens the archive itself and keeps it open until {@link #close()}, for a file the class
+     *         loader does not have - a resource pack, in other words
+     */
+    static AssetLayer owned(File jar) {
+        return ArchiveLayer.owned(jar);
     }
 
     static AssetLayer directory(File dir) {
@@ -47,9 +64,28 @@ public interface AssetLayer {
 final class ArchiveLayer implements AssetLayer {
 
     private final File jar;
+    /** Set when this layer opened the archive itself, which is then also this layer's to close. */
+    @Nullable
+    private final top.outlands.foundation.boot.ArchiveIndex owned;
 
     ArchiveLayer(File jar) {
+        this(jar, null);
+    }
+
+    ArchiveLayer(File jar, @Nullable top.outlands.foundation.boot.ArchiveIndex owned) {
         this.jar = Objects.requireNonNull(jar, "jar").getAbsoluteFile();
+        this.owned = owned;
+    }
+
+    static AssetLayer owned(File jar) {
+        try {
+            final top.outlands.foundation.boot.ArchiveIndex index = new top.outlands.foundation.boot.ArchiveIndex(
+                    jar.toPath(), new java.util.jar.JarFile(jar, false));
+            return new ArchiveLayer(jar, index);
+        } catch (IOException e) {
+            // an archive that will not open is a layer that answers nothing, not a stack that fails to build
+            return new ArchiveLayer(jar);
+        }
     }
 
     @Override
@@ -64,6 +100,14 @@ final class ArchiveLayer implements AssetLayer {
 
     @Override
     public boolean has(String path) {
+        if (owned != null) {
+            try {
+                return owned.find(path) != null;
+            } catch (RuntimeException e) {
+                // a handle that was closed with its stack answers nothing rather than throwing at the next query
+                return false;
+            }
+        }
         try (BorrowedArchive archive = BorrowedArchive.of(jar, false)) {
             return archive.index().find(path) != null;
         } catch (IOException | RuntimeException e) {
@@ -75,12 +119,35 @@ final class ArchiveLayer implements AssetLayer {
     @Override
     @Nullable
     public byte[] read(String path) throws IOException {
+        if (owned != null) {
+            try {
+                return owned.read(owned.find(path));
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
         try (BorrowedArchive archive = BorrowedArchive.of(jar, false)) {
             return archive.index().read(archive.index().find(path));
         } catch (IOException | RuntimeException e) {
             // unreadable is a miss, exactly what has() answers for the same layer: one broken jar in a stack must not
             // take the query down when the next layer may well have the file
             return null;
+        }
+    }
+
+    @Override
+    public boolean stale() {
+        return owned != null && !owned.fingerprint().matches(jar.toPath());
+    }
+
+    @Override
+    public void close() {
+        if (owned != null) {
+            try {
+                owned.jarFile().close();
+            } catch (IOException ignored) {
+                // closing a handle nobody else can see; there is nothing useful to do about a failure
+            }
         }
     }
 
