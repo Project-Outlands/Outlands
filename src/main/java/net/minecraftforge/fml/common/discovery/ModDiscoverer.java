@@ -40,8 +40,18 @@ import net.minecraftforge.fml.common.asm.transformers.ModAccessTransformer;
 import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
+import net.minecraftforge.fml.common.discovery.index.BorrowedArchive;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.RecordFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
+import net.minecraftforge.fml.common.discovery.index.ClassNaming;
+import net.minecraftforge.fml.common.discovery.index.LoadIndex;
+import net.minecraftforge.fml.common.asm.transformers.deobf.FMLDeobfuscatingRemapper;
+import net.minecraftforge.fml.relauncher.FMLInjectionData;
+import net.minecraftforge.fml.common.discovery.cache.RecordFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberFile;
+import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 import net.minecraftforge.fml.common.launcher.FMLTweaker;
 import net.minecraftforge.fml.relauncher.CoreModManager;
 import net.minecraftforge.fml.relauncher.libraries.LibraryManager;
@@ -294,6 +304,17 @@ public final class ModDiscoverer {
             } catch (URISyntaxException ignored) { }
         }
 
+        // The class index answers from the scans taken above and, for anything this run did not scan, from the cached
+        // records. Its order is the loader's own search order - the class path first, then every jar added to the
+        // loader as discovery went on - so a name resolves to the class the loader would define for it.
+        final LoadIndex loadIndex = new LoadIndex(Launch.minecraftHome,
+                () -> LoadIndex.filesOf(Launch.classLoader.getSources()));
+        LoadIndex.activate(loadIndex);
+        indexMinecraftJar(loadIndex);
+        // The MCP name table is MCP's data, so it is read from wherever the user put it, on a thread of its own: the
+        // start does not wait for it, and a run without one carries SRG names as it always did.
+        loadIndex.mappings().start(Launch.minecraftHome);
+
         long elapsedMillis = (System.nanoTime() - startTime) / 1_000_000L;
         FMLLog.log.info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);
         FMLLog.log.debug("Discovered mod ids: {}", String.join(", ", modIdToFiles.keySet()));
@@ -322,7 +343,8 @@ public final class ModDiscoverer {
         boolean modernMetadata = false;
         boolean hasMixinManifestAttributes = false, mixinTweakerForceMod = false, coreModContainsMod = false;
 
-        try (JarFile jarFile = new JarFile(absolute)) {
+        try (BorrowedArchive borrow = BorrowedArchive.of(absolute)) {
+            JarFile jarFile = borrow.jar();
             attributes = readManifestAttributes(absolute, jarFile);
             if (attributes != null) {
                 modType = attributes.getValue(ManifestAttributes.MODTYPE);
@@ -399,8 +421,10 @@ public final class ModDiscoverer {
             if (scan == null && needClasses) {
                 List<ClassScanRecord> records = new ArrayList<>();
                 List<Integer> indices = new ArrayList<>();
-                if (collectRecords(entries, jarFile, records, indices) && readCache) {
+                Map<String, MemberRecord[]> members = new HashMap<>();
+                if (collectRecords(entries, jarFile, records, indices, members) && readCache) {
                     scan = JarScanRecord.of(fingerprint, indices, records);
+                    MemberFile.write(MemberFile.fileFor(Launch.minecraftHome, absolute), fingerprint, members);
                 }
                 if (modIds.isEmpty()) {
                     collectModIds(records, modIds);
@@ -410,6 +434,7 @@ public final class ModDiscoverer {
             }
             if (scan != null) {
                 scanRecords.put(absolute, scan);
+                LoadIndex.registerIfActive(absolute, scan);
             }
             for (String modId : modIds) {
                 if (recordMod(modId, absolute)) {
@@ -476,7 +501,8 @@ public final class ModDiscoverer {
             if (!accessTransformers.isEmpty()) {
                 // addJar takes the space-separated form the manifest key had; joining keeps one implementation of "which
                 // files are this jar's access transformers" for both sources.
-                jar = new JarFile(file);
+                // the transformer keeps this handle for the life of the process, so it is the shared one
+                jar = BorrowedArchive.retained(file).jarFile();
                 ModAccessTransformer.addJar(jar, String.join(" ", accessTransformers));
             }
 
@@ -516,13 +542,10 @@ public final class ModDiscoverer {
         } catch (IOException ioe) {
             FMLLog.log.error("Unable to read the jar file {} - ignoring", file.getName(), ioe);
             return;
-        } finally {
-            try {
-                if (jar != null) {
-                    jar.close();
-                }
-            } catch (IOException ignored) { }
         }
+        // No close here: when the jar declares access transformers the handle above is the class loader's own, taken
+        // from the process wide ArchiveSet, and this jar is added to the class path a few lines below. Closing it would
+        // close the class path entry the loader is about to use - the jar is the same file, so it is the same handle.
 
         try {
             addDeclaredLibrariesToClasspath(classLoader, file);
@@ -624,6 +647,43 @@ public final class ModDiscoverer {
             }
         }
         return modList;
+    }
+
+    /**
+     * Adds the minecraft jar to the class index. Its classes are named for the class loader's mapping and are not part
+     * of any mod candidate; the pass is cached, so after the first start it costs a file read.
+     */
+    /** The loader's own renaming, expressed as the three operations the class index needs. */
+    private static ClassNaming remapperNaming() {
+        final FMLDeobfuscatingRemapper remapper = FMLDeobfuscatingRemapper.INSTANCE;
+        return new ClassNaming() {
+            @Override
+            public String type(String internalName) {
+                return remapper.map(internalName);
+            }
+
+            @Override
+            public String member(String ownerInternalName, String name, String descriptor, boolean method) {
+                return method
+                        ? remapper.mapMethodName(ownerInternalName, name, descriptor)
+                        : remapper.mapFieldName(ownerInternalName, name, descriptor);
+            }
+
+            @Override
+            public String descriptor(String descriptor) {
+                return remapper.mapDesc(descriptor);
+            }
+        };
+    }
+
+    private static void indexMinecraftJar(LoadIndex loadIndex) {
+        try {
+            loadIndex.indexMinecraftJar(
+                    remapperNaming(),
+                    "v" + RecordFile.CACHE_REV + "-" + FMLInjectionData.data()[4]);
+        } catch (RuntimeException | LinkageError e) {
+            FMLLog.log.debug("Not indexing the minecraft jar", e);
+        }
     }
 
     private void addCandidate(List<ModCandidate> modCandidates, Set<File> seen, ModCandidate candidate) {
@@ -748,7 +808,8 @@ public final class ModDiscoverer {
         }
     }
 
-    private static boolean collectRecords(List<JarEntry> entries, JarFile jar, List<ClassScanRecord> out, List<Integer> indices) {
+    private static boolean collectRecords(List<JarEntry> entries, JarFile jar, List<ClassScanRecord> out,
+            List<Integer> indices, Map<String, MemberRecord[]> members) {
         List<JarEntry> scanned = new ArrayList<>();
         for (JarEntry entry : entries) {
             if (ITypeDiscoverer.shouldScan(entry.getName())) {
@@ -770,10 +831,10 @@ public final class ModDiscoverer {
             ASMModParser parser = result.parser();
             parser.validate();
             ClassScanRecord record = parser.toRecord();
-            if (JarScanRecord.hasContent(record)) {
-                indices.add(ordinal);
-                out.add(record);
-            }
+            indices.add(ordinal);
+            out.add(record);
+            // the same visit that produced the header also saw the members; keeping them costs nothing here
+            members.put(record.internalName(), parser.toMembers());
         }
         return complete;
     }

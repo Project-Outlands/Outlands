@@ -4,6 +4,295 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026.11.26-3] - 2026-11-26
+
+### 🐛 Bug Fixes
+
+- [`0b67b17`](https://github.com/Project-Outlands/Outlands/commit/0b67b172f414c871a64a0a2aae137bdef082e179) - DeobfuscationTransformer crash EnderIO *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.26-2] - 2026-11-26
+
+### 🐛 Bug Fixes
+
+- [`35a05ed`](https://github.com/Project-Outlands/Outlands/commit/35a05eda4d56149c7deee5170f3a150f1f256d65) - Stop closing the class loader's jar handle from discovery *(PR [#79](https://github.com/Project-Outlands/Outlands/pull/79) by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
+## [2026.11.26] - 2026-11-26
+
+### 🐛 Bug Fixes
+
+- [`9c8d45a`](https://github.com/Project-Outlands/Outlands/commit/9c8d45a7e96b6b2530cca4c3135f4a57fa9ae2fd) - *(input)* Suppress Windows IME during mouse grab *(PR [#75](https://github.com/Project-Outlands/Outlands/pull/75) by [@DHJComical](https://github.com/DHJComical))*
+- [`aa481a4`](https://github.com/Project-Outlands/Outlands/commit/aa481a488974e061a43ecb3a1e96ead0c054012f) - *(build)* Package LWJGL SPIRV-Cross *(PR [#76](https://github.com/Project-Outlands/Outlands/pull/76) by [@DHJComical](https://github.com/DHJComical))*
+
+### ⚙️ Miscellaneous Tasks
+
+- [`544090c`](https://github.com/Project-Outlands/Outlands/commit/544090cbc01292d65fdf67d2a1e84cde8eabfd72) - Merge branch 'main' of github.com:Project-Outlands/Outlands *(commit by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+### 💼 Other
+
+- [`dc7cf4c`](https://github.com/Project-Outlands/Outlands/commit/dc7cf4c0c37b6d56b1ee95ceaf8c31d2760de0ac) - Index the load: one archive handle, class headers, members and names
+
+* feat(discovery): record every scanned class with its header
+
+The scan already parsed every class file to find its annotations, but stored a
+record only for the classes that had annotations or interfaces, and dropped the
+access flags and the super type on the way. Both are facts the parse already
+had: ModClassVisitor.visit receives them and beginNewTypeName did not take them.
+
+Every scanned class is now recorded, with superName and access, and hasContent()
+answers what the old filter meant: does this class say anything to the annotation
+table and can it start a container. Replay keeps using that predicate, so the
+discovery behaviour is unchanged; only what the cache carries grew.
+
+Cache format rev 1 -> 2, so existing files are ignored and every jar is scanned
+once more. Measured over three real jars, the full coverage costs 23-34% more
+cache: vanilla 274 -> 338 KB for 3,346 classes (~100 B/class), and reading it
+back takes 2.5 ms.
+
+* feat(discovery): add a per-archive class index
+
+ClassIndex answers "what shape does this class have" from the scan discovery
+already took: no class is loaded and nothing is parsed twice. One sort by name
+serves both an exact lookup and a range query, so the package query is a
+contiguous scan and needs no second structure.
+
+Names are internal form and the super type chain is followed inside the archive,
+which is where a jar's own hierarchy lives; a super type from elsewhere is
+reported by name and not followed, so a caller can continue the chain itself. The
+package query returns only the classes directly in the package, which is what the
+annotation scans ask for.
+
+Verified against the source jar: net/minecraft/world/ answers 47/47 classes, and
+World's ancestors come out as [java/lang/Object, net/minecraft/world/IBlockAccess].
+Building the index over 3,346 cached classes takes 0.5 ms.
+
+* feat(discovery): resolve class info across the class path
+
+ClassIndex answers for one archive; a script compiler asks about a name. LoadIndex
+holds the per-archive indexes in class path order, so classInfo() returns the class
+the class loader would define when two archives ship the same name, and supertypes()
+can follow a chain into another jar.
+
+An archive this run did not scan is answered from its cached record, which is what
+makes the index usable for libraries and the minecraft jar itself: the record is
+looked up by the jar's fingerprint, so a stale cache is simply not used.
+
+Discovery activates the index once the candidate list is known and registers every
+scan it takes, fresh or replayed; both are best effort and cannot change what is
+discovered.
+
+* feat(discovery): index the minecraft jar
+
+The class index had nothing to say about net.minecraft.* because the minecraft jar
+never goes through the mod scan. It now gets its own pass: the header of every class
+is read and every name is put through the mapping the class loader applies, so a
+query uses the name the loader defines.
+
+The jar is recognised the way FMLSanityChecker already recognises it, by the
+ClientBrandRetriever/MinecraftServer entries that are not obfuscated, rather than by
+looking at whether its names look obfuscated: sampling the names of every archive on
+the class path misidentified 14 of 300 workspace jars that contain notch-named
+classes of their own.
+
+The pass costs 85 ms for the 3,310 classes of the 1.12.2 client jar and produces a
+187 KB record, so a second start reads it in 3 ms. The cache name carries CACHE_REV,
+the minecraft version and the jar fingerprint, so a different mapping or a different
+jar simply misses instead of answering with stale names.
+
+* fix(discovery): take the index order from the class loader
+
+The class index ordered names by the mod candidates first and the class path
+after, which is backwards: jars the loader already had win over the mods that are
+added to it while discovery runs, and a mod that bundles a library class must not
+be reported as the source of that class.
+
+The order now comes from the loader's own source list, read on demand rather than
+snapshotted, because addURL keeps appending while discovery proceeds: an archive
+that was not on the class path when the index was created still has to be found
+later, and answers given under an older order are dropped when it changes.
+
+This also covers the jars a manifest Class-Path pulls in, since those are appended
+to the loader's sources before the class loader is built.
+
+* feat(discovery): index the members of every scanned class
+
+The scan already walked every field and method to find their annotations and threw
+the signature away. It is now kept, and the vanilla pass reads it from the same
+visit, so the member table costs the extra bytes and not a second parse: the
+minecraft jar goes from 85 ms to 131 ms cold, and 1.1 MB on disk beside the 187 KB
+of headers.
+
+Members live in a file of their own rather than in the class record, because the
+two are read at different moments: the headers answer "which archive has this
+class" during discovery, while a member table is only needed once something wants
+to resolve a member, and it is an order of magnitude larger.
+
+Member names are mapped too, through a ClassNaming with the three operations the
+loader actually applies (type, member, descriptor). Mapping only the class name
+would leave the minecraft jar's members at their obfuscated single letters, which
+is what the first version of this did.
+
+Also fixes the order refresh running on every query: it now re-reads the loader's
+order only when the current order had no answer, since a jar added later sits at
+the end of the search and can only answer names nothing answered before.
+
+* Borrow the class loader's jar handle instead of reopening it
+
+The class loader keeps a JarFile open per class path entry for the life of the process,
+and discovery opened the same jars again on its own: for the metadata, for the
+fingerprint, for the scan. BorrowedArchive asks the process wide ArchiveSet for the
+handle first and only opens a private one, which its reader closes, when nobody has it.
+
+The retaining reader is ModAccessTransformer: it kept a JarFile per jar that declares
+access transformers, forever, next to the class loader's handle for the same file. That
+one now takes the shared handle and registers it in the set, so the class loader reuses
+it when the jar is added.
+
+A private handle keeps the verification flag of the reader it replaces, so nothing that
+used a ZipFile starts verifying signatures; a borrowed handle keeps the class loader's,
+and those entries are read on load anyway.
+
+Timing is not the point here - opening a warm JarFile costs 3.7us against 0.15us for a
+lookup, about 1ms over 300 jars - the point is the 131 bytes per entry that a second
+handle keeps alive.
+
+Foundation is bumped to 1.1.3 for ArchiveSet.
+
+* Answer MCP names from the index instead of a second mapping table
+
+A script that writes getWorldInfo runs against classes the loader defines as
+func_72959_q, so the loader needs to translate one to the other. The table only has to
+go one way: measured over a 1.12.2 set, 21,622 distinct SRG member names each map to
+exactly one MCP name, while 2,006 MCP names cover more than one SRG name. So the stored
+form is one flat map of renames, and the reverse question is answered by walking the
+owner's members and asking that map about each of them - which is also what keeps the
+answer owner and descriptor scoped, the thing a name-only reverse lookup gets wrong.
+
+Mappings reads a TSRG file, one CSV, or a mapping zip (methods.csv and fields.csv),
+whichever the user placed in config/outlands/mappings, or the file a development run
+already has. In 1.12.2 every class line is an identity pair and a member whose two
+names are equal needs no entry, so the 2.1 MB TSRG collapses to 19,627 renames read in
+21 ms on a daemon thread. Nothing is bundled: MCP's data cannot be redistributed, and a
+run without a table says ABSENT once and carries SRG names as it always did.
+
+LoadIndex answers both directions: srgToMcp checks that the owner declares that member
+with that descriptor before naming it, and mcpToSrg returns every member of the owner
+MCP calls by that name, narrowed by a descriptor when the caller has one.
+
+* Fetch the name table when the user names a zip
+
+The URL is not guessed. Forge's maven publishes the tables as
+de/oceanlabs/mcp/mcp_stable/39-1.12/mcp_stable-39-1.12.zip, but which channel matches the
+mappings a build was compiled against is a property of that build, and a table from
+another channel mislabels code without anything failing. So outlands.mappings.fetch
+takes a URL, the download lands in config/outlands/mappings and is read from there on
+the next start, and a run that names nothing does no network at all.
+
+With nothing to read and nothing to fetch the state is ABSENT without a thread: there is
+no answer to wait for.
+
+* Answer resource paths and enumerate the archives from the same index
+
+AssetView resolves a path through an ordered list of archives and returns the first layer
+that has it. The order is the caller's because only the caller knows it: a client wants
+vanilla, then the mods, then the resource packs in the order the player arranged them,
+and the pack repository holds that. Handing the list in is what keeps an offline answer
+equal to the rendered one.
+
+LoadIndex.scan enumerates entries under a prefix, archive by archive, over the handles
+the class loader already has. A scan only enumerates, so an archive nobody has open is
+opened for its entry list and closed again rather than indexed - the index would walk the
+same entries a second time to build its package table, which measured 3x the scan.
+
+300 real jars, 108,598 classes: 7.0 ms, against 7.0 ms for opening every jar with a fresh
+ZipFile. Not reopening buys no time here; the enumeration is the whole cost, and the
+point is that a graph library does not have to hold 300 more handles to ask. *(PR [#77](https://github.com/Project-Outlands/Outlands/pull/77) by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+- [`49686cd`](https://github.com/Project-Outlands/Outlands/commit/49686cdc74b8bc5fa018ed56e16297c78ccc7051) - Answer assets from the layers that actually hold them
+
+* Add vanilla's downloaded asset half as a layer, and let it be missing
+
+The launcher's assets/objects is not a copy of the jar: measured on 1.12.2 the index
+names 1,305 objects (1,085 sounds, 106 languages) and the jar carries 4,642 files
+(textures, models, blockstates), with an empty intersection. The game reads the index
+first and falls back to the class path, so vanilla is one priority level made of two
+halves, in that order.
+
+AssetObjects reads assets/indexes/1.12.json into a name to hash table and serves the
+objects as plain files, which is cheaper than an archive: no central directory, no
+handle, no inflate. 1,305 entries read in 19 ms.
+
+None of it is required. A launcher that could not download, a download that stopped
+halfway and an index that was never written are all states a modded instance runs in,
+so every entry point answers instead of throwing: a missing or truncated index is an
+empty table, an object named but not on disk is a miss, and the jar keeps answering.
+
+AssetView now resolves through layers rather than files, so the objects and an archive
+can sit in one ordered list, and AssetView.vanilla builds the two in the order the game
+reads them. Against a real PrismLauncher install: lang/zh_cn.lang and sounds.json come
+from the objects, textures and models from the jar, and removing the index leaves the
+jar answering everything.
+
+* Read a directory as an asset layer, and treat an unreadable one as a miss
+
+A development run ships its resources as a directory, so every dev mod answered nothing:
+ArchiveLayer opened the path with JarFile, which throws "is a directory", has() swallowed
+it and read() let it out. DirectoryLayer reads the file under the root and checks that
+the path cannot walk out of it, and AssetLayer.of picks the kind from the file itself, so
+a view holds a jar and a directory in one order without the caller saying which is which.
+
+An unreadable layer now answers a miss from read() as well, which is what has() already
+said about it: one broken jar in a stack must not take a query down when the next layer
+may well have the file.
+
+* Keep the asset paths the launcher passes, and answer vanilla's assets from them
+
+The launcher passes where the downloaded objects live and which index names them, and
+nothing after the game starts can see either one: net.minecraftforge.boot.Main is the
+last code that has the argument list, so it keeps --assetsDir and --assetIndex as system
+properties before the game is started.
+
+LoadIndex already identified the minecraft jar to index its classes and then dropped it;
+it now remembers it, so LoadIndex.vanillaAssets() answers with the two halves in the
+order the game reads them, and with whatever half is there when only one is. A run that
+found neither gets an empty view rather than an exception.
+
+* Stack the asset layers in the order the game resolves them
+
+AssetStack holds the layers, the order they resolve in, and whatever they opened. The game
+walks its pack list backwards and takes the last pack with the file, so a stack built with
+preferLast keeps the list as given and resolves from the end: one reversal decided once
+instead of one per caller and per query.
+
+PackLayers turns the list reloadResources was handed into such a stack, and a layer over an
+IResourcePack needs nothing opened or reflected. FileResourcePack already keeps its own
+ZipFile, resourceExists is a central directory lookup on it, and the pack repository closes
+that file when the pack leaves the list - so the packs in this stack are not this stack's to
+close, and a stack over 300 packs costs no extra handles at all. A pack that throws is a
+miss; the next one still answers.
+
+Ownership stays for the files we open ourselves: AssetLayer.owned keeps an ArchiveIndex and
+is closed by the stack, and a file replaced underneath it is reported by stale(), which is
+the case a handle cannot see. What such a handle answers after a rewrite is undefined - the
+old central directory with the new bytes - which is exactly why the check exists.
+
+A closed layer answers a miss instead of throwing at the next query.
+
+* List what a directory holds, and hand the script side text
+
+A script asks two questions before it reads anything: which files are under this namespace
+and category, and which layer did each come from. AssetView.catalog answers both, grouped by
+layer in resolution order and sorted inside each layer, with a path that several layers have
+listed once per layer - the attribution is the answer, not a duplicate to clean up.
+
+Layers enumerate where they can: an archive walks its own central directory, a directory
+walks itself, the downloaded objects filter the index they already hold. A pack cannot,
+because IResourcePack offers its domains and not the files in them, so a passthrough layer
+reports nothing and the caller falls back to naming the files it wants.
+
+readText is the same read decoded as UTF-8, since a script merges JSON and not byte arrays. *(PR [#78](https://github.com/Project-Outlands/Outlands/pull/78) by [@kappa-maintainer](https://github.com/kappa-maintainer))*
+
+
 ## [2026.11.21] - 2026-11-21
 
 ### 🐛 Bug Fixes
