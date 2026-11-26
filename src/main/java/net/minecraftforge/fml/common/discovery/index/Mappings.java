@@ -77,13 +77,22 @@ public final class Mappings {
         }
         started = true;
         final List<Path> found = candidates(gameDir);
-        if (found.isEmpty()) {
+        final String fetch = System.getProperty("outlands.mappings.fetch");
+        if (found.isEmpty() && (fetch == null || fetch.isBlank())) {
+            // nothing to read and nothing to fetch: no thread, and the answer is known now
             state = State.ABSENT;
             FMLLog.log.debug("No MCP name table found; scripts that ask for MCP names will be told so once");
             return;
         }
         state = State.PENDING;
-        final Thread loader = new Thread(() -> load(found), "Outlands mapping table");
+        final Thread loader = new Thread(() -> {
+            if (!found.isEmpty()) {
+                load(found);
+            } else if (!download(gameDir)) {
+                state = State.ABSENT;
+                FMLLog.log.debug("No MCP name table could be fetched; names stay as the loader defines them");
+            }
+        }, "Outlands mapping table");
         loader.setDaemon(true);
         loader.start();
     }
@@ -160,6 +169,57 @@ public final class Mappings {
         FMLLog.log.info("None of the mapping files that were found could be read; MCP names stay unavailable");
     }
 
+    /**
+     * Fetches the table when the user pointed {@code outlands.mappings.fetch} at a zip, and leaves it in the config
+     * directory so the next start reads it locally.
+     *
+     * <p>The URL is not guessed. Forge's maven publishes the name tables as
+     * {@code de/oceanlabs/mcp/mcp_stable/39-1.12/mcp_stable-39-1.12.zip}, but which channel matches the mappings a
+     * given build was compiled with is a property of that build, not something a running game can tell: a table from
+     * another channel mislabels code without failing, so the choice stays with the user.
+     *
+     * @return whether a table was downloaded and read
+     */
+    private boolean download(File gameDir) {
+        final String url = System.getProperty("outlands.mappings.fetch");
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        final String name = url.substring(url.lastIndexOf('/') + 1);
+        if (name.isEmpty()) {
+            FMLLog.log.warn("The mapping URL {} does not name a file", url);
+            return false;
+        }
+        final Path target;
+        try {
+            target = gameDir == null
+                    ? java.nio.file.Files.createTempFile("mcp-names", ".zip")
+                    : configDir(gameDir).resolve(name);
+        } catch (IOException e) {
+            FMLLog.log.warn("Could not create a place for the MCP name table", e);
+            return false;
+        }
+        try {
+            FMLLog.log.info("Fetching the MCP name table from {}", url);
+            try (var in = new java.net.URL(url).openStream()) {
+                final Path parent = target.getParent();
+                if (parent != null) {
+                    java.nio.file.Files.createDirectories(parent);
+                }
+                java.nio.file.Files.copy(in, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            load(List.of(target));
+            return state == State.READY;
+        } catch (IOException | RuntimeException e) {
+            FMLLog.log.warn("Could not fetch the MCP name table from {}", url, e);
+            return false;
+        }
+    }
+
+    private static Path configDir(File gameDir) {
+        return gameDir.toPath().resolve(CONFIG_DIR);
+    }
+
     /** @return the files to try, most specific first; the caller reads the first one that yields a table */
     private static List<Path> candidates(File gameDir) {
         final List<Path> found = new ArrayList<>();
@@ -173,7 +233,7 @@ public final class Mappings {
             found.add(Path.of(dev));
         }
         if (gameDir != null) {
-            final Path dir = gameDir.toPath().resolve(CONFIG_DIR);
+            final Path dir = configDir(gameDir);
             if (Files.isDirectory(dir)) {
                 try (var listing = Files.list(dir)) {
                     // one file wins: a user who drops two would otherwise get whichever the file system answered first

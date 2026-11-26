@@ -88,6 +88,27 @@ class MappingsTest {
     }
 
     @Test
+    void aFetchedZipIsKeptWhereTheNextStartReadsIt(@TempDir Path dir) throws Exception {
+        final File gameDir = Files.createDirectories(dir.resolve("game")).toFile();
+        final Path zip = dir.resolve("mcp_stable-39-1.12.zip");
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            entry(out, "methods.csv", "func_72959_q,getBiomeProvider,0,\n");
+        }
+        System.setProperty("outlands.mappings.fetch", zip.toUri().toString());
+        try {
+            final Mappings table = Mappings.fresh();
+            table.start(gameDir);
+
+            assertTrue(table.awaitReady(5_000), "the zip named by the property is fetched and read");
+            assertEquals("getBiomeProvider", table.mcpNameOf("func_72959_q").orElse(null));
+            assertTrue(Files.isRegularFile(gameDir.toPath().resolve(Mappings.CONFIG_DIR)
+                    .resolve("mcp_stable-39-1.12.zip")), "and it stays there, so the next start reads it locally");
+        } finally {
+            System.clearProperty("outlands.mappings.fetch");
+        }
+    }
+
+    @Test
     void withoutAFileTheTableIsAbsentAndQuiet(@TempDir Path dir) throws Exception {
         final File gameDir = Files.createDirectories(dir.resolve("game")).toFile();
 
