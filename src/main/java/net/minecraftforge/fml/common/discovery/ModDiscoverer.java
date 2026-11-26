@@ -311,6 +311,9 @@ public final class ModDiscoverer {
                 () -> LoadIndex.filesOf(Launch.classLoader.getSources()));
         LoadIndex.activate(loadIndex);
         indexMinecraftJar(loadIndex);
+        // The MCP name table is MCP's data, so it is read from wherever the user put it, on a thread of its own: the
+        // start does not wait for it, and a run without one carries SRG names as it always did.
+        loadIndex.mappings().start(Launch.minecraftHome);
 
         long elapsedMillis = (System.nanoTime() - startTime) / 1_000_000L;
         FMLLog.log.info("Finished discovering mods. Found {} discovered mod ids in {} ms.", modIdToFiles.keySet().size(), elapsedMillis);

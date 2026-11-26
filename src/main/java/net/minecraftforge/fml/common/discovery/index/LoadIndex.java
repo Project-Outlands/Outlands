@@ -74,6 +74,10 @@ public final class LoadIndex {
     /** Archives indexed from a file outside the per-jar cache tree, mapped to the index file that was used. */
     private final Map<File, File> vanillaIndexFiles = new ConcurrentHashMap<>();
 
+    /** Null until a caller replaces the process table; a test does, a run does not. */
+    @Nullable
+    private Mappings mappingTable;
+
     public LoadIndex(File gameDir, List<File> order) {
         this(gameDir, () -> order);
         this.order = List.copyOf(order);
@@ -226,6 +230,72 @@ public final class LoadIndex {
         final Map<String, MemberRecord[]> table = memberTableOf(origin);
         final MemberRecord[] members = table == null ? null : table.get(internalName);
         return members == null ? NO_MEMBERS : members;
+    }
+
+    // ---- 名字视图：SRG 是索引里的名字，MCP 是查询时的投影 ----
+
+    /** @return the table that turns an SRG member name into the MCP one, empty when the user placed none */
+    public Mappings mappings() {
+        if (mappingTable != null) {
+            return mappingTable;
+        }
+        final Mappings table = Mappings.get();
+        if (!table.started()) {
+            // discovery starts it when it builds the index; a test that builds its own does not
+            table.start(gameDir);
+        }
+        return table;
+    }
+
+    /** Uses {@code table} for name queries instead of the process one; the process one is the default. */
+    void useMappings(Mappings table) {
+        this.mappingTable = table;
+    }
+
+    /**
+     * @param owner a name such as {@code net/minecraft/world/World}
+     * @param name the name the loader defines, such as {@code func_72959_q}
+     * @return the MCP name for that member, or empty when MCP does not name it, the owner does not declare it, or
+     *         there is no table at all
+     */
+    public java.util.Optional<String> srgToMcp(String owner, String name, String descriptor) {
+        for (MemberRecord member : membersOf(owner)) {
+            // the owner and the descriptor are checked, not used: they are what makes the answer this member and not
+            // another one that happens to share the SRG name
+            if (member.name().equals(name) && member.descriptor().equals(descriptor)) {
+                return mappings().mcpNameOf(name);
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * @param owner a name such as {@code net/minecraft/world/World}
+     * @param mcpName the MCP name a script used, such as {@code getWorldInfo}
+     * @param descriptor when given, narrows the answer to members the compiler could call with it
+     * @return every member of {@code owner} that MCP calls {@code mcpName}, in the order the class declares them
+     */
+    public List<MemberRef> mcpToSrg(String owner, String mcpName, @Nullable String descriptor) {
+        final Mappings table = mappings();
+        final MemberRecord[] members = membersOf(owner);
+        if (members.length == 0) {
+            return List.of();
+        }
+        final List<MemberRef> found = new ArrayList<>();
+        for (MemberRecord member : members) {
+            if (descriptor != null && !descriptor.equals(member.descriptor())) {
+                continue;
+            }
+            // a member MCP leaves alone is called the same thing in both worlds, so it answers to its own name
+            final String mapped = table.mcpNameOf(member.name()).orElse(member.name());
+            if (mapped.equals(mcpName)) {
+                found.add(new MemberRef(owner, member.name(), member.descriptor(), member.method()));
+            }
+        }
+        if (found.isEmpty() && table.state() == Mappings.State.ABSENT) {
+            table.warnMissingOnce();
+        }
+        return found;
     }
 
     /** @return the archive whose class the loader would define for {@code internalName}, or null */
