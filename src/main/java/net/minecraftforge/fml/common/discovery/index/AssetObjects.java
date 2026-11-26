@@ -163,6 +163,28 @@ public final class AssetObjects {
     }
 
     /**
+     * @param prefix an archive path prefix, such as {@code assets/minecraft/lang/}
+     * @return how many names the index lists under it, reported in the archive spelling the layers use
+     */
+    public int paths(String prefix, java.util.function.Consumer<String> sink) {
+        final String wanted = normalise(prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix);
+        int found = 0;
+        for (String key : hashByName.keySet()) {
+            if (!key.startsWith(wanted)) {
+                continue;
+            }
+            final int colon = key.indexOf(':');
+            if (colon < 0) {
+                sink.accept(key);
+            } else {
+                sink.accept("assets/" + key.substring(0, colon) + "/" + key.substring(colon + 1));
+            }
+            found++;
+        }
+        return found;
+    }
+
+    /**
      * Turns an archive path into the key the index uses: the index keys are {@code <namespace>/<path>} and the game
      * joins them with a colon, so an {@code assets/}-prefixed path is accepted and rewritten.
      */

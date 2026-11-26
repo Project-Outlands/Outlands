@@ -100,4 +100,43 @@ public final class AssetView {
     public int count(String path) {
         return layersOf(path).size();
     }
+
+    /** One file a catalog found, and the layer that has it. */
+    public record Entry(String path, AssetLayer layer) {
+    }
+
+    /**
+     * Lists every file under {@code prefix}, layer by layer in resolution order, and sorted inside each layer.
+     *
+     * <p>Grouped by layer because that is the order a consumer merges in, and each file keeps the layer it came from
+     * so an override can be attributed. A path several layers have appears once per layer, which is the point: the
+     * caller decides whether the last one wins or whether they merge.
+     *
+     * @param prefix an archive path, such as {@code assets/minecraft/lang/} or {@code data/mymod/recipes/}
+     * @return the files, or an empty list when no layer can enumerate
+     */
+    public List<Entry> catalog(String prefix) {
+        final List<Entry> found = new ArrayList<>();
+        for (AssetLayer layer : layers) {
+            final List<String> paths = new ArrayList<>();
+            try {
+                layer.paths(prefix, paths::add);
+            } catch (RuntimeException e) {
+                // a layer that cannot enumerate contributes nothing; the others still list
+                continue;
+            }
+            java.util.Collections.sort(paths);
+            for (String path : paths) {
+                found.add(new Entry(path, layer));
+            }
+        }
+        return found;
+    }
+
+    /** @return the winning layer's bytes decoded as UTF-8, or null when no layer has the path */
+    @Nullable
+    public String readText(String path) throws IOException {
+        final byte[] bytes = read(path);
+        return bytes == null ? null : new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+    }
 }

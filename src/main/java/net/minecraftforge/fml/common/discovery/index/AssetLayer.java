@@ -25,6 +25,19 @@ public interface AssetLayer {
     @Nullable
     byte[] read(String path) throws IOException;
 
+    /**
+     * Calls {@code sink} with every path under {@code prefix} this layer has.
+     *
+     * <p>A layer that can afford it lists its content; an {@code IResourcePack} cannot, because the interface has no
+     * way to ask for one (it offers the domains, not the files in them), so a passthrough layer reports nothing and the
+     * caller falls back to asking for the files it wants by name.
+     *
+     * @return how many paths were reported
+     */
+    default int paths(String prefix, java.util.function.Consumer<String> sink) {
+        return 0;
+    }
+
     /** @return whether the file behind this layer changed since it was read; only a layer that owns a handle can say */
     default boolean stale() {
         return false;
@@ -136,6 +149,22 @@ final class ArchiveLayer implements AssetLayer {
     }
 
     @Override
+    public int paths(String prefix, java.util.function.Consumer<String> sink) {
+        if (owned != null) {
+            try {
+                return owned.forEachWithPrefix(prefix, entry -> sink.accept(entry.getName()));
+            } catch (RuntimeException e) {
+                return 0;
+            }
+        }
+        try (BorrowedArchive archive = BorrowedArchive.of(jar, false)) {
+            return archive.index().forEachWithPrefix(prefix, entry -> sink.accept(entry.getName()));
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    @Override
     public boolean stale() {
         return owned != null && !owned.fingerprint().matches(jar.toPath());
     }
@@ -213,6 +242,31 @@ final class DirectoryLayer implements AssetLayer {
     }
 
     @Override
+    public int paths(String prefix, java.util.function.Consumer<String> sink) {
+        final java.nio.file.Path root = dir.toPath();
+        if (!java.nio.file.Files.isDirectory(root)) {
+            return 0;
+        }
+        int found = 0;
+        try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path file : (Iterable<java.nio.file.Path>) walk::iterator) {
+                if (!java.nio.file.Files.isRegularFile(file)) {
+                    continue;
+                }
+                // the same spelling an archive uses, so a path from one layer works in the other
+                final String path = root.relativize(file).toString().replace(java.io.File.separatorChar, '/');
+                if (path.startsWith(prefix)) {
+                    sink.accept(path);
+                    found++;
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            return found;
+        }
+        return found;
+    }
+
+    @Override
     public String toString() {
         return describe();
     }
@@ -247,6 +301,11 @@ final class ObjectsLayer implements AssetLayer {
     @Nullable
     public byte[] read(String path) throws IOException {
         return objects.read(path);
+    }
+
+    @Override
+    public int paths(String prefix, java.util.function.Consumer<String> sink) {
+        return objects.paths(prefix, sink);
     }
 
     @Override
