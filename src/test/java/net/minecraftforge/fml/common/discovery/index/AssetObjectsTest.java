@@ -86,6 +86,23 @@ class AssetObjectsTest {
     }
 
     @Test
+    void theExistenceAnswerIsRemembered(@TempDir Path dir) throws Exception {
+        final Path assets = assets(dir, Map.of("minecraft/lang/en_us.lang", "hello"));
+        final AssetObjects objects = AssetObjects.open(assets, "1.12");
+        assertTrue(objects.has("assets/minecraft/lang/en_us.lang"));
+
+        // the launcher wrote the objects before the game started; one disappearing mid-run is an install that changed
+        // under us, not something a lookup can paper over, and re-statting every one of them cost 1.15 us each
+        for (Path file : (Iterable<Path>) Files.walk(assets.resolve("objects"))::iterator) {
+            if (Files.isRegularFile(file)) {
+                Files.delete(file);
+            }
+        }
+        assertTrue(objects.has("assets/minecraft/lang/en_us.lang"), "the answer was remembered");
+        assertTrue(objects.lists("assets/minecraft/lang/en_us.lang"), "and the index still knows the name");
+    }
+
+    @Test
     void theJarAnswersWhenTheDownloadedHalfIsMissing(@TempDir Path dir) throws Exception {
         final Path assets = dir.resolve("assets");
         Files.createDirectories(assets);

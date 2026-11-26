@@ -317,7 +317,11 @@ public final class LoadIndex {
     private static int scan(File archive, java.util.jar.JarFile jar, String pathPrefix, boolean classesOnly,
             EntrySink sink) {
         int found = 0;
-        for (java.util.jar.JarEntry entry : Collections.list(jar.entries())) {
+        // enumerated in place: a catalog walks every entry of every layer, and materialising that list per layer per
+        // call was the largest allocation the listing did
+        for (final java.util.Iterator<java.util.jar.JarEntry> entries =
+                java.util.Collections.list(jar.entries()).iterator(); entries.hasNext(); ) {
+            final java.util.jar.JarEntry entry = entries.next();
             final String name = entry.getName();
             if (!name.startsWith(pathPrefix) || name.endsWith("/")) {
                 continue;
@@ -392,7 +396,8 @@ public final class LoadIndex {
                 continue;
             }
             // a member MCP leaves alone is called the same thing in both worlds, so it answers to its own name
-            final String mapped = table.mcpNameOf(member.name()).orElse(member.name());
+            final String known = table.mcpNameOrNull(member.name());
+            final String mapped = known == null ? member.name() : known;
             if (mapped.equals(mcpName)) {
                 found.add(new MemberRef(owner, member.name(), member.descriptor(), member.method()));
             }
@@ -566,7 +571,8 @@ public final class LoadIndex {
     private JarFingerprint fingerprintOf(File archive) {
         // the class loader already has most of these open; asking it first is what keeps this a read, not a reopen
         try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
-            return JarFingerprint.compute(Collections.list(borrow.jar().entries()));
+            // an Enumeration and not a list: the fingerprint folds the entries in one pass and nothing else needs them
+            return JarFingerprint.compute(borrow.jar().entries());
         } catch (IOException | RuntimeException e) {
             FMLLog.log.debug("Could not fingerprint {}", archive, e);
             return null;

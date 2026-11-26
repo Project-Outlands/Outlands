@@ -40,6 +40,12 @@ public final class AssetObjects {
     private final Path objectsDir;
     /** {@code minecraft:lang/en_us.lang} to the object's file name, which is its hash. */
     private final Map<String, String> hashByName;
+    /**
+     * Whether an object is on disk, keyed by the path it was asked for, because the answer cannot change while the
+     * game runs. Keyed by the raw path rather than the hash so a repeated lookup is one map read: normalising the
+     * path allocates two strings and was most of what was left of the cost once the stat was gone.
+     */
+    private final Map<String, Boolean> present = new java.util.concurrent.ConcurrentHashMap<>();
     private final String source;
     private final String indexId;
 
@@ -140,10 +146,23 @@ public final class AssetObjects {
     /**
      * @return whether the index lists the name <em>and</em> the object it points at exists; a partial download passes
      *         {@link #lists} and fails this, which is what a caller should decide on
+     *
+     * <p>The answer is remembered for the life of the process, because the launcher writes the objects before it
+     * starts the game: asking the file system on every lookup cost 1.15 us, and an object appearing or disappearing
+     * mid-run means the installation changed under the game, which is not something a lookup can paper over.
      */
     public boolean has(String path) {
+        final Boolean known = present.get(path);
+        if (known != null) {
+            return known;
+        }
+        // one stat per path for the life of the process: the launcher writes the objects before it starts the game,
+        // and asking the file system on every lookup was 1.15 us each - per item, per icon, per query
         final String hash = hashByName.get(normalise(path));
-        return hash != null && Files.isRegularFile(objectsDir.resolve(hash.substring(0, 2)).resolve(hash));
+        final boolean there = hash != null
+                && Files.isRegularFile(objectsDir.resolve(hash.substring(0, 2)).resolve(hash));
+        final Boolean raced = present.putIfAbsent(path, there);
+        return raced == null ? there : raced;
     }
 
     /**
