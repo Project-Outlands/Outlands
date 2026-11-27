@@ -20,6 +20,7 @@ plugins {
 }
 
 import top.outlands.gradle.helpers.ProjectConstants
+import top.outlands.gradle.helpers.ReleaseVersions
 import top.outlands.gradle.helpers.tasks.Util
 
 def sysProps = System.getProperties()
@@ -67,6 +68,56 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 idea.project.settings.compiler.javac.javacAdditionalOptions = ProjectConstants.COMPILER_JVM_ARGUMENTS.join(' ')
+
+// region git hooks -----------------------------------------------------------
+// The commit message rules live in .githooks/, which is tracked, but git only reads .git/hooks unless
+// core.hooksPath points somewhere else - and that setting is part of a clone, not of the repository. Installing it
+// from here means the check is on for anyone who opens the project in IDEA (see the sync trigger below) or runs any
+// Gradle task once, without a setup step to remember.
+//
+// It stays best effort on purpose: a source archive has no .git, a shallow clone still commits fine, and a build
+// must never fail over a hook.
+tasks.register('installGitHooks') {
+    group = 'setup'
+    description = 'Points core.hooksPath at .githooks so a commit message is checked before the commit is created.'
+    // Always runs: 'git config' is cheap and idempotent, and the hook files may have been added since the last run.
+    outputs.upToDateWhen { false }
+
+    doLast {
+        if (!new File(rootDir, '.git').exists()) {
+            logger.info('Not a git checkout, leaving core.hooksPath alone')
+            return
+        }
+
+        def hooks = new File(rootDir, '.githooks')
+
+        if (!hooks.isDirectory()) {
+            logger.warn("installGitHooks: ${hooks} is missing")
+            return
+        }
+
+        // A checkout that lost the executable bit (Windows, a zip of the working tree) would make git skip the hook
+        // silently, which is the one failure mode that looks like success.
+        hooks.listFiles({ it.isFile() } as java.io.FileFilter)?.each { file ->
+            if (!file.setExecutable(true, false)) logger.warn("installGitHooks: could not mark ${file.name} executable")
+        }
+
+        // Relative on purpose: git resolves core.hooksPath against the top of the working tree, so the clone can be
+        // moved or renamed without the configuration going stale.
+        def result = ReleaseVersions.gitResult(rootDir, 'config', 'core.hooksPath', '.githooks')
+
+        if (result.exit != 0) {
+            logger.warn("installGitHooks: git config failed (${result.exit}): ${result.output.trim()}")
+        } else {
+            logger.lifecycle('Commit messages are checked against .githooks before a commit is created')
+        }
+    }
+}
+
+// IDEA runs this at the start of a sync, so a clone that is only ever opened in the IDE gets the hook too. 'before'
+// and not 'after': a sync that fails later should not leave the clone without the check.
+idea.project.settings.taskTriggers.beforeSync(':installGitHooks')
+// endregion
 
 // region release -------------------------------------------------------------
 // Maintainer entry point: './gradlew release'. It never builds or publishes locally; it verifies the repository

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Checks one commit subject against the rules the changelog uses (cliff.toml).
+#
+# Reads the subject from the first line of stdin and exits non-zero with a reason when it does not pass. One script
+# serves both the local commit-msg hook and the CI check, so the two cannot disagree about what is allowed.
+set -eu
+
+subject=$(head -1 | tr -d '\r')
+
+# Messages nobody writes by hand: merge commits (git merge, GitHub's merge button), reverts, and the rebase
+# autosquash markers. They are exempt rather than rewritten.
+case "$subject" in
+    'Merge '*|'Revert "'*|'fixup! '*|'squash! '*|'amend! '*) exit 0 ;;
+esac
+
+# The release workflow appends this so that the changelog commit does not start a build.
+case "$subject" in
+    *' [skip ci]') subject=${subject%' [skip ci]'} ;;
+esac
+
+if [ -z "$subject" ]; then
+    echo "commit message: the first line is empty" >&2
+    exit 1
+fi
+
+# type(scope)!: description. The types are exactly the ones cliff.toml groups or skips: a type it does not know
+# ends up in the 'Other' section of the changelog instead of the one it belongs to.
+if ! printf '%s\n' "$subject" | grep -Eq '^(feat|fix|perf|refactor|test|chore|build|ci|docs|style)(\([a-z0-9._-]+\))?!?: [^ ].*$'; then
+    cat >&2 <<EOF
+commit message: '${subject}' is not a conventional commit
+
+    type(scope): description
+
+    types: feat fix perf refactor test chore build ci docs style
+
+The type decides the changelog section (see cliff.toml); build, ci, docs and style are skipped there, everything
+else is listed under its own heading.
+EOF
+    exit 1
+fi
+
+case "$subject" in
+    *.)
+        echo "commit message: '${subject}' ends with a period, the subject is a heading in the changelog" >&2
+        exit 1
+        ;;
+esac
+
+if [ ${#subject} -gt 100 ]; then
+    echo "commit message: the subject is ${#subject} characters, keep it to 100 or less" >&2
+    exit 1
+fi
+
+exit 0

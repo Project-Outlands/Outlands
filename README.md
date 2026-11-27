@@ -31,6 +31,13 @@ Artifacts land in `projects/outlands/build/libs/`:
 
 `-Prelease` builds the launcher pack against the published maven URL instead of pointing at the local jar.
 
+### Commit messages
+
+Subjects are checked against `cliff.toml` before a commit is created: `type(scope): description`, with the types the
+changelog groups or skips. The rules live in `.githooks/`, and `./gradlew installGitHooks` points `core.hooksPath` at
+them - IntelliJ runs it as part of every Gradle sync, so opening the project is enough. CI checks the same rules for
+what the hook cannot see (a `--no-verify` commit, and the PR title that GitHub turns into the squash message).
+
 ### Version
 
 CalVer, `YYYY.MM.DD`, in UTC, with nothing else in it - no commit distance, no dirty flag, no CI run number. Two

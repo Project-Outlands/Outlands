@@ -1,0 +1,41 @@
+name: Commit messages
+
+# The local hook (.githooks/commit-msg) cannot see everything: 'git commit --no-verify' skips it, tooling that applies
+# patches (git am, cherry-pick from a bundle) never lands in a working tree with hooks, and GitHub's 'Squash and merge'
+# builds the commit message from the pull request title on the server. This runs the same checker for those paths.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commitlint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional:
+    name: Conventional commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The commit range starts at the base commit, which a shallow clone does not have.
+          fetch-depth: 0
+
+      # On a squash merge the PR title becomes the commit message, so it is held to the same rule.
+      - name: Pull request title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$TITLE" | .githooks/check-subject
+
+      - name: Commits in the pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          failed=0
+          while IFS= read -r subject; do
+            printf '%s\n' "$subject" | .githooks/check-subject || failed=1
+          done < <(git log --no-merges --format=%s "$BASE"..HEAD)
+          exit $failed

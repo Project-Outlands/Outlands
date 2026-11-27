@@ -1,0 +1,17 @@
+#!/bin/sh
+# git commit-msg hook: refuses a commit whose subject is not a conventional commit (see check-subject).
+#
+# git passes the path to the message file as $1. It still holds the comment lines and, with 'git commit --verbose',
+# the diff block behind a scissors line; none of that is part of the message, so the subject is the first line that
+# survives them.
+set -eu
+
+if [ "$#" -lt 1 ] || [ ! -f "$1" ]; then
+    echo "commit-msg: expected the path to the message file, got '$*'" >&2
+    exit 1
+fi
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+subject=$(tr -d '\r' < "$1" | sed -e '/^#/d' -e '/^$/d' -e '/^------------------------ >8/d' | head -1)
+
+printf '%s\n' "$subject" | "$here/check-subject"

@@ -30,6 +30,13 @@
 
 `-Prelease` 会让启动器整合包指向已发布的 maven 地址，而不是本地 jar。
 
+### 提交信息
+
+提交的 subject 会在提交创建之前按 `cliff.toml` 校验：`type(scope): description`，type 取 changelog 分组或跳过的那些。
+规则在 `.githooks/` 里，`./gradlew installGitHooks` 把 `core.hooksPath` 指过去——IntelliJ 每次 Gradle 同步都会跑它，
+所以打开项目就够了。CI 会对钩子看不到的两条路径跑同一套规则：`--no-verify` 的提交，以及 GitHub squash 时当作提交
+信息的 PR 标题。
+
 ### 版本号
 
 CalVer：`YYYY.MM.DD`，用 UTC，**不带任何其它信息**——没有 commit 距离、没有 dirty 标记、没有 CI 运行号。
