@@ -6,10 +6,8 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -26,6 +24,11 @@ import javax.annotation.Nullable;
 import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.discovery.Intern;
 import net.minecraftforge.fml.common.discovery.asm.ModAnnotation;
+
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.readVInt;
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.writeVInt;
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.readVLong;
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.writeVLong;
 
 import org.objectweb.asm.Type;
 
@@ -110,7 +113,7 @@ public final class RecordFile {
         }
         try {
             // A null result means the file is for another jar or revision; only failures are quarantined.
-            return decode(Files.readAllBytes(file.toPath()), expected);
+            return decode(CacheFile.read(file), expected);
         } catch (Exception e) {
             // A file we cannot read is no better than no file; keep it aside and stop touching it in this process.
             FMLLog.log.debug("Ignoring unreadable annotation scan cache {}", file, e);
@@ -126,21 +129,7 @@ public final class RecordFile {
             return;
         }
         try {
-            byte[] bytes = encode(record);
-            File parent = file.getParentFile();
-            if (parent != null) {
-                //noinspection ResultOfMethodCallIgnored
-                parent.mkdirs();
-            }
-            File temp = new File(file.getPath() + TEMP_SUFFIX);
-            try (OutputStream out = Files.newOutputStream(temp.toPath())) {
-                out.write(bytes);
-            }
-            try {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
+            CacheFile.write(file, encode(record), TEMP_SUFFIX);
         } catch (Exception e) {
             FMLLog.log.debug("Could not write the annotation scan cache {}", file, e);
         }
@@ -161,6 +150,10 @@ public final class RecordFile {
     }
 
     private static void sweepDir(File dir, Path base, Path cacheRoot) {
+        // The vanilla index is named after the jar's fingerprint and the mapping salt, not after a path below the game
+        // directory, so there is no file to compare it with; its own name is what invalidates it.
+        final boolean fingerprintKeyed = dir.getAbsoluteFile().toPath().normalize()
+                .equals(cacheRoot.resolve("vanilla"));
         File[] children = dir.listFiles();
         if (children == null) {
             return;
@@ -180,10 +173,25 @@ public final class RecordFile {
                 if (name.endsWith(TEMP_SUFFIX)) {
                     //noinspection ResultOfMethodCallIgnored
                     child.delete();
-                } else if (name.endsWith(FILE_SUFFIX)) {
+                } else if (name.endsWith(FILE_SUFFIX) && !fingerprintKeyed) {
                     Path relative = cacheRoot.relativize(child.getAbsoluteFile().toPath().normalize());
                     String path = relative.toString();
                     if (!base.resolve(path.substring(0, path.length() - FILE_SUFFIX.length())).toFile().isFile()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        child.delete();
+                        // the files that hang off this record answer for the same jar, so they go with it
+                        //noinspection ResultOfMethodCallIgnored
+                        new File(child.getPath() + MemberFile.SUFFIX).delete();
+                        //noinspection ResultOfMethodCallIgnored
+                        new File(child.getPath() + DetailFile.SUFFIX).delete();
+                    }
+                } else if (name.endsWith(MemberFile.SUFFIX) || name.endsWith(DetailFile.SUFFIX)) {
+                    // an orphan whose record is gone: either an interrupted write or a jar that this sweep has just
+                    // removed, and both leave a file nothing can be read out of
+                    final String suffix = name.endsWith(MemberFile.SUFFIX) ? MemberFile.SUFFIX : DetailFile.SUFFIX;
+                    final File record = new File(child.getPath().substring(0,
+                            child.getPath().length() - suffix.length()));
+                    if (!record.isFile()) {
                         //noinspection ResultOfMethodCallIgnored
                         child.delete();
                     }
@@ -201,7 +209,7 @@ public final class RecordFile {
      * trailing CRC32C is appended through the same stream, so it covers everything written before it.
      */
     private static byte[] encode(JarScanRecord record) throws IOException {
-        Pool pool = new Pool();
+        CacheFormat.Pool pool = new CacheFormat.Pool();
         ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
         DataOutputStream body = new DataOutputStream(bodyBytes);
         writeVInt(body, record.indices().length);
@@ -220,7 +228,7 @@ public final class RecordFile {
         data.writeByte(0); // flags, reserved
         writeVInt(data, record.fingerprint().classEntryCount());
         data.writeLong(record.fingerprint().value());
-        writePool(data, pool);
+        CacheFormat.writePool(data, pool);
         bodyBytes.writeTo(data);
         data.flush();
 
@@ -232,7 +240,7 @@ public final class RecordFile {
         return out.toByteArray();
     }
 
-    private static void writeRecord(DataOutputStream out, Pool pool, ClassScanRecord record) throws IOException {
+    private static void writeRecord(DataOutputStream out, CacheFormat.Pool pool, ClassScanRecord record) throws IOException {
         writeVInt(out, pool.intern(record.internalName()));
         writeVInt(out, record.classVersion());
         writeVInt(out, record.access());
@@ -267,7 +275,7 @@ public final class RecordFile {
         }
     }
 
-    private static void writeValue(DataOutputStream out, Pool pool, @Nullable Object value) throws IOException {
+    private static void writeValue(DataOutputStream out, CacheFormat.Pool pool, @Nullable Object value) throws IOException {
         switch (value) {
             case null -> out.writeByte(TAG_NULL);
             case String string -> {
@@ -416,7 +424,7 @@ public final class RecordFile {
             return null;
         }
 
-        String[] pool = readPool(data, bytes.length);
+        String[] pool = CacheFormat.readPool(data, bytes.length);
 
         int recordCount = readVInt(data);
         if (recordCount < 0) {
@@ -586,99 +594,15 @@ public final class RecordFile {
     // ------------------------------------------------------------------ helpers
 
     /** Writes {@code poolCount || pool[]}; see the layout note on this class. */
-    private static void writePool(DataOutputStream out, Pool pool) throws IOException {
-        writeVInt(out, pool.strings.size());
-        for (String string : pool.strings) {
-            byte[] utf8 = string.getBytes(StandardCharsets.UTF_8);
-            writeVInt(out, utf8.length);
-            out.write(utf8);
-        }
-    }
 
-    /** Reads what {@link #writePool} wrote; {@code sizeLimit} only bounds the allocation for a corrupt file. */
-    private static String[] readPool(DataInputStream data, int sizeLimit) throws IOException {
-        int poolSize = readVInt(data);
-        if (poolSize < 0 || poolSize > sizeLimit) {
-            throw new IOException("bad pool size");
-        }
-        String[] pool = new String[poolSize];
-        for (int i = 0; i < poolSize; i++) {
-            int length = readVInt(data);
-            if (length < 0 || length > data.available()) {
-                throw new IOException("bad pool entry");
-            }
-            byte[] utf8 = new byte[length];
-            data.readFully(utf8);
-            pool[i] = new String(utf8, StandardCharsets.UTF_8);
-        }
-        return pool;
-    }
-
-    private static void writeVInt(DataOutputStream out, int value) throws IOException {
-        int v = (value << 1) ^ (value >> 31);
-        while ((v & ~0x7F) != 0) {
-            out.writeByte((v & 0x7F) | 0x80);
-            v >>>= 7;
-        }
-        out.writeByte(v);
-    }
-
-    private static int readVInt(DataInputStream in) throws IOException {
-        int v = 0;
-        for (int shift = 0; shift <= 28; shift += 7) {
-            int b = in.readUnsignedByte();
-            v |= (b & 0x7F) << shift;
-            if ((b & 0x80) == 0) {
-                return (v >>> 1) ^ -(v & 1);
-            }
-        }
-        throw new IOException("malformed varint");
-    }
-
-    private static void writeVLong(DataOutputStream out, long value) throws IOException {
-        long v = (value << 1) ^ (value >> 63);
-        while ((v & ~0x7FL) != 0) {
-            out.writeByte((int) ((v & 0x7F) | 0x80));
-            v >>>= 7;
-        }
-        out.writeByte((int) v);
-    }
-
-    private static long readVLong(DataInputStream in) throws IOException {
-        long v = 0;
-        for (int shift = 0; shift <= 63; shift += 7) {
-            int b = in.readUnsignedByte();
-            v |= (long) (b & 0x7F) << shift;
-            if ((b & 0x80) == 0) {
-                return (v >>> 1) ^ -(v & 1);
-            }
-        }
-        throw new IOException("malformed varlong");
-    }
-
+    /** Moves a file that could not be read aside, so this process stops touching it. */
     private static void quarantine(File file) {
         try {
-            File errored = new File(file.getPath() + ERR_SUFFIX);
+            final File errored = new File(file.getPath() + ERR_SUFFIX);
             Files.deleteIfExists(errored.toPath());
             Files.move(file.toPath(), errored.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (Exception ignored) {
             // Keep going; the file stays where it is and is simply not used again in this process.
-        }
-    }
-
-    /** Insertion-ordered unique strings; annotation names, members and descriptors repeat heavily. */
-    private static final class Pool {
-        private final List<String> strings = new ArrayList<>();
-        private final Map<String, Integer> ids = new HashMap<>();
-
-        int intern(String string) {
-            Integer id = ids.get(string);
-            if (id == null) {
-                id = strings.size();
-                strings.add(string);
-                ids.put(string, id);
-            }
-            return id;
         }
     }
 }

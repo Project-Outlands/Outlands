@@ -311,6 +311,10 @@ public final class ModDiscoverer {
                 () -> LoadIndex.filesOf(Launch.classLoader.getSources()));
         LoadIndex.activate(loadIndex);
         indexMinecraftJar(loadIndex);
+        // The manifest is the index's publication record: written after everything it names, so a reader that has it
+        // can treat the files it lists as complete. It is published on a thread of its own because nothing in the game
+        // reads it and hashing a few megabytes is not worth a millisecond of the start.
+        loadIndex.writeManifestAsync("discovery");
         // The MCP name table is MCP's data, so it is read from wherever the user put it, on a thread of its own: the
         // start does not wait for it, and a run without one carries SRG names as it always did.
         loadIndex.mappings().start(Launch.minecraftHome);
@@ -494,6 +498,7 @@ public final class ModDiscoverer {
             if (modSide.excludes(FMLLaunchHandler.side().name())) {
                 FMLLog.log.debug("Skipping {}, as we're on {} side and the mod is on {} side", file.getName(), FMLLaunchHandler.side(), modSide);
                 CoreModManager.getIgnoredMods().add(file.getName());
+                SkippedJars.record(file, "side mismatch: " + modSide);
                 return;
             }
 
@@ -672,6 +677,12 @@ public final class ModDiscoverer {
             @Override
             public String descriptor(String descriptor) {
                 return remapper.mapDesc(descriptor);
+            }
+
+            @Override
+            public String signature(String signature, boolean typeSignature) {
+                // the same call FMLRemappingAdapter makes for a declared signature, including the null JDT returns
+                return remapper.mapSignature(signature, typeSignature);
             }
         };
     }

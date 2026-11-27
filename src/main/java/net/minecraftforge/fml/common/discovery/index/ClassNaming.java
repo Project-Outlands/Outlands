@@ -17,6 +17,16 @@ public interface ClassNaming {
     /** A member descriptor with the type names inside it mapped. */
     String descriptor(String descriptor);
 
+    /**
+     * A generic signature with the type names inside it mapped.
+     *
+     * @param typeSignature whether the signature is a type signature (a class or field) rather than a method's, which
+     *                      carries type parameters of its own; the remapper needs the difference
+     */
+    default String signature(String signature, boolean typeSignature) {
+        return signature;
+    }
+
     /** The mapping that leaves everything alone, which is what a deobfuscated install uses. */
     static ClassNaming identity() {
         return new ClassNaming() {

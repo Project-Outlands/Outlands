@@ -711,6 +711,10 @@ public class LibraryManager
                 {
                     FMLLog.log.debug("Not extracting {} from {}: a higher version of \"{}\" is bundled elsewhere ({})",
                             dep, new File(jar.getName()).getName(), declared.id(), bundledSelection.winnerVersion(declared.id()));
+                    // a reader that indexes nested jars would otherwise pick up the copy the game leaves out
+                    net.minecraftforge.fml.common.discovery.SkippedJars.record(
+                            jar.getName() + "!/" + dep,
+                            "shadowed by bundled " + declared.id() + " " + bundledSelection.winnerVersion(declared.id()));
                     continue;
                 }
 

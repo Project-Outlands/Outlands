@@ -6,10 +6,8 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -20,6 +18,9 @@ import java.util.zip.CRC32C;
 import javax.annotation.Nullable;
 
 import net.minecraftforge.fml.common.FMLLog;
+
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.readVInt;
+import static net.minecraftforge.fml.common.discovery.cache.CacheFormat.writeVInt;
 
 /**
  * On-disk form of a jar's member table: the members of every scanned class, keyed by class name and guarded by the
@@ -39,7 +40,7 @@ public final class MemberFile {
     public static final int CACHE_REV = 1;
 
     private static final int MAGIC = 0x4D46; // 'M''F'
-    private static final String SUFFIX = ".members";
+    static final String SUFFIX = ".members";
     private static final String TEMP_SUFFIX = ".tmp";
 
     private MemberFile() {}
@@ -63,14 +64,7 @@ public final class MemberFile {
                 //noinspection ResultOfMethodCallIgnored
                 parent.mkdirs();
             }
-            final File temp = new File(file.getPath() + TEMP_SUFFIX);
-            Files.write(temp.toPath(), bytes);
-            try {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
+            CacheFile.write(file, bytes, TEMP_SUFFIX);
         } catch (Exception e) {
             FMLLog.log.debug("Could not write the member index {}", file, e);
         }
@@ -86,7 +80,7 @@ public final class MemberFile {
             return null;
         }
         try {
-            return decode(Files.readAllBytes(file.toPath()), expected);
+            return decode(CacheFile.read(file), expected);
         } catch (Exception e) {
             FMLLog.log.debug("Ignoring unreadable member index {}", file, e);
             return null;
@@ -94,7 +88,7 @@ public final class MemberFile {
     }
 
     private static byte[] encode(JarFingerprint fingerprint, Map<String, MemberRecord[]> members) throws IOException {
-        final Pool pool = new Pool();
+        final CacheFormat.Pool pool = new CacheFormat.Pool();
         final ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream(1 << 14);
         final DataOutputStream body = new DataOutputStream(bodyBytes);
         writeVInt(body, members.size());
@@ -117,12 +111,7 @@ public final class MemberFile {
         data.writeByte(0); // flags, reserved
         writeVInt(data, fingerprint.classEntryCount());
         data.writeLong(fingerprint.value());
-        writeVInt(data, pool.size());
-        for (String string : pool.strings()) {
-            final byte[] utf8 = string.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            writeVInt(data, utf8.length);
-            data.write(utf8);
-        }
+        CacheFormat.writePool(data, pool);
         body.flush();
         data.write(bodyBytes.toByteArray());
 
@@ -159,15 +148,9 @@ public final class MemberFile {
             return null;
         }
 
-        final int poolCount = readVInt(data);
-        if (poolCount < 0) {
+        final String[] pool = CacheFormat.readPool(data, bytes.length);
+        if (pool == null) {
             return null;
-        }
-        final String[] pool = new String[poolCount];
-        for (int i = 0; i < poolCount; i++) {
-            final byte[] utf8 = new byte[readVInt(data)];
-            data.readFully(utf8);
-            pool[i] = new String(utf8, java.nio.charset.StandardCharsets.UTF_8);
         }
 
         final int classCount = readVInt(data);
@@ -195,49 +178,5 @@ public final class MemberFile {
             return null;
         }
         return members;
-    }
-
-    private static void writeVInt(DataOutputStream out, int value) throws IOException {
-        int v = (value << 1) ^ (value >> 31);
-        while ((v & ~0x7F) != 0) {
-            out.writeByte((v & 0x7F) | 0x80);
-            v >>>= 7;
-        }
-        out.writeByte(v);
-    }
-
-    private static int readVInt(DataInputStream in) throws IOException {
-        int v = 0;
-        for (int shift = 0; shift <= 28; shift += 7) {
-            int b = in.readUnsignedByte();
-            v |= (b & 0x7F) << shift;
-            if ((b & 0x80) == 0) {
-                return (v >>> 1) ^ -(v & 1);
-            }
-        }
-        throw new IOException("malformed varint");
-    }
-
-    private static final class Pool {
-        private final List<String> strings = new ArrayList<>();
-        private final Map<String, Integer> ids = new HashMap<>();
-
-        int intern(String string) {
-            Integer id = ids.get(string);
-            if (id == null) {
-                id = strings.size();
-                strings.add(string);
-                ids.put(string, id);
-            }
-            return id;
-        }
-
-        int size() {
-            return strings.size();
-        }
-
-        List<String> strings() {
-            return strings;
-        }
     }
 }

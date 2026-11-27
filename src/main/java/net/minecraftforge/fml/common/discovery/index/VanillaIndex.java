@@ -20,7 +20,10 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import net.minecraftforge.fml.common.discovery.ITypeDiscoverer;
+import net.minecraftforge.fml.common.discovery.cache.ClassDetail;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.DetailRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberDetail;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
@@ -60,8 +63,11 @@ final class VanillaIndex {
         return false;
     }
 
-    /** The two things one pass produces: the class index and the member table it is queried with. */
-    record Scanned(JarScanRecord index, Map<String, MemberRecord[]> members) {}
+    /**
+     * The three things one pass produces: the class index, the member table it is queried with, and the detail a
+     * language tool asks for, all from the same visit and all named the way the loader defines them.
+     */
+    record Scanned(JarScanRecord index, Map<String, MemberRecord[]> members, DetailRecord detail) {}
 
     /**
      * @return the index of {@code archive} with every name mapped the way the loader maps it, and its member table
@@ -71,8 +77,11 @@ final class VanillaIndex {
         final List<Integer> indices = new ArrayList<>();
         final List<ClassScanRecord> records = new ArrayList<>();
         final Map<String, MemberRecord[]> members = new HashMap<>();
+        final Map<String, ClassDetail> details = new HashMap<>();
+        net.minecraftforge.fml.common.asm.transformers.AtRule[] atRules = new net.minecraftforge.fml.common.asm.transformers.AtRule[0];
         try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
             final java.util.jar.JarFile zip = borrow.jar();
+            atRules = net.minecraftforge.fml.common.discovery.JarAtRules.of(zip, null);
             int ordinal = -1;
             for (ZipEntry listed : Collections.list(zip.entries())) {
                 // JarFile hands out JarEntry, which is what the index reads through
@@ -86,16 +95,22 @@ final class VanillaIndex {
                 final Header header = readHeader(borrow.index().read(entry), naming);
                 records.add(header.record);
                 members.put(header.record.internalName(), header.members());
+                if (header.detail != null && !header.detail.isEmpty()) {
+                    details.put(header.record.internalName(), header.detail);
+                }
             }
         }
-        return new Scanned(JarScanRecord.of(JarFingerprint.compute(entries), indices, records), members);
+        final JarScanRecord index = JarScanRecord.of(JarFingerprint.compute(entries), indices, records);
+        return new Scanned(index, members, new DetailRecord(index.fingerprint(), details, atRules));
     }
 
     private static Header readHeader(byte[] bytes, ClassNaming naming) throws IOException {
         final Header header = new Header(naming);
         // the bytes came out of the archive at the size its central directory records, so ASM does not have to buffer
         // them into a growing stream of its own first
-        new ClassReader(bytes).accept(header, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        // SourceFile is a debug attribute and is the one thing a reader needs to name a file; method bodies stay
+        // skipped, which is where the line and variable tables live
+        new ClassReader(bytes).accept(header, ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
         header.finish();
         return header;
     }
@@ -113,7 +128,13 @@ final class VanillaIndex {
 
         private final ClassNaming naming;
         private final List<MemberRecord> members = new ArrayList<>();
+        private final Map<String, MemberDetail> memberDetails = new HashMap<>();
         private ClassScanRecord record;
+        private ClassDetail detail;
+        private String signature;
+        private ClassDetail.Inner inner;
+        private ClassDetail.Enclosing enclosing;
+        private String sourceFile;
 
         private String name;
         /** The name the class file declares, which is what a member mapping is looked up by. */
@@ -136,20 +157,59 @@ final class VanillaIndex {
             this.owner = name;
             this.superName = superName;
             this.interfaces = interfaces == null ? new String[0] : interfaces;
+            this.signature = signature;
+        }
+
+        @Override
+        public void visitSource(String source, String debug) {
+            this.sourceFile = source;
+        }
+
+        @Override
+        public void visitOuterClass(String owner, String name, String descriptor) {
+            this.enclosing = new ClassDetail.Enclosing(naming.type(owner),
+                    name == null ? null : naming.member(owner, name, descriptor, true),
+                    descriptor == null ? null : naming.descriptor(descriptor));
+        }
+
+        @Override
+        public void visitInnerClass(String innerName, String outerName, String simpleName, int innerAccess) {
+            if (this.name != null && innerName.equals(this.name)) {
+                this.inner = new ClassDetail.Inner(outerName, simpleName, innerAccess);
+            }
         }
 
         @Override
         public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
-            members.add(new MemberRecord(naming.member(owner, name, descriptor, false),
-                    naming.descriptor(descriptor), access, false));
+            final String mappedName = naming.member(owner, name, descriptor, false);
+            final String mappedDescriptor = naming.descriptor(descriptor);
+            members.add(new MemberRecord(mappedName, mappedDescriptor, access, false));
+            final MemberDetail detail = MemberDetail.of(
+                    signature == null ? null : naming.signature(signature, true), null, value);
+            if (detail != null) {
+                memberDetails.put(MemberRecord.key(mappedName, mappedDescriptor, false), detail);
+            }
             return null;
         }
 
         @Override
         public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
                 String[] exceptions) {
-            members.add(new MemberRecord(naming.member(owner, name, descriptor, true),
-                    naming.descriptor(descriptor), access, true));
+            final String mappedName = naming.member(owner, name, descriptor, true);
+            final String mappedDescriptor = naming.descriptor(descriptor);
+            members.add(new MemberRecord(mappedName, mappedDescriptor, access, true));
+            String[] mappedExceptions = null;
+            if (exceptions != null && exceptions.length > 0) {
+                mappedExceptions = new String[exceptions.length];
+                for (int i = 0; i < exceptions.length; i++) {
+                    mappedExceptions[i] = naming.type(exceptions[i]);
+                }
+            }
+            final MemberDetail detail = MemberDetail.of(
+                    signature == null ? null : naming.signature(signature, false), mappedExceptions, null);
+            if (detail != null) {
+                memberDetails.put(MemberRecord.key(mappedName, mappedDescriptor, true), detail);
+            }
             return null;
         }
 
@@ -162,6 +222,13 @@ final class VanillaIndex {
             this.record = new ClassScanRecord(naming.type(name), version,
                     superName == null ? null : naming.type(superName), access, mapped,
                     new ClassScanRecord.Annotation[0]);
+            final ClassDetail.Inner mappedInner = inner == null ? null
+                    : new ClassDetail.Inner(inner.outer() == null ? null : naming.type(inner.outer()),
+                            inner.innerName(), inner.access());
+            this.detail = new ClassDetail(
+                    signature == null ? null : naming.signature(signature, true),
+                    mappedInner, enclosing, sourceFile,
+                    memberDetails.isEmpty() ? Map.of() : Map.copyOf(memberDetails));
         }
 
         private MemberRecord[] members() {

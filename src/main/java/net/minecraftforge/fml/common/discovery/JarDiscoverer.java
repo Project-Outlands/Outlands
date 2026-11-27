@@ -37,7 +37,10 @@ import net.minecraftforge.fml.common.ModContainer;
 import net.minecraftforge.fml.common.ModContainerFactory;
 import net.minecraftforge.fml.common.discovery.ASMDataTable.ASMData;
 import net.minecraftforge.fml.common.discovery.asm.ASMModParser;
+import net.minecraftforge.fml.common.discovery.cache.ClassDetail;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.DetailFile;
+import net.minecraftforge.fml.common.discovery.cache.DetailRecord;
 import net.minecraftforge.fml.common.DeclarativeModContainer;
 import net.minecraftforge.fml.common.ModMetadata;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
@@ -128,6 +131,9 @@ public class JarDiscoverer implements ITypeDiscoverer
         List<Integer> indices = Lists.newArrayList();
         List<ClassScanRecord> records = Lists.newArrayList();
         Map<String, MemberRecord[]> members = new java.util.HashMap<>();
+        // what a language server reads on top of the header and the member list; produced by the same visit, so it
+        // costs the write and nothing else, and it lives in its own file so that a change here invalidates only it
+        Map<String, ClassDetail> details = new java.util.HashMap<>();
 
         for (int ordinal = 0; ordinal < scanned.size(); ordinal++)
         {
@@ -161,6 +167,11 @@ public class JarDiscoverer implements ITypeDiscoverer
                 indices.add(ordinal);
                 records.add(modParser.toRecord());
                 members.put(modParser.internalName(), modParser.toMembers());
+                ClassDetail detail = modParser.toDetail();
+                if (!detail.isEmpty())
+                {
+                    details.put(modParser.internalName(), detail);
+                }
             }
             ModContainer container = ModContainerFactory.instance().build(modParser, candidate.getModContainer(), candidate);
             addContainer(container, table, foundMods, mc, modParser.getClassVersion());
@@ -174,6 +185,8 @@ public class JarDiscoverer implements ITypeDiscoverer
             RecordFile.write(cacheFile, scan);
             MemberFile.write(MemberFile.fileFor(Launch.minecraftHome, candidate.getModContainer()),
                     scan.fingerprint(), members);
+            DetailFile.write(DetailFile.fileFor(Launch.minecraftHome, candidate.getModContainer()),
+                    new DetailRecord(scan.fingerprint(), details, JarAtRules.of(jar, mc)));
         }
     }
 

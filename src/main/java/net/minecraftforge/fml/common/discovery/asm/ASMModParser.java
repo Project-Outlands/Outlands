@@ -30,7 +30,9 @@ import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.LoaderException;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
 import net.minecraftforge.fml.common.discovery.ModCandidate;
+import net.minecraftforge.fml.common.discovery.cache.ClassDetail;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.MemberDetail;
 import net.minecraftforge.fml.common.discovery.cache.MemberRecord;
 
 import org.objectweb.asm.ClassReader;
@@ -51,6 +53,12 @@ public class ASMModParser
     private final Set<String> interfaces = Sets.newHashSet();
     /** The members as the class file declares them; the parse already walks them, keeping them is what costs. */
     private final List<MemberRecord> members = Lists.newArrayList();
+    /** The detail of the members that have one, keyed by {@link MemberRecord#key}; sparse on purpose. */
+    private final java.util.Map<String, MemberDetail> memberDetails = com.google.common.collect.Maps.newHashMap();
+    private String classSignature;
+    private ClassDetail.Inner innerSelf;
+    private ClassDetail.Enclosing enclosing;
+    private String sourceFile;
 
     public enum AnnotationType
     {
@@ -79,7 +87,10 @@ public class ASMModParser
     {
         try
         {
-            reader.accept(new ModClassVisitor(this), ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            // SKIP_DEBUG is deliberately not set: the SourceFile attribute is a debug attribute, and a language
+            // server wants to name the file a class came from. Method bodies are still skipped, which is where the
+            // line and variable tables (the expensive part of debug info) live.
+            reader.accept(new ModClassVisitor(this), ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
         }
         catch (Exception ex)
         {
@@ -88,10 +99,47 @@ public class ASMModParser
         }
     }
 
-    /** Records one member of the class being parsed. */
-    public void addMember(String name, String descriptor, int access, boolean method)
+    /** Records one member of the class being parsed, and the detail a language server asks for when there is some. */
+    public void addMember(String name, String descriptor, String signature, String[] exceptions, Object value, int access, boolean method)
     {
         members.add(new MemberRecord(name, descriptor, access, method));
+        final MemberDetail detail = MemberDetail.of(signature, exceptions, value);
+        if (detail != null)
+        {
+            memberDetails.put(MemberRecord.key(name, descriptor, method), detail);
+        }
+    }
+
+    /** @return the detail of the class body that was visited last, which is only meaningful once the visit is over */
+    public ClassDetail toDetail()
+    {
+        if (classSignature == null && innerSelf == null && enclosing == null && sourceFile == null && memberDetails.isEmpty())
+        {
+            return ClassDetail.EMPTY;
+        }
+        return new ClassDetail(classSignature, innerSelf, enclosing, sourceFile,
+                memberDetails.isEmpty() ? java.util.Map.of() : java.util.Map.copyOf(memberDetails));
+    }
+
+    /** Sets the {@code SourceFile} attribute of the class being parsed. */
+    public void sourceFile(String source)
+    {
+        this.sourceFile = source;
+    }
+
+    /** Sets the {@code EnclosingMethod} attribute, which local and anonymous classes carry. */
+    public void enclosingMethod(String owner, String name, String descriptor)
+    {
+        this.enclosing = new ClassDetail.Enclosing(owner, name, descriptor);
+    }
+
+    /** Keeps this class' own entry of the {@code InnerClasses} attribute; the other entries describe other classes. */
+    public void innerClass(String name, String outerName, String innerName, int access)
+    {
+        if (asmType != null && name.equals(asmType.getInternalName()))
+        {
+            this.innerSelf = new ClassDetail.Inner(outerName, innerName, access);
+        }
     }
 
     /** @return the internal name of the class, once its header has been visited */
@@ -106,8 +154,9 @@ public class ASMModParser
         return members.toArray(new MemberRecord[0]);
     }
 
-    public void beginNewTypeName(String typeQName, int classVersion, int classAccess, String superClassQName, String[] interfaces)
+    public void beginNewTypeName(String typeQName, int classVersion, int classAccess, String typeSignature, String superClassQName, String[] interfaces)
     {
+        this.classSignature = typeSignature;
         this.asmType = Type.getObjectType(typeQName);
         this.classVersion = classVersion;
         this.classAccess = classAccess;

@@ -14,6 +14,11 @@ public record MemberRecord(String name, String descriptor, int access, boolean m
 
     /** The key a lookup by name alone uses: the descriptor is what tells an overload apart. */
     public String key() {
+        return key(name, descriptor, method);
+    }
+
+    /** The key of a member, which is what a detail record is stored under: a field needs only its name. */
+    public static String key(String name, String descriptor, boolean method) {
         return method ? name + descriptor : name;
     }
 }
