@@ -289,6 +289,39 @@ public class EventBus implements IEventExceptionHandler
         }
     }
 
+    /** Probed listener lists by event type: the list is stable, registrations go into it. */
+    private final java.util.Map<Class<? extends Event>, ListenerList> probedLists = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * @param eventType an event class
+     * @return whether any listener is registered for it on this bus, without instantiating the event
+     *
+     * <p>Asked before an event is built for the sole purpose of posting it - capability gathering does that once per
+     * object and gets nothing at all back when no mod listens, which is the common case for a pack that attaches
+     * nothing. An event type this bus cannot probe answers {@code true}, so a caller only skips what is provably
+     * unwatched.
+     */
+    public boolean hasListeners(Class<? extends Event> eventType)
+    {
+        if (shutdown) return false;
+
+        ListenerList list = probedLists.get(eventType);
+        if (list == null)
+        {
+            try
+            {
+                list = listenerListOf(eventType);
+            }
+            catch (RuntimeException e)
+            {
+                return true;
+            }
+            ListenerList raced = probedLists.putIfAbsent(eventType, list);
+            if (raced != null) list = raced;
+        }
+        return list.getListeners(busID).length > 0;
+    }
+
     public boolean post(Event event)
     {
         if (shutdown) return false;

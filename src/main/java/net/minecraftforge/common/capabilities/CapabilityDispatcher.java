@@ -56,9 +56,12 @@ public final class CapabilityDispatcher implements INBTSerializable<NBTTagCompou
     @SuppressWarnings("unchecked")
     public CapabilityDispatcher(Map<ResourceLocation, ICapabilityProvider> list, @Nullable ICapabilityProvider parent)
     {
-        List<ICapabilityProvider> lstCaps = Lists.newArrayList();
-        List<INBTSerializable<NBTBase>> lstWriters = Lists.newArrayList();
-        List<String> lstNames = Lists.newArrayList();
+        // sized up front: a dispatcher is built once per object that has capabilities, and the three lists otherwise
+        // grew from ten the whole way to the map's size
+        int size = list.size() + (parent != null ? 1 : 0);
+        List<ICapabilityProvider> lstCaps = Lists.newArrayListWithCapacity(size);
+        List<INBTSerializable<NBTBase>> lstWriters = Lists.newArrayListWithCapacity(size);
+        List<String> lstNames = Lists.newArrayListWithCapacity(size);
 
         if (parent != null) // Parents go first!
         {
