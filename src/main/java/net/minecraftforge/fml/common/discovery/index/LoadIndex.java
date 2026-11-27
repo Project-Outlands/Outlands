@@ -14,7 +14,11 @@ import java.util.jar.JarFile;
 import javax.annotation.Nullable;
 
 import net.minecraftforge.fml.common.FMLLog;
+import net.minecraftforge.fml.common.asm.transformers.AtRule;
+import net.minecraftforge.fml.common.discovery.cache.ClassDetail;
 import net.minecraftforge.fml.common.discovery.cache.ClassScanRecord;
+import net.minecraftforge.fml.common.discovery.cache.DetailFile;
+import net.minecraftforge.fml.common.discovery.cache.DetailRecord;
 import net.minecraftforge.fml.common.discovery.cache.JarFingerprint;
 import net.minecraftforge.fml.common.discovery.cache.JarScanRecord;
 import net.minecraftforge.fml.common.discovery.cache.MemberFile;
@@ -74,6 +78,10 @@ public final class LoadIndex {
     /** Per-archive member tables, read on demand: a full table is an order of magnitude larger than the headers. */
     private final Map<File, Map<String, MemberRecord[]>> memberTables = new ConcurrentHashMap<>();
     private final Set<File> withoutMembers = ConcurrentHashMap.newKeySet();
+    /** Per-archive detail, read on demand like the member tables: only a language tool ever asks for it. */
+    private final Map<File, Map<String, ClassDetail>> detailTables = new ConcurrentHashMap<>();
+    private final Map<File, AtRule[]> atRules = new ConcurrentHashMap<>();
+    private final Set<File> withoutDetail = ConcurrentHashMap.newKeySet();
     /** Archives indexed from a file outside the per-jar cache tree, mapped to the index file that was used. */
     private final Map<File, File> vanillaIndexFiles = new ConcurrentHashMap<>();
 
@@ -83,6 +91,13 @@ public final class LoadIndex {
 
     /** Set when the minecraft jar is identified, so the asset view knows which archive is vanilla. */
     private volatile File vanillaArchive;
+    /** What the vanilla index was built for; part of the manifest's chunk key, because it names the mapping. */
+    @Nullable
+    private volatile String mappingSalt;
+    /** Fingerprints are a central-directory walk each; the manifest asks for every archive, so keep them. */
+    private final Map<File, JarFingerprint> fingerprints = new ConcurrentHashMap<>();
+    /** Created on first use; the export has no state of its own besides the single flight it guards. */
+    private volatile IndexExport exporter;
     /** Built once per index; vanilla's asset answer does not change while the process runs. */
     private volatile AssetView vanillaAssets;
 
@@ -122,6 +137,9 @@ public final class LoadIndex {
         withoutRecord.remove(key);
         memberTables.remove(key);
         withoutMembers.remove(key);
+        detailTables.remove(key);
+        atRules.remove(key);
+        withoutDetail.remove(key);
         origins.clear();
         misses.clear();
     }
@@ -151,6 +169,7 @@ public final class LoadIndex {
             final JarScanRecord scan = scanWithCache(archive, naming, salt);
             if (scan != null) {
                 register(archive, scan);
+                mappingSalt = salt;
                 vanillaArchive = archive.getAbsoluteFile();
                 vanillaAssets = null;
                 return true;
@@ -207,6 +226,7 @@ public final class LoadIndex {
                 final File memberFile = memberFileTarget(archive, cacheFile);
                 if (memberFile != null) {
                     MemberFile.write(memberFile, scanned.index().fingerprint(), scanned.members());
+                    DetailFile.write(new File(memberFile.getPath() + ".detail"), scanned.detail());
                 }
             }
             // keep the table this pass produced, so the first query after it does not read it back
@@ -233,6 +253,130 @@ public final class LoadIndex {
         }
         final File root = new File(RecordFile.cacheDir(gameDir), "vanilla");
         return new File(root, salt + "-" + Long.toHexString(fingerprint.value()) + "-" + fingerprint.classEntryCount() + ".bin");
+    }
+
+    /** @param reason what the manifest is being written for, {@code discovery} or {@code dump} */
+    public void writeManifest(String reason) {
+        IndexManifest.write(gameDir, this, reason);
+    }
+
+    /** Publishes the manifest without making the start wait for its hashes; nothing in the game reads it. */
+    public void writeManifestAsync(String reason) {
+        IndexManifest.writeAsync(gameDir, this, reason);
+    }
+
+    /** @return the handle a mod uses to ask for the file form of what only this process can produce */
+    public IndexExport export() {
+        IndexExport known = exporter;
+        if (known == null) {
+            synchronized (this) {
+                known = exporter;
+                if (known == null) {
+                    known = new IndexDumper(this);
+                    exporter = known;
+                }
+            }
+        }
+        return known;
+    }
+
+    /** @return the directory this index describes; the manifest and the per-jar files are placed relative to it */
+    File gameDir() {
+        return gameDir;
+    }
+
+    /** @return the salt the vanilla index was built with, or an empty string when it was not identified */
+    String mappingSalt() {
+        final String salt = mappingSalt;
+        return salt == null ? "" : salt;
+    }
+
+    /** @return the fingerprint of an archive, remembered for the process; null when it cannot be read */
+    @Nullable
+    JarFingerprint fingerprintFor(File archive) {
+        final File key = archive.getAbsoluteFile();
+        final JarFingerprint known = fingerprints.get(key);
+        if (known != null) {
+            return known;
+        }
+        // Discovery already computed one for every archive it scanned, which is most of a class path: reuse it
+        // instead of folding the central directory again for the manifest.
+        final JarScanRecord scan = scans.get(key);
+        final JarFingerprint fingerprint = scan != null ? scan.fingerprint() : fingerprintOf(key);
+        if (fingerprint != null) {
+            fingerprints.put(key, fingerprint);
+        }
+        return fingerprint;
+    }
+
+    /** @return the header file of an archive, which is where the vanilla ones live outside the game directory */
+    @Nullable
+    File headersFileFor(File archive) {
+        final File vanilla = vanillaIndexFiles.get(archive.getAbsoluteFile());
+        if (vanilla != null) {
+            return vanilla;
+        }
+        return RecordFile.fileFor(gameDir, archive);
+    }
+
+    /**
+     * @param internalName a name such as {@code net/minecraft/world/World}
+     * @return the generic signatures, nested class identity and member signatures of that class; empty when the
+     *         archive has no detail file (never asked for) or the class has none of it
+     */
+    public ClassDetail detailOf(String internalName) {
+        final File origin = archiveOf(internalName);
+        if (origin == null) {
+            return ClassDetail.EMPTY;
+        }
+        final ClassDetail detail = detailTableOf(origin).get(internalName);
+        return detail == null ? ClassDetail.EMPTY : detail;
+    }
+
+    /** @return every archive's access transformer rules, unioned in class path order */
+    public List<AtRule> atRules() {
+        final List<AtRule> result = new ArrayList<>();
+        for (File archive : order()) {
+            if (!archive.isDirectory()) {
+                result.addAll(List.of(atRulesOf(archive)));
+            }
+        }
+        return result;
+    }
+
+    private AtRule[] atRulesOf(File archive) {
+        detailTableOf(archive);
+        final AtRule[] rules = atRules.get(archive.getAbsoluteFile());
+        return rules == null ? new AtRule[0] : rules;
+    }
+
+    /** @return the detail of one archive, read on demand and remembered; empty when it has no file */
+    private Map<String, ClassDetail> detailTableOf(File archive) {
+        final File key = archive.getAbsoluteFile();
+        final Map<String, ClassDetail> known = detailTables.get(key);
+        if (known != null) {
+            return known;
+        }
+        if (withoutDetail.contains(key)) {
+            return Map.of();
+        }
+        final File file = detailFileFor(key);
+        final JarFingerprint fingerprint = fingerprintFor(key);
+        final DetailRecord record = file == null || fingerprint == null ? null : DetailFile.read(file, fingerprint);
+        if (record == null) {
+            withoutDetail.add(key);
+            return Map.of();
+        }
+        detailTables.put(key, record.classes());
+        atRules.put(key, record.atRules());
+        return record.classes();
+    }
+
+    /** @return the detail file of an archive, which for vanilla sits next to its index outside the game directory */
+    @Nullable
+    File detailFileFor(File archive) {
+        final File headers = headersFileFor(archive);
+        return headers == null ? null : new File(headers.getPath() + ".detail");
     }
 
     /** @return the archives this index searches, in class path order */

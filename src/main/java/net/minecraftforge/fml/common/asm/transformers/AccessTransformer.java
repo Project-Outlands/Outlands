@@ -57,13 +57,10 @@ import org.objectweb.asm.tree.InnerClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
-import com.google.common.base.Splitter;
 import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.io.CharSource;
-import com.google.common.io.LineProcessor;
 import com.google.common.io.Resources;
 
 public class AccessTransformer implements IClassTransformer
@@ -79,6 +76,18 @@ public class AccessTransformer implements IClassTransformer
         public boolean changeFinal = false;
         public boolean markFinal = false;
         protected boolean modifyClassVisibility;
+
+        static Modifier of(AtRule rule)
+        {
+            Modifier m = new Modifier();
+            m.name = rule.name();
+            m.desc = rule.descriptor();
+            m.targetAccess = rule.targetAccess();
+            m.changeFinal = rule.changeFinal();
+            m.markFinal = rule.markFinal();
+            m.modifyClassVisibility = rule.classVisibility();
+            return m;
+        }
 
         private void setTargetAccess(String name)
         {
@@ -131,54 +140,10 @@ public class AccessTransformer implements IClassTransformer
     }
     protected void processATFile(CharSource rulesResource) throws IOException
     {
-        rulesResource.readLines(new LineProcessor<Void>()
+        for (AtRule rule : AtRules.parse(rulesResource))
         {
-            @Override
-            public Void getResult()
-            {
-                return null;
-            }
-
-            @Override
-            public boolean processLine(@NonNull String input) throws IOException
-            {
-                String line = Iterables.getFirst(Splitter.on('#').limit(2).split(input), "").trim();
-                if (line.isEmpty())
-                {
-                    return true;
-                }
-                List<String> parts = Lists.newArrayList(Splitter.on(" ").trimResults().split(line));
-                if (parts.size()>3)
-                {
-                    throw new RuntimeException("Invalid config file line "+ input);
-                }
-                Modifier m = new Modifier();
-                m.setTargetAccess(parts.get(0));
-
-                if (parts.size() == 2)
-                {
-                    m.modifyClassVisibility = true;
-                }
-                else
-                {
-                    String nameReference = parts.get(2);
-                    int parenIdx = nameReference.indexOf('(');
-                    if (parenIdx>0)
-                    {
-                        m.desc = nameReference.substring(parenIdx);
-                        m.name = nameReference.substring(0,parenIdx);
-                    }
-                    else
-                    {
-                        m.name = nameReference;
-                    }
-                }
-                String className = parts.get(1).replace('/', '.');
-                modifiers.put(className, m);
-                if (DEBUG) FMLLog.log.debug("AT RULE: {} {} {} (type {})", toBinary(m.targetAccess), m.name, m.desc, className);
-                return true;
-            }
-        });
+            modifiers.put(rule.owner().replace('/', '.'), Modifier.of(rule));
+        }
     }
 
     @Override

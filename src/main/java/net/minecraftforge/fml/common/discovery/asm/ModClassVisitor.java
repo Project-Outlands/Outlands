@@ -39,7 +39,26 @@ public class ModClassVisitor extends ClassVisitor
     @Override
     public void visit(int version, int access, String name, String signature, String superName, String[] interfaces)
     {
-        discoverer.beginNewTypeName(name, version, access, superName, interfaces);
+        discoverer.beginNewTypeName(name, version, access, signature, superName, interfaces);
+    }
+
+    @Override
+    public void visitSource(String source, String debug)
+    {
+        discoverer.sourceFile(source);
+    }
+
+    @Override
+    public void visitOuterClass(String owner, String name, String descriptor)
+    {
+        discoverer.enclosingMethod(owner, name, descriptor);
+    }
+
+    @Override
+    public void visitInnerClass(String name, String outerName, String innerName, int access)
+    {
+        // only this class' own entry says what it is; the rest of the attribute lists classes it mentions
+        discoverer.innerClass(name, outerName, innerName, access);
     }
 
     @Override
@@ -53,14 +72,14 @@ public class ModClassVisitor extends ClassVisitor
     @Override
     public FieldVisitor visitField(int access, String name, String desc, String signature, Object value)
     {
-        discoverer.addMember(name, desc, access, false);
+        discoverer.addMember(name, desc, signature, null, value, access, false);
         return new ModFieldVisitor(name, discoverer);
     }
 
     @Override
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions)
     {
-        discoverer.addMember(name, desc, access, true);
+        discoverer.addMember(name, desc, signature, exceptions, null, access, true);
         return new ModMethodVisitor(name, desc, discoverer);
     }
 }
