@@ -58,7 +58,7 @@
          }
  
          this.validStates = ImmutableList.<IBlockState>copyOf(list1);
-@@ -164,12 +175,41 @@
+@@ -164,12 +175,43 @@
              private final Block block;
              private final ImmutableMap < IProperty<?>, Comparable<? >> properties;
              protected ImmutableTable < IProperty<?>, Comparable<?>, IBlockState > propertyValueTable;
@@ -87,7 +87,9 @@
 +            @Nullable
 +            private IBlockState neighbourOfWrapper(IProperty<?> property, Comparable<?> current, Comparable<?> wanted)
 +            {
-+                Neighbourhood grid = this.block == null ? null : this.block.getBlockState().neighbourhood;
++                Block block = this.block;
++                BlockStateContainer container = block == null ? null : block.getBlockState();
++                Neighbourhood grid = container == null ? null : container.neighbourhood;
 +
 +                if (grid == null)
 +                {
@@ -100,18 +102,29 @@
  
              @Override
              public Collection < IProperty<? >> getPropertyKeys()
-@@ -207,7 +247,9 @@
+@@ -207,7 +249,20 @@
                  }
                  else
                  {
 -                    IBlockState iblockstate = (IBlockState)this.propertyValueTable.get(property, value);
-+                    IBlockState iblockstate = this.neighbourhood == null
-+                            ? this.neighbourOfWrapper(property, comparable, value)
-+                            : this.neighbourhood.withProperty(this.stateIndex, property, comparable, value);
++                    IBlockState iblockstate;
++
++                    if (this.neighbourhood != null)
++                    {
++                        iblockstate = this.neighbourhood.withProperty(this.stateIndex, property, comparable, value);
++                    }
++                    else if (this.propertyValueTable != null)
++                    {
++                        iblockstate = this.propertyValueTable.get(property, value);
++                    }
++                    else
++                    {
++                        iblockstate = this.neighbourOfWrapper(property, comparable, value);
++                    }
  
                      if (iblockstate == null)
                      {
-@@ -249,41 +291,35 @@
+@@ -249,9 +304,33 @@
              @Override
              public int hashCode()
              {
@@ -141,46 +154,14 @@
 +            }
 +
 +            /**
-+             * Kept for binary compatibility. The table this used to build is no longer created: neighbours come from
-+             * the container's property grid, see {@link Neighbourhood}.
++             * Builds this state's neighbour table. The container no longer calls this - neighbours come from the
++             * property grid, see {@link Neighbourhood} - but a container that drives its own state list still does
++             * (IC2Classic's BlockStateContainerIC2 builds its states and calls this for each of them).
 +             */
-+            @Deprecated
              public void buildPropertyValueTable(Map < Map < IProperty<?>, Comparable<? >> , BlockStateContainer.StateImplementation > map)
              {
--                if (this.propertyValueTable != null)
--                {
--                    throw new IllegalStateException();
--                }
--                else
--                {
--                    Table < IProperty<?>, Comparable<?>, IBlockState > table = HashBasedTable.create();
--
--                    for (Entry < IProperty<?>, Comparable<? >> entry : this.properties.entrySet())
--                    {
--                        IProperty<?> iproperty = entry.getKey();
--
--                        for (Comparable<?> comparable : iproperty.getAllowedValues())
--                        {
--                            if (comparable != entry.getValue())
--                            {
--                                table.put(iproperty, comparable, map.get(this.getPropertiesWithValue(iproperty, comparable)));
--                            }
--                        }
--                    }
--
--                    this.propertyValueTable = ImmutableTable.copyOf(table);
--                }
--            }
--
--            private Map < IProperty<?>, Comparable<? >> getPropertiesWithValue(IProperty<?> property, Comparable<?> value)
--            {
--                Map < IProperty<?>, Comparable<? >> map = Maps.newHashMap(this.properties);
--                map.put(property, value);
--                return map;
-             }
- 
-             @Override
-@@ -528,5 +564,221 @@
+                 if (this.propertyValueTable != null)
+@@ -528,5 +607,221 @@
              {
                  return this.block.getBlockFaceShape(worldIn, this, pos, facing);
              }

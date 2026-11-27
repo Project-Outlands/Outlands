@@ -1,5 +1,6 @@
 package net.minecraftforge.common.property;
 
+import java.util.List;
 import java.util.Map;
 
 import net.minecraft.block.Block;
@@ -15,6 +16,8 @@ import net.minecraft.util.IStringSerializable;
 import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -198,6 +201,32 @@ class BlockStateNeighbourhoodTest
         {
             super(source.getBlock(), source.getProperties(), ((BlockStateBase) source).getPropertyValueTable());
         }
+    }
+
+    /**
+     * IC2Classic's BlockStateContainerIC2 does not use the container's own state list: it calls the super
+     * constructor with no properties, builds its own states, and calls buildPropertyValueTable() for each of them
+     * while the block is still under construction (so {@code block.getBlockState()} is still null). Its
+     * data-carrying wrapper states then forward that table. Everything here happens with no block at all.
+     */
+    @Test
+    void statesThatBuiltTheirOwnTableStillAnswerFromIt()
+    {
+        BlockStateContainer container = container();
+        IBlockState base = container.getBaseState();
+        Map<Map<IProperty<?>, Comparable<?>>, BlockStateContainer.StateImplementation> states = Maps.newHashMap();
+
+        for (IBlockState state : container.getValidStates())
+        {
+            states.put(state.getProperties(), (BlockStateContainer.StateImplementation) state);
+        }
+
+        WrappingState own = new WrappingState(base);
+        own.buildPropertyValueTable(states);
+
+        assertSame(stateWith(container, base, AGE, 2), withProperty(own, AGE, 2));
+        assertSame(stateWith(container, base, SHAPE, Shape.CORNER), withProperty(own, SHAPE, Shape.CORNER));
+        assertThrows(IllegalArgumentException.class, () -> own.withProperty(AGE, 9));
     }
 
     @Test
