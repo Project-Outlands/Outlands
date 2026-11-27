@@ -668,18 +668,9 @@ public class ForgeHooksClient
 
     public static void renderLitItem(RenderItem ri, IBakedModel model, int color, ItemStack stack)
     {
-        List<BakedQuad> allquads = new ArrayList<>();
-
-        for (EnumFacing enumfacing : EnumFacing.VALUES)
-        {
-            allquads.addAll(model.getQuads(null, enumfacing, 0));
-        }
-
-        allquads.addAll(model.getQuads(null, null, 0));
-
-        if (allquads.isEmpty()) return;
-
-        // Current list of consecutive quads with the same lighting
+        // The seven quad lists are walked where they are instead of being copied into one first: that copy was a list
+        // per item drawn, growing all the way to the model's quad count, and the only thing the loop needs from it is a
+        // position and whether anything was drawn before.
         List<BakedQuad> segment = new ArrayList<>();
 
         // Lighting of the current segment
@@ -692,50 +683,64 @@ public class ForgeHooksClient
         boolean segmentShadingDirty = false;
         // If the current segment contains lighting data
         boolean hasLighting = false;
+        // Whether a segment was already drawn, which is what "segment is shorter than what was processed" means
+        boolean drawnAny = false;
+        int processed = 0;
 
-        for (int i = 0; i < allquads.size(); i++) 
+        for (int listIndex = 0; listIndex <= EnumFacing.VALUES.length; listIndex++)
         {
-            BakedQuad q = allquads.get(i);
+            List<BakedQuad> quads = listIndex == EnumFacing.VALUES.length
+                    ? model.getQuads(null, null, 0)
+                    : model.getQuads(null, EnumFacing.VALUES[listIndex], 0);
 
-            // Lighting of the current quad
-            int bl = 0;
-            int sl = 0;
-
-            // Fail-fast on ITEM, as it cannot have light data
-            if (q.getFormat() != DefaultVertexFormats.ITEM && q.getFormat().hasUvOffset(1))
+            for (int j = 0; j < quads.size(); j++, processed++)
             {
-                q.pipe(lightGatherer);
-                if (lightGatherer.hasLighting())
+                BakedQuad q = quads.get(j);
+
+                // Lighting of the current quad
+                int bl = 0;
+                int sl = 0;
+
+                // Fail-fast on ITEM, as it cannot have light data
+                if (q.getFormat() != DefaultVertexFormats.ITEM && q.getFormat().hasUvOffset(1))
                 {
-                    bl = lightGatherer.blockLight;
-                    sl = lightGatherer.skyLight;
+                    q.pipe(lightGatherer);
+                    if (lightGatherer.hasLighting())
+                    {
+                        bl = lightGatherer.blockLight;
+                        sl = lightGatherer.skyLight;
+                    }
                 }
-            }
 
-            boolean shade = q.shouldApplyDiffuseLighting();
+                boolean shade = q.shouldApplyDiffuseLighting();
 
-            boolean lightingDirty = segmentBlockLight != bl || segmentSkyLight != sl;
-            boolean shadeDirty = shade != segmentShading; 
+                boolean lightingDirty = segmentBlockLight != bl || segmentSkyLight != sl;
+                boolean shadeDirty = shade != segmentShading;
 
-            // If lighting or color data has changed, draw the segment and flush it
-            if (lightingDirty || shadeDirty)
-            {
-                if (i > 0) // Make sure this isn't the first quad being processed
+                // If lighting or color data has changed, draw the segment and flush it
+                if (lightingDirty || shadeDirty)
                 {
-                    drawSegment(ri, color, stack, segment, segmentBlockLight, segmentSkyLight, segmentShading, segmentLightingDirty && (hasLighting || segment.size() < i), segmentShadingDirty);
+                    if (processed > 0) // Make sure this isn't the first quad being processed
+                    {
+                        drawSegment(ri, color, stack, segment, segmentBlockLight, segmentSkyLight, segmentShading, segmentLightingDirty && (hasLighting || drawnAny), segmentShadingDirty);
+                        drawnAny = true;
+                    }
+                    segmentBlockLight = bl;
+                    segmentSkyLight = sl;
+                    segmentShading = shade;
+                    segmentLightingDirty = lightingDirty;
+                    segmentShadingDirty = shadeDirty;
+                    hasLighting = segmentBlockLight > 0 || segmentSkyLight > 0 || !segmentShading;
                 }
-                segmentBlockLight = bl;
-                segmentSkyLight = sl;
-                segmentShading = shade;
-                segmentLightingDirty = lightingDirty;
-                segmentShadingDirty = shadeDirty;
-                hasLighting = segmentBlockLight > 0 || segmentSkyLight > 0 || !segmentShading;
-            }
 
-            segment.add(q);
+                segment.add(q);
+            }
         }
 
-        drawSegment(ri, color, stack, segment, segmentBlockLight, segmentSkyLight, segmentShading, segmentLightingDirty && (hasLighting || segment.size() < allquads.size()), segmentShadingDirty);
+        // A model with no quads draws nothing, and it used to return here before any of the above
+        if (processed == 0) return;
+
+        drawSegment(ri, color, stack, segment, segmentBlockLight, segmentSkyLight, segmentShading, segmentLightingDirty && (hasLighting || drawnAny), segmentShadingDirty);
 
         // Clean up render state if necessary
         if (hasLighting)
