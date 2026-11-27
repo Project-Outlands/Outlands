@@ -86,8 +86,8 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
             LZMAInputSupplier zis = new LZMAInputSupplier(new FileInputStream(mapData));
             CharSource srgSource = zis.asCharSource(StandardCharsets.UTF_8);
             List<String> srgList = srgSource.readLines();
-            rawMethodMaps = Maps.newHashMap();
-            rawFieldMaps = Maps.newHashMap();
+            rawMethodMaps = Maps.newConcurrentMap();
+            rawFieldMaps = Maps.newConcurrentMap();
             Builder<String, String> builder = ImmutableBiMap.builder();
             Splitter splitter = Splitter.on(CharMatcher.anyOf(" ")).omitEmptyStrings().trimResults();
             String cl = "";
@@ -115,8 +115,8 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
         {
             FMLLog.log.error("An error occurred loading the deobfuscation map data", ioe);
         }
-        methodNameMaps = Maps.newHashMapWithExpectedSize(rawMethodMaps.size());
-        fieldNameMaps = Maps.newHashMapWithExpectedSize(rawFieldMaps.size());
+        methodNameMaps = new java.util.concurrent.ConcurrentHashMap<>(rawMethodMaps.size());
+        fieldNameMaps = new java.util.concurrent.ConcurrentHashMap<>(rawFieldMaps.size());
 
     }
     public void setup(File mcDir, LaunchClassLoader classLoader, String deobfFileName, boolean liveEnv)
@@ -139,8 +139,8 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
                 FMLLog.log.debug("Loading deobfuscation resource {} with {} records", gradleStartProp, srgList.size());
             }
 
-            rawMethodMaps = Maps.newHashMap();
-            rawFieldMaps = Maps.newHashMap();
+            rawMethodMaps = Maps.newConcurrentMap();
+            rawFieldMaps = Maps.newConcurrentMap();
             Builder<String, String> builder = ImmutableBiMap.builder();
             Splitter splitter = Splitter.on(CharMatcher.anyOf(" ")).omitEmptyStrings().trimResults();
             String cl = "";
@@ -167,8 +167,8 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
         {
             FMLLog.log.error("An error occurred loading the deobfuscation map data", ioe);
         }
-        methodNameMaps = Maps.newHashMapWithExpectedSize(rawMethodMaps.size());
-        fieldNameMaps = Maps.newHashMapWithExpectedSize(rawFieldMaps.size());
+        methodNameMaps = new java.util.concurrent.ConcurrentHashMap<>(rawMethodMaps.size());
+        fieldNameMaps = new java.util.concurrent.ConcurrentHashMap<>(rawFieldMaps.size());
     }
 
     public boolean isRemappedClass(String className)
@@ -183,7 +183,7 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
         String newName = parts[1];
         if (!rawFieldMaps.containsKey(cl))
         {
-            rawFieldMaps.put(cl, Maps.newHashMap());
+            rawFieldMaps.put(cl, Maps.newConcurrentMap());
         }
         String fieldType = getFieldType(cl, oldName);
         // We might be in mcp named land, where in fact the name is "new"
@@ -198,8 +198,12 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
     private final Map<String,Map<String,String>> fieldDescriptions = Maps.newHashMap();
 
     // Cache null values so we don't waste time trying to recompute classes with no field or method maps
-    private final Set<String> negativeCacheMethods = Sets.newHashSet();
-    private final Set<String> negativeCacheFields = Sets.newHashSet();
+    // Class loading happens on more than one thread (a measured start defined classes on the main thread, the
+    // integrated server thread, a Netty IO thread and a mod's skin preloader), and these are written lazily while a
+    // class is being mapped. The inner maps of methodNameMaps/fieldNameMaps are immutable; the raw ones are written
+    // when a member is mapped, so they are concurrent as well.
+    private final Set<String> negativeCacheMethods = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<String> negativeCacheFields = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @Nullable
     private String getFieldType(String owner, String name)
@@ -247,7 +251,7 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
         String newName = parts[2];
         if (!rawMethodMaps.containsKey(cl))
         {
-            rawMethodMaps.put(cl, Maps.newHashMap());
+            rawMethodMaps.put(cl, Maps.newConcurrentMap());
         }
         rawMethodMaps.get(cl).put(oldName+sig, newName);
     }
@@ -356,11 +360,9 @@ public class FMLDeobfuscatingRemapper extends Remapper implements Unmapper {
 
     private Map<String,String> getRawFieldMap(String className)
     {
-        if (!rawFieldMaps.containsKey(className))
-        {
-            rawFieldMaps.put(className, Maps.<String,String>newHashMap());
-        }
-        return rawFieldMaps.get(className);
+        // computeIfAbsent: two threads mapping members of the same class used to create two maps, and one of them was
+        // dropped along with whatever had been written to it
+        return rawFieldMaps.computeIfAbsent(className, key -> Maps.newConcurrentMap());
     }
 
     private Map<String,String> getFieldMap(String className, boolean raw)
