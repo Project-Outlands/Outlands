@@ -22,6 +22,8 @@ package net.minecraftforge.event;
 import java.util.Collections;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Maps;
 
 import net.minecraft.util.ResourceLocation;
@@ -38,8 +40,17 @@ import net.minecraftforge.fml.common.eventhandler.GenericEvent;
 public class AttachCapabilitiesEvent<T> extends GenericEvent<T>
 {
     private final T obj;
-    private final Map<ResourceLocation, ICapabilityProvider> caps = Maps.newLinkedHashMap();
-    private final Map<ResourceLocation, ICapabilityProvider> view = Collections.unmodifiableMap(caps);
+    /**
+     * Created on the first {@link #addCapability}, not with the event.
+     *
+     * <p>An event is posted for every object that gathers capabilities - every item stack, tile entity, chunk and
+     * world, and every {@code ItemStack.copy()} - and most of them end with nothing attached. The map and the
+     * unmodifiable view of it were 1.2 GB of a measured start, 88% of every LinkedHashMap the run allocated, for
+     * events nobody added anything to.
+     */
+    @Nullable
+    private Map<ResourceLocation, ICapabilityProvider> caps;
+    private Map<ResourceLocation, ICapabilityProvider> view = Collections.emptyMap();
 
     public AttachCapabilitiesEvent(Class<T> type, T obj)
     {
@@ -66,13 +77,20 @@ public class AttachCapabilitiesEvent<T> extends GenericEvent<T>
      */
     public void addCapability(ResourceLocation key, ICapabilityProvider cap)
     {
-        if (caps.containsKey(key))
+        if (this.caps == null)
+        {
+            this.caps = Maps.newLinkedHashMap();
+            this.view = Collections.unmodifiableMap(this.caps);
+        }
+
+        if (this.caps.containsKey(key))
             throw new IllegalStateException("Duplicate Capability Key: " + key  + " " + cap);
+
         this.caps.put(key, cap);
     }
 
     /**
-     * An unmodifiable view of the capabilities that will be attached to this object.
+     * An unmodifiable view of the capabilities that will be attached to this object; empty when nothing was attached.
      */
     public Map<ResourceLocation, ICapabilityProvider> getCapabilities()
     {

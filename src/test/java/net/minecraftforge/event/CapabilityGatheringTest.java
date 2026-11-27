@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -91,6 +92,21 @@ class CapabilityGatheringTest {
 
         assertNull(ForgeEventFactory.gatherCapabilities(new BareTileEntity()),
                 "and with the listener gone the fast path is back");
+    }
+
+    @Test
+    void anEventNobodyAttachesToHoldsNoMap() {
+        final AttachCapabilitiesEvent<TileEntity> event = new AttachCapabilitiesEvent<>(TileEntity.class, null);
+
+        assertTrue(event.getCapabilities().isEmpty(), "nothing was attached, so there is nothing to hold");
+
+        final ResourceLocation key = new ResourceLocation("test", "cap");
+        event.addCapability(key, PROVIDER);
+        assertSame(PROVIDER, event.getCapabilities().get(key), "the first attachment makes the view");
+
+        // the duplicate guard still has to see the first one, which is what building the map lazily could have broken
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> event.addCapability(key, PROVIDER));
     }
 
     /** A tile entity needs no world to have capabilities gathered for it. */
