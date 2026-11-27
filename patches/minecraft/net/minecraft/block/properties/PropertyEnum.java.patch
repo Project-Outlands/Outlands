@@ -1,0 +1,39 @@
+--- before/net/minecraft/block/properties/PropertyEnum.java
++++ after/net/minecraft/block/properties/PropertyEnum.java
+@@ -15,6 +15,8 @@
+ {
+     private final ImmutableSet<T> allowedValues;
+     private final Map<String, T> nameToValue = Maps.newHashMap();
++    /** Both fields below are final and never mutated, so the hash does not have to be recomputed. */
++    private final int cachedHashCode;
+ 
+     protected PropertyEnum(String name, Class<T> valueClass, Collection<T> allowedValues)
+     {
+@@ -32,6 +34,8 @@
+ 
+             this.nameToValue.put(s, t);
+         }
++
++        this.cachedHashCode = this.computeHashCode();
+     }
+ 
+     @Override
+@@ -69,8 +73,18 @@
+         }
+     }
+ 
++    /**
++     * Hashing a property walks its allowed values and its name to value map, and a block state lookup hashes the
++     * property on every call - getValue(), withProperty() and every map keyed by a property pay this. The result
++     * cannot change: both fields are built once in the constructor and have no mutator.
++     */
+     @Override
+     public int hashCode()
++    {
++        return this.cachedHashCode;
++    }
++
++    private int computeHashCode()
+     {
+         int i = super.hashCode();
+         i = 31 * i + this.allowedValues.hashCode();

@@ -21,6 +21,7 @@ import com.google.common.collect.Maps;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -153,6 +154,21 @@ class BlockStateNeighbourhoodTest
             assertTrue(second.getValidStates().contains(state.withProperty(AGE, 2)));
         }
         assertSame(first.getValidStates().get(1), fromFirst);
+    }
+
+    @Test
+    void equalPropertyEnumsHashEqually()
+    {
+        // PropertyEnum caches its hash; two separate instances with the same name, class and values must still
+        // agree, or a state's property map would stop resolving a property built elsewhere.
+        PropertyEnum<Shape> first = PropertyEnum.create("shape", Shape.class);
+        PropertyEnum<Shape> second = PropertyEnum.create("shape", Shape.class);
+
+        assertNotSame(first, second);
+        assertEquals(first, second);
+        assertEquals(first.hashCode(), second.hashCode());
+        assertEquals(first.hashCode(), first.hashCode());
+        assertNotEquals(first.hashCode(), PropertyEnum.create("kind", Shape.class).hashCode());
     }
 
     @Test
