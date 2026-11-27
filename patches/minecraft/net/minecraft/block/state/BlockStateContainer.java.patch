@@ -9,7 +9,11 @@
  import java.util.regex.Pattern;
  import javax.annotation.Nullable;
  import net.minecraft.block.Block;
-@@ -57,6 +59,16 @@
+@@ -54,9 +56,20 @@
+     private final Block block;
+     private final ImmutableSortedMap < String, IProperty<? >> properties;
+     private final ImmutableList<IBlockState> validStates;
++    private final Neighbourhood neighbourhood;
  
      public BlockStateContainer(Block blockIn, IProperty<?>... properties)
      {
@@ -26,7 +30,7 @@
          this.block = blockIn;
          Map < String, IProperty<? >> map = Maps.newHashMap();
  
-@@ -67,22 +79,20 @@
+@@ -67,22 +80,20 @@
          }
  
          this.properties = ImmutableSortedMap.copyOf(map);
@@ -45,16 +49,16 @@
          }
  
 -        for (BlockStateContainer.StateImplementation blockstatecontainer$stateimplementation1 : list1)
-+        Neighbourhood neighbourhood = new Neighbourhood(this, list1);
++        this.neighbourhood = new Neighbourhood(this, list1);
 +
 +        for (int i = 0; i < list1.size(); ++i)
          {
 -            blockstatecontainer$stateimplementation1.buildPropertyValueTable(map2);
-+            list1.get(i).setNeighbourhood(neighbourhood, i);
++            list1.get(i).setNeighbourhood(this.neighbourhood, i);
          }
  
          this.validStates = ImmutableList.<IBlockState>copyOf(list1);
-@@ -164,12 +174,21 @@
+@@ -164,12 +175,41 @@
              private final Block block;
              private final ImmutableMap < IProperty<?>, Comparable<? >> properties;
              protected ImmutableTable < IProperty<?>, Comparable<?>, IBlockState > propertyValueTable;
@@ -73,19 +77,41 @@
 +                this.properties = propertiesIn;
 +                this.propertyValueTable = propertyValueTable;
 +            }
++
++            /**
++             * A state built by wrapping another one (Forge's extended states call the three argument constructor,
++             * IC2Classic builds data carrying states the same way) has no grid position of its own. The grid it
++             * belongs to is the one its block's container built, which is what the table it used to forward provided.
++             * Nothing is cached: these states are rare and caching would mean writing fields under a data race.
++             */
++            @Nullable
++            private IBlockState neighbourOfWrapper(IProperty<?> property, Comparable<?> current, Comparable<?> wanted)
++            {
++                Neighbourhood grid = this.block == null ? null : this.block.getBlockState().neighbourhood;
++
++                if (grid == null)
++                {
++                    return null;
++                }
++
++                int index = grid.indexOf(this.properties);
++                return index < 0 ? null : grid.withProperty(index, property, current, wanted);
++            }
  
              @Override
              public Collection < IProperty<? >> getPropertyKeys()
-@@ -207,7 +226,7 @@
+@@ -207,7 +247,9 @@
                  }
                  else
                  {
 -                    IBlockState iblockstate = (IBlockState)this.propertyValueTable.get(property, value);
-+                    IBlockState iblockstate = this.neighbourhood == null ? null : this.neighbourhood.withProperty(this.stateIndex, property, comparable, value);
++                    IBlockState iblockstate = this.neighbourhood == null
++                            ? this.neighbourOfWrapper(property, comparable, value)
++                            : this.neighbourhood.withProperty(this.stateIndex, property, comparable, value);
  
                      if (iblockstate == null)
                      {
-@@ -249,41 +268,35 @@
+@@ -249,41 +291,35 @@
              @Override
              public int hashCode()
              {
@@ -154,7 +180,7 @@
              }
  
              @Override
-@@ -528,5 +541,221 @@
+@@ -528,5 +564,221 @@
              {
                  return this.block.getBlockFaceShape(worldIn, this, pos, facing);
              }

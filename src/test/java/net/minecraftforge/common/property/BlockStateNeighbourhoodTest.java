@@ -1,6 +1,5 @@
 package net.minecraftforge.common.property;
 
-import java.util.EnumSet;
 import java.util.Map;
 
 import net.minecraft.block.Block;
@@ -187,6 +186,58 @@ class BlockStateNeighbourhoodTest
         assertEquals(2, aged.getValue(AGE));
         assertEquals(Boolean.TRUE, ((IExtendedBlockState) aged).getUnlistedProperties().get(TestProperty.INSTANCE).orElse(null));
         assertNotNull(aged);
+    }
+
+    /**
+     * The shape Forge's extended states and IC2Classic's data carrying states use: wrap another state and forward
+     * the (now always null) table. Such a state has no grid position, so withProperty has to find its container.
+     */
+    static final class WrappingState extends BlockStateContainer.StateImplementation
+    {
+        WrappingState(IBlockState source)
+        {
+            super(source.getBlock(), source.getProperties(), ((BlockStateBase) source).getPropertyValueTable());
+        }
+    }
+
+    @Test
+    void wrappingStatesResolveTheirGridThroughTheBlock() throws Exception
+    {
+        Block block = bareBlock();
+        BlockStateContainer container = new BlockStateContainer(block, POWERED, AGE, SHAPE);
+        setBlockState(block, container);
+
+        IBlockState source = container.getValidStates().get(0);
+        IBlockState wrapper = new WrappingState(source);
+
+        // Setting the value it already has short circuits before any lookup, wrapper or not.
+        assertSame(wrapper, withProperty(wrapper, AGE, source.getValue(AGE)));
+        assertSame(stateWith(container, source, AGE, 2), withProperty(wrapper, AGE, 2));
+        assertSame(stateWith(container, source, SHAPE, Shape.CORNER), withProperty(wrapper, SHAPE, Shape.CORNER));
+        assertThrows(IllegalArgumentException.class, () -> wrapper.withProperty(AGE, 9));
+    }
+
+    /**
+     * A Block whose constructor never ran: the real one reads {@code SoundType.STONE}, which initialises SoundEvents
+     * and requires the sound registry, and other tests in this project rearrange the registries. Only the container
+     * lookup (which needs {@code block.blockState}) matters here, and that field is written below.
+     */
+    private static Block bareBlock() throws Exception
+    {
+        return (Block) unsafe().allocateInstance(Block.class);
+    }
+
+    private static void setBlockState(Block block, BlockStateContainer container) throws Exception
+    {
+        sun.misc.Unsafe unsafe = unsafe();
+        unsafe.putObject(block, unsafe.objectFieldOffset(Block.class.getDeclaredField("blockState")), container);
+    }
+
+    private static sun.misc.Unsafe unsafe() throws Exception
+    {
+        java.lang.reflect.Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        return (sun.misc.Unsafe) field.get(null);
     }
 
     private static IBlockState stateWith(BlockStateContainer container, IBlockState state, IProperty<?> property, Object value)
