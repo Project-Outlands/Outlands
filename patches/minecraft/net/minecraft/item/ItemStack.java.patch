@@ -62,16 +62,27 @@
      }
  
      public boolean isEmpty()
-@@ -135,7 +148,7 @@
+@@ -135,14 +148,11 @@
          {
              return true;
          }
 -        else if (this.item == null || this.item == Item.getItemFromBlock(Blocks.AIR))
-+        else if (this.getItemRaw() == null || this.getItemRaw() == Items.AIR)
-         {
-             return true;
-         }
-@@ -162,7 +175,7 @@
+-        {
+-            return true;
+-        }
+-        else
+-        {
+-            return this.stackSize <= 0 ? true : this.itemDamage < -32768 || this.itemDamage > 65535;
+-        }
++
++        // asked once: recipe matching and inventory checks call this far more often than anything else on a stack, and
++        // the getter goes through the registry delegate
++        Item item = this.getItemRaw();
++        return item == null || item == Items.AIR || this.stackSize <= 0 || this.itemDamage < -32768 || this.itemDamage > 65535;
+     }
+ 
+     public static void registerFixes(DataFixer fixer)
+@@ -162,7 +172,7 @@
  
      public Item getItem()
      {
@@ -80,7 +91,7 @@
      }
  
      public EnumActionResult onItemUse(
-@@ -176,6 +189,7 @@
+@@ -176,6 +186,7 @@
          float hitZ
      )
      {
@@ -88,7 +99,7 @@
          EnumActionResult enumactionresult = this.getItem()
                                              .onItemUse(playerIn, worldIn, pos, hand, side, hitX, hitY, hitZ);
  
-@@ -187,6 +201,28 @@
+@@ -187,6 +198,28 @@
          return enumactionresult;
      }
  
@@ -117,7 +128,7 @@
      public float getDestroySpeed(IBlockState blockIn)
      {
          return this.getItem().getDestroySpeed(this, blockIn);
-@@ -214,12 +250,18 @@
+@@ -214,12 +247,18 @@
              nbt.setTag("tag", this.stackTagCompound);
          }
  
@@ -137,7 +148,7 @@
      }
  
      public boolean isStackable()
-@@ -235,7 +277,7 @@
+@@ -235,7 +274,7 @@
          }
          else
          {
@@ -146,7 +157,7 @@
          }
      }
  
-@@ -246,32 +288,27 @@
+@@ -246,32 +285,27 @@
  
      public boolean isItemDamaged()
      {
@@ -184,7 +195,7 @@
      }
  
      public boolean attemptDamageItem(int amount, Random rand, @Nullable EntityPlayerMP damager)
-@@ -308,8 +345,8 @@
+@@ -308,8 +342,8 @@
                  CriteriaTriggers.ITEM_DURABILITY_CHANGED.trigger(damager, this, this.itemDamage + amount);
              }
  
@@ -195,7 +206,7 @@
          }
      }
  
-@@ -358,7 +395,7 @@
+@@ -358,7 +392,7 @@
  
      public boolean canHarvestBlock(IBlockState blockIn)
      {
@@ -204,7 +215,7 @@
      }
  
      public boolean interactWithEntity(EntityPlayer playerIn, EntityLivingBase entityIn, EnumHand hand)
-@@ -368,15 +405,30 @@
+@@ -368,15 +402,30 @@
  
      public ItemStack copy()
      {
@@ -240,7 +251,7 @@
      }
  
      public static boolean areItemStackTagsEqual(ItemStack stackA, ItemStack stackB)
-@@ -393,7 +445,7 @@
+@@ -393,7 +442,7 @@
          {
              return stackA.stackTagCompound == null && stackB.stackTagCompound != null
                     ? false
@@ -249,7 +260,7 @@
          }
      }
  
-@@ -427,7 +479,7 @@
+@@ -427,7 +476,7 @@
          {
              return this.stackTagCompound == null && other.stackTagCompound != null
                     ? false
@@ -258,7 +269,7 @@
          }
      }
  
-@@ -796,6 +848,7 @@
+@@ -796,6 +845,7 @@
                                  I18n.translateToLocal("attribute.name." + entry.getKey())
                              )
                          );
@@ -266,7 +277,7 @@
                      }
                  }
              }
-@@ -871,6 +924,7 @@
+@@ -871,6 +921,7 @@
              }
          }
  
@@ -274,7 +285,7 @@
          return list;
      }
  
-@@ -880,6 +934,7 @@
+@@ -880,6 +931,7 @@
          return this.getItem().hasEffect(this);
      }
  
@@ -282,7 +293,7 @@
      public EnumRarity getRarity()
      {
          return this.getItem().getRarity(this);
-@@ -985,7 +1040,7 @@
+@@ -985,7 +1037,7 @@
          }
          else
          {
@@ -291,7 +302,7 @@
          }
  
          return multimap;
-@@ -1030,7 +1085,7 @@
+@@ -1030,7 +1082,7 @@
          {
              NBTTagCompound nbttagcompound = this.writeToNBT(new NBTTagCompound());
              itextcomponent.getStyle().setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, new TextComponentString(nbttagcompound.toString())));
@@ -300,7 +311,7 @@
          }
  
          return itextcomponent;
-@@ -1127,5 +1182,129 @@
+@@ -1127,5 +1179,129 @@
      public void shrink(int quantity)
      {
          this.grow(-quantity);
