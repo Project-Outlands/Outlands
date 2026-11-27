@@ -1,11 +1,12 @@
 name: Build and Upload Test Artifact
 
 on:
+  # A branch is built once, from its pull request. 'push' fires for every branch a moment before GitHub notices the
+  # pull request and starts the second run; both land in the same concurrency group (github.head_ref || github.ref_name
+  # is the same string on both events), so the later run cancelled the earlier one and every pull request carried a
+  # cancelled check beside the real one. Main still builds here, because the merge commit is not a pull request head.
   push:
-    # Renovate pushes to its own branches before opening the PR, and those pushes are built by the pull_request
-    # event below. Ignoring them here keeps one build per revision instead of two.
-    branches-ignore:
-      - 'renovate/**'
+    branches: [main]
     paths:
       - 'src/**'
       - 'buildSrc/**'
