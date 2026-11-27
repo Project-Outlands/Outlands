@@ -100,6 +100,12 @@ tasks.register('launcherJson') {
                 game: gameArguments,
                 jvm : [
                     [rules: [[action: 'allow', os: [name: 'osx']]], value: '-XstartOnFirstThread'],
+                    // The loader requires Java 25, so both are safe to pass unconditionally: compact object headers
+                    // shrink every object header from 16 to 8 bytes, and the explicit-GC flag turns the System.gc()
+                    // calls vanilla makes when a world loads into concurrent cycles instead of stop-the-world full
+                    // collections (measured: four of them, about 740 ms of a 68 s start).
+                    '-XX:+UseCompactObjectHeaders',
+                    '-XX:+ExplicitGCInvokesConcurrent',
                     '-Djava.library.path=${natives_directory}',
                     '-cp',
                     '${classpath}'

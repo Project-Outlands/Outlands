@@ -2,6 +2,10 @@ package top.outlands.gradle.helpers
 
 interface ProjectConstants {
     List<String> JVM_ARGUMENTS = [
+        // The loader requires Java 25, so the flags the launcher profiles carry are safe here too; a dev run should
+        // behave like a shipped one.
+        '-XX:+UseCompactObjectHeaders',
+        '-XX:+ExplicitGCInvokesConcurrent',
         '--add-opens=java.base/jdk.internal.loader=ALL-UNNAMED',
         '--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED',
         '--add-opens=java.base/java.lang=ALL-UNNAMED',

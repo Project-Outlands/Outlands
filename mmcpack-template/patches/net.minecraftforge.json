@@ -1,7 +1,15 @@
 {
-    "+tweakers": ["net.minecraftforge.fml.common.launcher.FMLTweaker"],
-    "+traits": ["FirstThreadOnMacOS"],
-    "+jvmArgs": ["-Dfile.encoding=UTF-8"],
+    "+tweakers": [
+        "net.minecraftforge.fml.common.launcher.FMLTweaker"
+    ],
+    "+traits": [
+        "FirstThreadOnMacOS"
+    ],
+    "+jvmArgs": [
+        "-Dfile.encoding=UTF-8",
+        "-XX:+UseCompactObjectHeaders",
+        "-XX:+ExplicitGCInvokesConcurrent"
+    ],
     "formatVersion": 1,
     "libraries": [],
     "mainClass": "top.outlands.foundation.boot.Foundation",
