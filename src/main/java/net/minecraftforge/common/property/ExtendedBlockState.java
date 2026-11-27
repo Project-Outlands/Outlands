@@ -97,7 +97,9 @@ public class ExtendedBlockState extends BlockStateContainer
                 return clean;
             }
 
-            return new ExtendedStateImplementation(getBlock(), clean.getProperties(), unlistedProperties, ((StateImplementation)clean).getPropertyValueTable(), this.cleanState);
+            ExtendedStateImplementation extended = new ExtendedStateImplementation(getBlock(), clean.getProperties(), unlistedProperties, ((StateImplementation)clean).getPropertyValueTable(), this.cleanState);
+            extended.inheritStatePosition((StateImplementation) clean);
+            return extended;
         }
 
         @Override
@@ -129,7 +131,9 @@ public class ExtendedBlockState extends BlockStateContainer
             { // no dynamic properties, lookup normal state
                 return (IExtendedBlockState) cleanState;
             }
-            return new ExtendedStateImplementation(getBlock(), getProperties(), builder.build(), propertyValueTable, this.cleanState);
+            ExtendedStateImplementation extended = new ExtendedStateImplementation(getBlock(), getProperties(), builder.build(), propertyValueTable, this.cleanState);
+            extended.inheritStatePosition(this);
+            return extended;
         }
 
         @Override

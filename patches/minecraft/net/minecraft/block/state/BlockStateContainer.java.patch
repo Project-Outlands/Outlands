@@ -1,6 +1,15 @@
 --- before/net/minecraft/block/state/BlockStateContainer.java
 +++ after/net/minecraft/block/state/BlockStateContainer.java
-@@ -57,6 +57,16 @@
+@@ -16,6 +16,8 @@
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Map.Entry;
++import it.unimi.dsi.fastutil.objects.Object2IntMap;
++import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import java.util.regex.Pattern;
+ import javax.annotation.Nullable;
+ import net.minecraft.block.Block;
+@@ -57,6 +59,16 @@
  
      public BlockStateContainer(Block blockIn, IProperty<?>... properties)
      {
@@ -17,18 +26,43 @@
          this.block = blockIn;
          Map < String, IProperty<? >> map = Maps.newHashMap();
  
-@@ -73,9 +83,7 @@
+@@ -67,22 +79,20 @@
+         }
+ 
+         this.properties = ImmutableSortedMap.copyOf(map);
+-        Map < Map < IProperty<?>, Comparable<? >> , BlockStateContainer.StateImplementation > map2 = Maps.newLinkedHashMap();
+         List<BlockStateContainer.StateImplementation> list1 = Lists.newArrayList();
+ 
          for (List < Comparable<? >> list : Cartesian.cartesianProduct(this.getAllowedValues()))
          {
              Map < IProperty<?>, Comparable<? >> map1 = MapPopulator.createMap(this.properties.values(), list);
 -            BlockStateContainer.StateImplementation blockstatecontainer$stateimplementation = new BlockStateContainer.StateImplementation(
 -                blockIn, ImmutableMap.copyOf(map1)
 -            );
+-            map2.put(map1, blockstatecontainer$stateimplementation);
 +            BlockStateContainer.StateImplementation blockstatecontainer$stateimplementation = createState(blockIn, ImmutableMap.copyOf(map1), unlistedProperties);
-             map2.put(map1, blockstatecontainer$stateimplementation);
              list1.add(blockstatecontainer$stateimplementation);
          }
-@@ -170,6 +178,13 @@
+ 
+-        for (BlockStateContainer.StateImplementation blockstatecontainer$stateimplementation1 : list1)
++        Neighbourhood neighbourhood = new Neighbourhood(this, list1);
++
++        for (int i = 0; i < list1.size(); ++i)
+         {
+-            blockstatecontainer$stateimplementation1.buildPropertyValueTable(map2);
++            list1.get(i).setNeighbourhood(neighbourhood, i);
+         }
+ 
+         this.validStates = ImmutableList.<IBlockState>copyOf(list1);
+@@ -164,12 +174,21 @@
+             private final Block block;
+             private final ImmutableMap < IProperty<?>, Comparable<? >> properties;
+             protected ImmutableTable < IProperty<?>, Comparable<?>, IBlockState > propertyValueTable;
++            private Neighbourhood neighbourhood;
++            private int stateIndex = -1;
+ 
+             protected StateImplementation(Block blockIn, ImmutableMap < IProperty<?>, Comparable<? >> propertiesIn)
+             {
                  this.block = blockIn;
                  this.properties = propertiesIn;
              }
@@ -42,7 +76,85 @@
  
              @Override
              public Collection < IProperty<? >> getPropertyKeys()
-@@ -528,5 +543,94 @@
+@@ -207,7 +226,7 @@
+                 }
+                 else
+                 {
+-                    IBlockState iblockstate = (IBlockState)this.propertyValueTable.get(property, value);
++                    IBlockState iblockstate = this.neighbourhood == null ? null : this.neighbourhood.withProperty(this.stateIndex, property, comparable, value);
+ 
+                     if (iblockstate == null)
+                     {
+@@ -249,41 +268,35 @@
+             @Override
+             public int hashCode()
+             {
+-                return this.properties.hashCode();
+-            }
+-
++                // equals() is identity for block states, so the identity hash is consistent with it. Hashing
++                // this.properties instead walked every property on every call, and hashing a PropertyEnum in turn
++                // walks all of its allowed values.
++                return System.identityHashCode(this);
++            }
++
++            void setNeighbourhood(Neighbourhood neighbourhood, int stateIndex)
++            {
++                this.neighbourhood = neighbourhood;
++                this.stateIndex = stateIndex;
++            }
++
++            /**
++             * Copies the grid position from another state of the same container. Forge's extended block states wrap a
++             * clean state but answer withProperty() themselves, so they need the same position the clean state has.
++             */
++            public void inheritStatePosition(StateImplementation from)
++            {
++                this.neighbourhood = from.neighbourhood;
++                this.stateIndex = from.stateIndex;
++            }
++
++            /**
++             * Kept for binary compatibility. The table this used to build is no longer created: neighbours come from
++             * the container's property grid, see {@link Neighbourhood}.
++             */
++            @Deprecated
+             public void buildPropertyValueTable(Map < Map < IProperty<?>, Comparable<? >> , BlockStateContainer.StateImplementation > map)
+             {
+-                if (this.propertyValueTable != null)
+-                {
+-                    throw new IllegalStateException();
+-                }
+-                else
+-                {
+-                    Table < IProperty<?>, Comparable<?>, IBlockState > table = HashBasedTable.create();
+-
+-                    for (Entry < IProperty<?>, Comparable<? >> entry : this.properties.entrySet())
+-                    {
+-                        IProperty<?> iproperty = entry.getKey();
+-
+-                        for (Comparable<?> comparable : iproperty.getAllowedValues())
+-                        {
+-                            if (comparable != entry.getValue())
+-                            {
+-                                table.put(iproperty, comparable, map.get(this.getPropertiesWithValue(iproperty, comparable)));
+-                            }
+-                        }
+-                    }
+-
+-                    this.propertyValueTable = ImmutableTable.copyOf(table);
+-                }
+-            }
+-
+-            private Map < IProperty<?>, Comparable<? >> getPropertiesWithValue(IProperty<?> property, Comparable<?> value)
+-            {
+-                Map < IProperty<?>, Comparable<? >> map = Maps.newHashMap(this.properties);
+-                map.put(property, value);
+-                return map;
+             }
+ 
+             @Override
+@@ -528,5 +541,221 @@
              {
                  return this.block.getBlockFaceShape(worldIn, this, pos, facing);
              }
@@ -137,4 +249,131 @@
 +            return new net.minecraftforge.common.property.ExtendedBlockState(this.block, listed, unlisted);
 +        }
 +    }
++    /**
++     * The stride grid a container's states sit on: one axis per property, the last property varying fastest.
++     *
++     * <p>Vanilla built an {@code ImmutableTable} per state holding "every neighbour reachable by changing one
++     * property", and looking a neighbour up hashed the property map again. Hashing a {@code PropertyEnum} walks all
++     * of its allowed values, so both halves were linear in the state's property tree, times every state - it is the
++     * single largest block of CPU in a launch.
++     *
++     * <p>Here the neighbour of a state is arithmetic: its index plus the signed stride of the changed property.
++     * States are placed by their own property values instead of the order the container happens to create them in,
++     * so nothing depends on {@link Cartesian}'s iteration order, and the per state table never has to exist.
++     */
++    public static final class Neighbourhood
++    {
++        private final int[] strides;
++        private final Object2IntMap<IProperty<?>> positions;
++        private final Object2IntMap<Comparable<?>>[] valueIndices;
++        private final IBlockState[] states;
++
++        @SuppressWarnings("unchecked")
++        Neighbourhood(BlockStateContainer container, List<? extends StateImplementation> created)
++        {
++            List<IProperty<?>> properties = ImmutableList.copyOf(container.properties.values());
++            int count = properties.size();
++            this.strides = new int[count];
++            this.valueIndices = new Object2IntMap[count];
++            this.positions = new Object2IntOpenHashMap<>(count);
++            this.positions.defaultReturnValue(-1);
++            int size = 1;
++
++            for (int i = count - 1; i >= 0; --i)
++            {
++                IProperty<?> property = properties.get(i);
++                Object2IntMap<Comparable<?>> values = new Object2IntOpenHashMap<>();
++                values.defaultReturnValue(-1);
++                int index = 0;
++
++                for (Comparable<?> value : property.getAllowedValues())
++                {
++                    values.put(value, index++);
++                }
++
++                int axis = values.size();
++                int grown = size * axis;
++
++                if (axis != 0 && grown / axis != size)
++                {
++                    throw new IllegalStateException("Too many block states for " + container);
++                }
++
++                this.strides[i] = size;
++                this.valueIndices[i] = values;
++                this.positions.put(property, i);
++                size = grown;
++            }
++
++            this.states = new IBlockState[size];
++
++            for (StateImplementation state : created)
++            {
++                int index = this.indexOf(state.getProperties());
++
++                if (index < 0 || index >= size || this.states[index] != null)
++                {
++                    throw new IllegalStateException("Block state " + state + " does not fit the property grid of " + container);
++                }
++
++                this.states[index] = state;
++            }
++
++            if (created.size() != size)
++            {
++                throw new IllegalStateException("Expected " + size + " block states for " + container + ", but got " + created.size());
++            }
++        }
++
++        int indexOf(ImmutableMap<IProperty<?>, Comparable<?>> properties)
++        {
++            int index = 0;
++
++            for (Entry<IProperty<?>, Comparable<?>> entry : properties.entrySet())
++            {
++                int position = this.positions.getInt(entry.getKey());
++
++                if (position < 0)
++                {
++                    return -1;
++                }
++
++                int value = this.valueIndices[position].getInt(entry.getValue());
++
++                if (value < 0)
++                {
++                    return -1;
++                }
++
++                index += value * this.strides[position];
++            }
++
++            return index;
++        }
++
++        @Nullable
++        IBlockState withProperty(int stateIndex, IProperty<?> property, Comparable<?> current, Comparable<?> wanted)
++        {
++            int position = this.positions.getInt(property);
++
++            if (position < 0 || stateIndex < 0)
++            {
++                return null;
++            }
++
++            Object2IntMap<Comparable<?>> values = this.valueIndices[position];
++            int from = values.getInt(current);
++            int to = values.getInt(wanted);
++
++            if (from < 0 || to < 0)
++            {
++                return null;
++            }
++
++            int target = stateIndex + (to - from) * this.strides[position];
++
++            return target >= 0 && target < this.states.length ? this.states[target] : null;
++        }
++    }
++
  }
