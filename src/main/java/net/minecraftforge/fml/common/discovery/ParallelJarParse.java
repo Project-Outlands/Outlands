@@ -8,6 +8,7 @@
 
 package net.minecraftforge.fml.common.discovery;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -118,11 +119,45 @@ public final class ParallelJarParse
     {
         try (InputStream in = jar.getInputStream(entry))
         {
-            return new Parsed(new ASMModParser(in), null);
+            return new Parsed(new ASMModParser(read(entry, in)), null);
         }
         catch (Exception e)
         {
             return new Parsed(null, e);
         }
+    }
+
+    /**
+     * Reads the class file into one array of the size the central directory already knows.
+     *
+     * <p>Handing the stream to ASM instead made it copy the class into a growing buffer and then copy it again for the
+     * bytes: 313 MB of allocation inside the parser over a measured start, most of it those two copies of data the jar
+     * had already described.
+     */
+    private static byte[] read(JarEntry entry, InputStream in) throws IOException
+    {
+        final long size = entry.getSize();
+
+        if (size < 0 || size > Integer.MAX_VALUE - 8)
+        {
+            return in.readAllBytes();
+        }
+
+        final byte[] bytes = new byte[(int) size];
+        int filled = 0;
+
+        while (filled < bytes.length)
+        {
+            final int read = in.read(bytes, filled, bytes.length - filled);
+
+            if (read < 0)
+            {
+                break;
+            }
+
+            filled += read;
+        }
+
+        return filled == bytes.length ? bytes : java.util.Arrays.copyOf(bytes, filled);
     }
 }

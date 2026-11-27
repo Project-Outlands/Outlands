@@ -57,11 +57,28 @@ public class ASMModParser
         CLASS, FIELD, METHOD, SUBTYPE;
     }
 
+    /**
+     * @param bytes the class file, read by a caller that already knew how large it is
+     *
+     * <p>Reading through an {@link InputStream} makes ASM copy the class into a growing buffer and then copy it again
+     * to hand back the bytes; a caller holding a jar entry knows the length from the central directory, so it can hand
+     * the bytes over instead. Measured over a start: 313 MB of allocation inside this constructor, most of it those
+     * two copies.
+     */
+    public ASMModParser(byte[] bytes) throws IOException
+    {
+        this(new ClassReader(bytes));
+    }
+
     public ASMModParser(InputStream stream) throws IOException
+    {
+        this(new ClassReader(stream));
+    }
+
+    private ASMModParser(ClassReader reader) throws IOException
     {
         try
         {
-            ClassReader reader = new ClassReader(stream);
             reader.accept(new ModClassVisitor(this), ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         }
         catch (Exception ex)

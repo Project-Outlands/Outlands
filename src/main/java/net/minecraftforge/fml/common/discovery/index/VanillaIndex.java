@@ -74,14 +74,16 @@ final class VanillaIndex {
         try (BorrowedArchive borrow = BorrowedArchive.of(archive, false)) {
             final java.util.jar.JarFile zip = borrow.jar();
             int ordinal = -1;
-            for (ZipEntry entry : Collections.list(zip.entries())) {
+            for (ZipEntry listed : Collections.list(zip.entries())) {
+                // JarFile hands out JarEntry, which is what the index reads through
+                final java.util.jar.JarEntry entry = (java.util.jar.JarEntry) listed;
                 entries.add(entry);
                 if (!ITypeDiscoverer.shouldScan(entry.getName())) {
                     continue;
                 }
                 ordinal++;
                 indices.add(ordinal);
-                final Header header = readHeader(zip.getInputStream(entry), naming);
+                final Header header = readHeader(borrow.index().read(entry), naming);
                 records.add(header.record);
                 members.put(header.record.internalName(), header.members());
             }
@@ -89,9 +91,11 @@ final class VanillaIndex {
         return new Scanned(JarScanRecord.of(JarFingerprint.compute(entries), indices, records), members);
     }
 
-    private static Header readHeader(java.io.InputStream stream, ClassNaming naming) throws IOException {
+    private static Header readHeader(byte[] bytes, ClassNaming naming) throws IOException {
         final Header header = new Header(naming);
-        new ClassReader(stream).accept(header, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        // the bytes came out of the archive at the size its central directory records, so ASM does not have to buffer
+        // them into a growing stream of its own first
+        new ClassReader(bytes).accept(header, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         header.finish();
         return header;
     }

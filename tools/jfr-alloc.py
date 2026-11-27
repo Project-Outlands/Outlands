@@ -118,6 +118,10 @@ def main():
     parser.add_argument('--top', type=int, default=15, help='rows per table (default 15)')
     parser.add_argument('--class', dest='klass',
                         help='also break this allocated class down by the code that asked for it')
+    parser.add_argument('--site', dest='site',
+                        help='also break one allocating site down by its callers')
+    parser.add_argument('--frame', dest='frame',
+                        help='also break down who calls this method anywhere in the stack')
     parser.add_argument('--gc', action='store_true', help='print the GC tables instead')
     args = parser.parse_args()
 
@@ -159,6 +163,38 @@ def main():
         print()
         print('%s: %s of %s (%.1f%%)' % (wanted, human(own), human(total), 100 * own / total))
         table('%s -- who allocates it' % wanted, callers, own, args.top)
+
+    if args.frame:
+        wanted = args.frame
+        callers = collections.Counter()
+        own = 0.0
+        for _, weight, frames in samples:
+            for i, frame in enumerate(frames[1:], 1):
+                if frame == wanted:
+                    own += weight
+                    callers[frames[i + 1] if i + 1 < len(frames) else '(top)'] += weight
+                    break
+        if own == 0:
+            sys.exit('\n%s does not appear in any stack' % wanted)
+        print()
+        print('%s is called by, %s of %s (%.1f%%)' % (wanted, human(own), human(total),
+                                                       100 * own / total))
+        table('callers of %s' % wanted, callers, own, args.top)
+
+    if args.site:
+        wanted = args.site
+        callers = collections.Counter()
+        own = 0.0
+        for _, weight, frames in samples:
+            if not frames or frames[0] != wanted:
+                continue
+            own += weight
+            callers[frames[1] if len(frames) > 1 else '(direct)'] += weight
+        if own == 0:
+            sys.exit('\n%s did not allocate anything in this recording' % wanted)
+        print()
+        print('%s: %s of %s (%.1f%%)' % (wanted, human(own), human(total), 100 * own / total))
+        table('%s -- who calls it' % wanted, callers, own, args.top)
 
 
 if __name__ == '__main__':
