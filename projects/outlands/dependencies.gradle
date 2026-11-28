@@ -134,7 +134,7 @@ dependencies {
     installer 'commons-codec:commons-codec:1.23.0'
     installer 'commons-io:commons-io:2.22.0'
     installer 'commons-logging:commons-logging:1.4.0'
-    installer 'org.apache.maven:maven-artifact:3.10.1'
+    installer 'org.apache.maven:maven-artifact:3.10.2'
     installer 'org.apache.commons:commons-text:1.15.0' // Some old classes in lang3 moved to here, wtf
     
     // xz in common-compress need this to work
