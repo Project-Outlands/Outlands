@@ -1,6 +1,11 @@
 --- before/net/minecraft/world/chunk/Chunk.java
 +++ after/net/minecraft/world/chunk/Chunk.java
-@@ -41,7 +41,7 @@
+@@ -37,16 +37,17 @@
+ import net.minecraft.world.gen.ChunkGeneratorDebug;
+ import net.minecraft.world.gen.IChunkGenerator;
+ import net.minecraftforge.fml.relauncher.Side;
++import net.minecraftforge.registries.BiomeError;
+ import net.minecraftforge.fml.relauncher.SideOnly;
  import org.apache.logging.log4j.LogManager;
  import org.apache.logging.log4j.Logger;
  
@@ -9,10 +14,17 @@
  {
      private static final Logger LOGGER = LogManager.getLogger();
      public static final ExtendedBlockStorage NULL_BLOCK_STORAGE = null;
-@@ -84,6 +84,7 @@
+     private final ExtendedBlockStorage[] storageArrays = new ExtendedBlockStorage[16];
+-    private final byte[] blockBiomeArray = new byte[256];
++    private int[] blockBiomeArray;
+     private final int[] precipitationHeightMap = new int[256];
+     private final boolean[] updateSkylightColumns = new boolean[256];
+     private boolean loaded;
+@@ -83,7 +84,7 @@
+         }
  
          Arrays.fill(this.precipitationHeightMap, -999);
-         Arrays.fill(this.blockBiomeArray, (byte) - 1);
+-        Arrays.fill(this.blockBiomeArray, (byte) - 1);
 +        capabilities = net.minecraftforge.event.ForgeEventFactory.gatherCapabilities(this);
      }
  
@@ -391,7 +403,16 @@
          boolean flag = this.world.provider.hasSkyLight();
  
          for (int i = 0; i < this.storageArrays.length; i++)
-@@ -1182,10 +1198,16 @@
+@@ -1167,7 +1183,7 @@
+ 
+         if (groundUpContinuous)
+         {
+-            buf.readBytes(this.blockBiomeArray);
++            this.setBiomeIds(buf.readVarIntArray());
+         }
+ 
+         for (int j = 0; j < this.storageArrays.length; j++)
+@@ -1182,44 +1198,74 @@
          this.isTerrainPopulated = true;
          this.generateHeightMap();
  
@@ -408,9 +429,14 @@
      }
  
      public Biome getBiome(BlockPos pos, BiomeProvider provider)
-@@ -1196,7 +1218,12 @@
+     {
+         int i = pos.getX() & 15;
+         int j = pos.getZ() & 15;
+-        int k = this.blockBiomeArray[j << 4 | i] & 255;
++        int k = this.getBiomeIds()[j << 4 | i];
  
-         if (k == 255)
+-        if (k == 255)
++        if (k == -1)
          {
 -            Biome biome = provider.getBiome(pos, Biomes.PLAINS);
 +            // Forge: checking for client ensures that biomes are only generated on integrated server
@@ -420,9 +446,61 @@
 +            // This is not necessary in 1.13 and newer versions.
 +            Biome biome = world.isRemote ? Biomes.PLAINS : provider.getBiome(pos, Biomes.PLAINS);
              k = Biome.getIdForBiome(biome);
-             this.blockBiomeArray[j << 4 | i] = (byte)(k & 0xFF);
+-            this.blockBiomeArray[j << 4 | i] = (byte)(k & 0xFF);
++            this.getBiomeIds()[j << 4 | i] = k;
          }
-@@ -1251,13 +1278,13 @@
+ 
+         Biome biome1 = Biome.getBiome(k);
+         return biome1 == null ? Biomes.PLAINS : biome1;
+     }
+ 
+-    public byte[] getBiomeArray()
++    /** Returns the mutable 256-entry storage used by generation, persistence, and networking. */
++    public int[] getBiomeIds()
+     {
++        if (this.blockBiomeArray == null)
++        {
++            this.blockBiomeArray = new int[256];
++            Arrays.fill(this.blockBiomeArray, -1);
++        }
++
+         return this.blockBiomeArray;
+     }
+ 
++    /** Copies a complete 256-entry biome ID array into this chunk. */
++    public void setBiomeIds(int[] biomeIds)
++    {
++        if (biomeIds.length != 256)
++        {
++            LOGGER.warn("Could not set level chunk biomes, array length is {} instead of {}", biomeIds.length, 256);
++            return;
++        }
++
++        System.arraycopy(biomeIds, 0, this.getBiomeIds(), 0, 256);
++    }
++
++    public byte[] getBiomeArray()
++    {
++        byte[] legacyBiomes = new byte[256];
++        Arrays.fill(legacyBiomes, (byte)BiomeError.getId());
++        return legacyBiomes;
++    }
++
+     public void setBiomeArray(byte[] biomeArray)
+     {
+-        if (this.blockBiomeArray.length != biomeArray.length)
+-        {
+-            LOGGER.warn("Could not set level chunk biomes, array length is {} instead of {}", biomeArray.length, this.blockBiomeArray.length);
+-        }
+-        else
+-        {
+-            System.arraycopy(biomeArray, 0, this.blockBiomeArray, 0, this.blockBiomeArray.length);
+-        }
++        // Legacy byte writes cannot represent complete biome IDs.
+     }
+ 
+     public void resetRelightChecks()
+@@ -1251,13 +1297,13 @@
                      boolean flag = i1 == 0 || i1 == 15 || k == 0 || k == 15 || l == 0 || l == 15;
  
                      if (this.storageArrays[j] == NULL_BLOCK_STORAGE && flag
@@ -438,7 +516,7 @@
                              {
                                  this.world.checkLight(blockpos2);
                              }
-@@ -1390,7 +1417,7 @@
+@@ -1390,7 +1436,7 @@
          {
              blockpos$mutableblockpos.setPos(blockpos$mutableblockpos.getX(), l, blockpos$mutableblockpos.getZ());
  
@@ -447,7 +525,7 @@
              {
                  this.world.checkLight(blockpos$mutableblockpos);
              }
-@@ -1429,6 +1456,7 @@
+@@ -1429,6 +1475,7 @@
          else
          {
              System.arraycopy(newHeightMap, 0, this.heightMap, 0, this.heightMap.length);
@@ -455,7 +533,7 @@
          }
      }
  
-@@ -1492,10 +1520,61 @@
+@@ -1492,10 +1539,61 @@
          this.inhabitedTime = newInhabitedTime;
      }
  
