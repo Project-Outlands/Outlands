@@ -76,6 +76,9 @@ final class FoundationTransformerProvider implements ITransformerProvider {
         this.delegatedTransformers = new ArrayList<>();
         for (ITransformer transformer : this.getTransformers()) {
             if (!(transformer instanceof ILegacyClassTransformer legacyTransformer)) {
+                // Nothing in the replay can use it, but it is still expected to run when a class is
+                // loaded, so a transformer landing here is worth knowing about.
+                logger.debug("  Skipping:  {} (not a legacy transformer)", transformer.getName());
                 continue;
             }
             String transformerName = legacyTransformer.getName();
