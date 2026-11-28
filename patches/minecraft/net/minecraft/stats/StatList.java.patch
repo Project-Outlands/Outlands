@@ -1,6 +1,81 @@
 --- before/net/minecraft/stats/StatList.java
 +++ after/net/minecraft/stats/StatList.java
-@@ -207,7 +207,7 @@
+@@ -119,47 +119,47 @@
+     public static final StatBase CHEST_OPENED = new StatBasic("stat.chestOpened", new TextComponentTranslation("stat.chestOpened")).registerStat();
+     public static final StatBase SLEEP_IN_BED = new StatBasic("stat.sleepInBed", new TextComponentTranslation("stat.sleepInBed")).registerStat();
+     public static final StatBase OPEN_SHULKER_BOX = new StatBasic("stat.shulkerBoxOpened", new TextComponentTranslation("stat.shulkerBoxOpened")).registerStat();
+-    private static final StatBase[] BLOCKS_STATS = new StatBase[4096];
+-    private static final StatBase[] CRAFTS_STATS = new StatBase[32000];
+-    private static final StatBase[] OBJECT_USE_STATS = new StatBase[32000];
+-    private static final StatBase[] OBJECT_BREAK_STATS = new StatBase[32000];
+-    private static final StatBase[] OBJECTS_PICKED_UP_STATS = new StatBase[32000];
+-    private static final StatBase[] OBJECTS_DROPPED_STATS = new StatBase[32000];
++    private static final Map<Integer, StatBase> BLOCKS_STATS = Maps.newHashMap();
++    private static final Map<Integer, StatBase> CRAFTS_STATS = Maps.newHashMap();
++    private static final Map<Integer, StatBase> OBJECT_USE_STATS = Maps.newHashMap();
++    private static final Map<Integer, StatBase> OBJECT_BREAK_STATS = Maps.newHashMap();
++    private static final Map<Integer, StatBase> OBJECTS_PICKED_UP_STATS = Maps.newHashMap();
++    private static final Map<Integer, StatBase> OBJECTS_DROPPED_STATS = Maps.newHashMap();
+ 
+     @Nullable
+     public static StatBase getBlockStats(Block blockIn)
+     {
+-        return BLOCKS_STATS[Block.getIdFromBlock(blockIn)];
++        return BLOCKS_STATS.get(Block.getIdFromBlock(blockIn));
+     }
+ 
+     @Nullable
+     public static StatBase getCraftStats(Item itemIn)
+     {
+-        return CRAFTS_STATS[Item.getIdFromItem(itemIn)];
++        return CRAFTS_STATS.get(Item.getIdFromItem(itemIn));
+     }
+ 
+     @Nullable
+     public static StatBase getObjectUseStats(Item itemIn)
+     {
+-        return OBJECT_USE_STATS[Item.getIdFromItem(itemIn)];
++        return OBJECT_USE_STATS.get(Item.getIdFromItem(itemIn));
+     }
+ 
+     @Nullable
+     public static StatBase getObjectBreakStats(Item itemIn)
+     {
+-        return OBJECT_BREAK_STATS[Item.getIdFromItem(itemIn)];
++        return OBJECT_BREAK_STATS.get(Item.getIdFromItem(itemIn));
+     }
+ 
+     @Nullable
+     public static StatBase getObjectsPickedUpStats(Item itemIn)
+     {
+-        return OBJECTS_PICKED_UP_STATS[Item.getIdFromItem(itemIn)];
++        return OBJECTS_PICKED_UP_STATS.get(Item.getIdFromItem(itemIn));
+     }
+ 
+     @Nullable
+     public static StatBase getDroppedObjectStats(Item itemIn)
+     {
+-        return OBJECTS_DROPPED_STATS[Item.getIdFromItem(itemIn)];
++        return OBJECTS_DROPPED_STATS.get(Item.getIdFromItem(itemIn));
+     }
+ 
+     public static void init()
+@@ -199,15 +199,18 @@
+ 
+                 if (s != null)
+                 {
+-                    CRAFTS_STATS[i] = new StatCrafting(
+-                        "stat.craftItem.", s, new TextComponentTranslation("stat.craftItem", new ItemStack(item).getTextComponent()), item
+-                    )
+-                    .registerStat();
++                    CRAFTS_STATS.put(
++                        i,
++                        new StatCrafting(
++                            "stat.craftItem.", s, new TextComponentTranslation("stat.craftItem", new ItemStack(item).getTextComponent()), item
++                        )
++                        .registerStat()
++                    );
+                 }
              }
          }
  
@@ -9,7 +84,24 @@
      }
  
      private static void initMiningStats()
-@@ -232,7 +232,7 @@
+@@ -223,16 +226,19 @@
+ 
+                 if (s != null && block.getEnableStats())
+                 {
+-                    BLOCKS_STATS[i] = new StatCrafting(
+-                        "stat.mineBlock.", s, new TextComponentTranslation("stat.mineBlock", new ItemStack(block).getTextComponent()), item
+-                    )
+-                    .registerStat();
+-                    MINE_BLOCK_STATS.add((StatCrafting)BLOCKS_STATS[i]);
++                    BLOCKS_STATS.put(
++                        i,
++                        new StatCrafting(
++                            "stat.mineBlock.", s, new TextComponentTranslation("stat.mineBlock", new ItemStack(block).getTextComponent()), item
++                        )
++                        .registerStat()
++                    );
++                    MINE_BLOCK_STATS.add((StatCrafting)BLOCKS_STATS.get(i));
+                 }
              }
          }
  
@@ -18,7 +110,24 @@
      }
  
      private static void initStats()
-@@ -257,7 +257,7 @@
+@@ -246,18 +252,21 @@
+ 
+                 if (s != null)
+                 {
+-                    OBJECT_USE_STATS[i] = new StatCrafting("stat.useItem.", s, new TextComponentTranslation("stat.useItem", new ItemStack(item).getTextComponent()), item)
+-                    .registerStat();
++                    OBJECT_USE_STATS.put(
++                        i,
++                        new StatCrafting("stat.useItem.", s, new TextComponentTranslation("stat.useItem", new ItemStack(item).getTextComponent()), item)
++                        .registerStat()
++                    );
+ 
+                     if (!(item instanceof ItemBlock))
+                     {
+-                        USE_ITEM_STATS.add((StatCrafting)OBJECT_USE_STATS[i]);
++                        USE_ITEM_STATS.add((StatCrafting)OBJECT_USE_STATS.get(i));
+                     }
+                 }
              }
          }
  
@@ -27,7 +136,22 @@
      }
  
      private static void initItemDepleteStats()
-@@ -279,7 +279,7 @@
+@@ -271,15 +280,18 @@
+ 
+                 if (s != null && item.isDamageable())
+                 {
+-                    OBJECT_BREAK_STATS[i] = new StatCrafting(
+-                        "stat.breakItem.", s, new TextComponentTranslation("stat.breakItem", new ItemStack(item).getTextComponent()), item
+-                    )
+-                    .registerStat();
++                    OBJECT_BREAK_STATS.put(
++                        i,
++                        new StatCrafting(
++                            "stat.breakItem.", s, new TextComponentTranslation("stat.breakItem", new ItemStack(item).getTextComponent()), item
++                        )
++                        .registerStat()
++                    );
+                 }
              }
          }
  
@@ -36,7 +160,25 @@
      }
  
      private static void initPickedUpAndDroppedStats()
-@@ -301,7 +301,7 @@
+@@ -293,15 +305,21 @@
+ 
+                 if (s != null)
+                 {
+-                    OBJECTS_PICKED_UP_STATS[i] = new StatCrafting("stat.pickup.", s, new TextComponentTranslation("stat.pickup", new ItemStack(item).getTextComponent()), item)
+-                    .registerStat();
+-                    OBJECTS_DROPPED_STATS[i] = new StatCrafting("stat.drop.", s, new TextComponentTranslation("stat.drop", new ItemStack(item).getTextComponent()), item)
+-                    .registerStat();
++                    OBJECTS_PICKED_UP_STATS.put(
++                        i,
++                        new StatCrafting("stat.pickup.", s, new TextComponentTranslation("stat.pickup", new ItemStack(item).getTextComponent()), item)
++                        .registerStat()
++                    );
++                    OBJECTS_DROPPED_STATS.put(
++                        i,
++                        new StatCrafting("stat.drop.", s, new TextComponentTranslation("stat.drop", new ItemStack(item).getTextComponent()), item)
++                        .registerStat()
++                    );
+                 }
              }
          }
  
@@ -45,12 +187,12 @@
      }
  
      private static String getItemName(Item itemIn)
-@@ -310,28 +310,35 @@
+@@ -310,39 +328,55 @@
          return resourcelocation != null ? resourcelocation.toString().replace(':', '.') : null;
      }
  
 -    private static void replaceAllSimilarBlocks(StatBase[] stat)
-+    private static void replaceAllSimilarBlocks(StatBase[] stat, boolean useItemIds)
++    private static void replaceAllSimilarBlocks(Map<Integer, StatBase> stat, boolean useItemIds)
      {
 -        mergeStatBases(stat, Blocks.WATER, Blocks.FLOWING_WATER);
 -        mergeStatBases(stat, Blocks.LAVA, Blocks.FLOWING_LAVA);
@@ -83,7 +225,7 @@
      }
  
 -    private static void mergeStatBases(StatBase[] statBaseIn, Block block1, Block block2)
-+    private static void mergeStatBases(StatBase[] statBaseIn, Block block1, Block block2, boolean useItemIds)
++    private static void mergeStatBases(Map<Integer, StatBase> statBaseIn, Block block1, Block block2, boolean useItemIds)
      {
 -        int i = Block.getIdFromBlock(block1);
 -        int j = Block.getIdFromBlock(block2);
@@ -97,9 +239,35 @@
 +            j = Block.getIdFromBlock(block2);
 +        }
  
-         if (statBaseIn[i] != null && statBaseIn[j] == null)
+-        if (statBaseIn[i] != null && statBaseIn[j] == null)
++        StatBase statbase = statBaseIn.get(i);
++        StatBase statbase1 = statBaseIn.get(j);
++        if (statbase != null && statbase1 == null)
          {
-@@ -368,5 +375,37 @@
+-            statBaseIn[j] = statBaseIn[i];
++            statBaseIn.put(j, statbase);
+         }
+         else
+         {
+-            ALL_STATS.remove(statBaseIn[i]);
+-            MINE_BLOCK_STATS.remove(statBaseIn[i]);
+-            BASIC_STATS.remove(statBaseIn[i]);
+-            statBaseIn[i] = statBaseIn[j];
++            ALL_STATS.remove(statbase);
++            MINE_BLOCK_STATS.remove(statbase);
++            BASIC_STATS.remove(statbase);
++            if (statbase1 == null)
++            {
++                statBaseIn.remove(i);
++            }
++            else
++            {
++                statBaseIn.put(i, statbase1);
++            }
+         }
+     }
+ 
+@@ -368,5 +402,41 @@
      public static StatBase getOneShotStat(String statName)
      {
          return ID_TO_STAT_MAP.get(statName);
@@ -113,17 +281,12 @@
 +        USE_ITEM_STATS.clear();
 +        MINE_BLOCK_STATS.clear();
 +
-+        for (StatBase[] sb : new StatBase[][]{BLOCKS_STATS,  CRAFTS_STATS, OBJECT_USE_STATS, OBJECT_BREAK_STATS, OBJECTS_PICKED_UP_STATS, OBJECTS_DROPPED_STATS})
-+        {
-+            for (int x = 0; x < sb.length; x++)
-+            {
-+                if (sb[x] != null)
-+                {
-+                    ALL_STATS.remove(sb[x]);
-+                    sb[x] = null;
-+                }
-+            }
-+        }
++        clearStats(BLOCKS_STATS);
++        clearStats(CRAFTS_STATS);
++        clearStats(OBJECT_USE_STATS);
++        clearStats(OBJECT_BREAK_STATS);
++        clearStats(OBJECTS_PICKED_UP_STATS);
++        clearStats(OBJECTS_DROPPED_STATS);
 +        List<StatBase> unknown = Lists.newArrayList(ALL_STATS);
 +        ALL_STATS.clear();
 +
@@ -135,5 +298,14 @@
 +        initItemDepleteStats();
 +        initCraftableStats();
 +        initPickedUpAndDroppedStats();
++    }
++
++    private static void clearStats(Map<Integer, StatBase> stats)
++    {
++        for (StatBase stat : stats.values())
++        {
++            ALL_STATS.remove(stat);
++        }
++        stats.clear();
      }
  }
