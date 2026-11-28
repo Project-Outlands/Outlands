@@ -140,7 +140,30 @@
          }
      }
  
-@@ -320,11 +374,19 @@
+@@ -286,6 +340,13 @@
+                 byte[] abyte = new byte[4096];
+                 NibbleArray nibblearray = new NibbleArray();
+                 NibbleArray nibblearray1 = extendedblockstorage.getData().getDataForNBT(abyte, nibblearray);
++                int[] palette = extendedblockstorage.getData().getTemporaryPalette();
++
++                if (palette != null)
++                {
++                    nbttagcompound.setIntArray("Palette", palette);
++                }
++
+                 nbttagcompound.setByteArray("Blocks", abyte);
+                 nbttagcompound.setByteArray("Data", nibblearray.getData());
+ 
+@@ -310,7 +371,7 @@
+         }
+ 
+         compound.setTag("Sections", nbttaglist);
+-        compound.setByteArray("Biomes", chunkIn.getBiomeArray());
++        compound.setIntArray("Biomes", chunkIn.getBiomeIds());
+         chunkIn.setHasEntities(false);
+         NBTTagList nbttaglist1 = new NBTTagList();
+ 
+@@ -320,11 +381,19 @@
              {
                  NBTTagCompound nbttagcompound2 = new NBTTagCompound();
  
@@ -160,7 +183,7 @@
              }
          }
  
-@@ -333,8 +395,16 @@
+@@ -333,8 +402,16 @@
  
          for (TileEntity tileentity : chunkIn.getTileEntityMap().values())
          {
@@ -177,7 +200,7 @@
          }
  
          compound.setTag("TileEntities", nbttaglist2);
-@@ -360,6 +430,18 @@
+@@ -360,6 +437,18 @@
  
              compound.setTag("TileTicks", nbttaglist3);
          }
@@ -196,10 +219,60 @@
      }
  
      private Chunk readChunkFromNBT(World worldIn, NBTTagCompound compound)
-@@ -403,6 +485,16 @@
-             chunk.setBiomeArray(compound.getByteArray("Biomes"));
-         }
+@@ -382,9 +471,24 @@
+             int i1 = nbttagcompound.getByte("Y");
+             ExtendedBlockStorage extendedblockstorage = new ExtendedBlockStorage(i1 << 4, flag);
+             byte[] abyte = nbttagcompound.getByteArray("Blocks");
+-            NibbleArray nibblearray = new NibbleArray(nbttagcompound.getByteArray("Data"));
+-            NibbleArray nibblearray1 = nbttagcompound.hasKey("Add", 7) ? new NibbleArray(nbttagcompound.getByteArray("Add")) : null;
+-            extendedblockstorage.getData().setDataFromNBT(abyte, nibblearray, nibblearray1);
++
++            try
++            {
++                NibbleArray nibblearray = new NibbleArray(nbttagcompound.getByteArray("Data"));
++                NibbleArray nibblearray1 = nbttagcompound.hasKey("Add", 7) ? new NibbleArray(nbttagcompound.getByteArray("Add")) : null;
++                NibbleArray nibblearray2 = nbttagcompound.hasKey("Add2", 7) ? new NibbleArray(nbttagcompound.getByteArray("Add2")) : null;
++                extendedblockstorage.getData().setTemporaryPalette(nbttagcompound.hasKey("Palette", 11) ? nbttagcompound.getIntArray("Palette") : null);
++                extendedblockstorage.getData().setLegacyAdd2(nibblearray2);
++                extendedblockstorage.getData().setDataFromNBT(abyte, nibblearray, nibblearray1);
++            }
++            catch (IllegalArgumentException exception)
++            {
++                throw new IllegalArgumentException(
++                    "Invalid block data at chunk x=" + i + ", z=" + j + ", section Y=" + i1 + ": " + exception.getMessage(),
++                    exception
++                );
++            }
++
+             extendedblockstorage.setBlockLight(new NibbleArray(nbttagcompound.getByteArray("BlockLight")));
  
+             if (flag)
+@@ -398,11 +502,33 @@
+ 
+         chunk.setStorageArrays(aextendedblockstorage);
+ 
+-        if (compound.hasKey("Biomes", 7))
+-        {
+-            chunk.setBiomeArray(compound.getByteArray("Biomes"));
+-        }
+-
++        if (compound.hasKey("Biomes", 11))
++        {
++            chunk.setBiomeIds(compound.getIntArray("Biomes"));
++        }
++        else if (compound.hasKey("Biomes", 7))
++        {
++            byte[] legacyBiomes = compound.getByteArray("Biomes");
++            int[] biomeIds = new int[legacyBiomes.length];
++
++            for (int biomeIndex = 0; biomeIndex < legacyBiomes.length; biomeIndex++)
++            {
++                biomeIds[biomeIndex] = legacyBiomes[biomeIndex] & 0xFF;
++            }
++
++            chunk.setBiomeIds(biomeIds);
++        }
++
 +        if (chunk.getCapabilities() != null && compound.hasKey("ForgeCaps")) {
 +            chunk.getCapabilities().deserializeNBT(compound.getCompoundTag("ForgeCaps"));
 +        }
@@ -213,7 +286,7 @@
          NBTTagList nbttaglist1 = compound.getTagList("Entities", 10);
  
          for (int j1 = 0; j1 < nbttaglist1.tagCount(); j1++)
-@@ -451,8 +543,6 @@
+@@ -451,8 +577,6 @@
                  );
              }
          }
@@ -222,7 +295,7 @@
      }
  
      @Nullable
-@@ -584,5 +674,10 @@
+@@ -584,5 +708,10 @@
  
              return entity;
          }
