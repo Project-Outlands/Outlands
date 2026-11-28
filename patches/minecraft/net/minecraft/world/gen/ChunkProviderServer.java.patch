@@ -60,13 +60,10 @@
          return chunk;
      }
  
-@@ -122,9 +152,19 @@
+@@ -122,6 +152,20 @@
                  throw new ReportedException(crashreport);
              }
  
--            this.loadedChunks.put(i, chunk);
--            chunk.onLoad();
--            chunk.populate(this, this.chunkGenerator);
 +            if (chunk.hasUnsetBiomes())
 +            {
 +                Biome[] biomes = this.world.getBiomeProvider().getBiomes(null, x << 4, z << 4, 16, 16);
@@ -80,10 +77,11 @@
 +                // Stays narrow unless a provider hands out an id a byte cannot hold.
 +                chunk.setBiomeIds(biomeIds);
 +            }
-         }
- 
-         return chunk;
-@@ -222,6 +262,11 @@
++
+             this.loadedChunks.put(i, chunk);
+             chunk.onLoad();
+             chunk.populate(this, this.chunkGenerator);
+@@ -222,6 +266,11 @@
          {
              if (!this.droppedChunks.isEmpty())
              {
@@ -95,7 +93,7 @@
                  Iterator<Long> iterator = this.droppedChunks.iterator();
  
                  for (int i = 0; i < 100 && iterator.hasNext(); iterator.remove())
-@@ -232,6 +277,7 @@
+@@ -232,6 +281,7 @@
                      if (chunk != null && chunk.unloadQueued)
                      {
                          chunk.onUnload();
@@ -103,7 +101,7 @@
                          this.saveChunkData(chunk);
                          this.saveChunkExtraData(chunk);
                          this.loadedChunks.remove(olong);
-@@ -239,6 +285,8 @@
+@@ -239,6 +289,8 @@
                      }
                  }
              }

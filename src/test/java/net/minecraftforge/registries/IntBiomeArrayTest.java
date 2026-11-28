@@ -286,6 +286,24 @@ public class IntBiomeArrayTest
         assertArrayEquals(expected, level.getIntArray("Biomes"));
     }
 
+    /**
+     * A generated chunk has to enter the provider's loaded set: that is what makes the second call return the
+     * same instance, what onLoad() marks, and what saveChunks() iterates. Losing it means the world has no
+     * chunks at all - the terrain never reaches the client and nothing can be saved.
+     */
+    @Test
+    public void generatedChunkIsRegisteredWithTheProvider()
+    {
+        TestWorldServer world = new TestWorldServer(new FixedBiomeProvider(legacyBiome));
+        ChunkProviderServer chunkProvider = new ChunkProviderServer(world, new EmptyChunkLoader(), new TestChunkGenerator(world, false));
+
+        Chunk first = chunkProvider.provideChunk(0, 0);
+        Chunk second = chunkProvider.provideChunk(0, 0);
+
+        assertSame(first, second);
+        assertTrue(first.isLoaded());
+    }
+
     @Test
     public void chunkProviderFillsUninitializedChunkWithWideBiomeIds()
     {
