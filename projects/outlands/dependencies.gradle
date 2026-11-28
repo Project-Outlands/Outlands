@@ -47,7 +47,7 @@ configurations {
 }
 
 // Also expanded into mixin.info by build.gradle, so it is named once here rather than twice.
-ext.mixinVersion = '0.17.6+mixin.0.8.7-local'
+ext.mixinVersion = '0.17.7+mixin.0.8.7-local'
 
 dependencies {
     lwjglMinimumApi "org.lwjgl:lwjgl-opengl:$props.lwjgl_minimum_version"
