@@ -8,7 +8,8 @@ import java.util.Set;
  * Requested by: @Desoroxxx
  *
  * @since 9.0
- * @deprecated since 11.0, use {@link org.spongepowered.asm.mixin.transformer.Config#blacklist(String)}
+ * @deprecated since 11.0 and no longer honoured: this loader reports what a hijacker asks for
+ *      rather than suppressing the configuration, so the mixin environment loads it normally.
  */
 @Deprecated
 public interface IMixinConfigHijacker {

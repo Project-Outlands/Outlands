@@ -128,7 +128,7 @@ public class FMLLaunchHandler
         try
         {
             LibraryManager.setup(minecraftHome);
-            FMLLog.log.info("Initializing CleanMix...");
+            FMLLog.log.info("Initializing Mixin...");
             MixinBootstrap.init();
             FMLLog.log.info("Initializing MixinExtras...");
             MixinExtrasBootstrap.init();

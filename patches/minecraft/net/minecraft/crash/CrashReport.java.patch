@@ -20,7 +20,7 @@
          }
  
 -        return s;
-+        return s + net.minecraftforge.cleanmix.CleanMixHooks.addMixinMetadataToCrashReport(throwable)
++        return s + net.minecraftforge.mixin.MixinHooks.addMixinMetadataToCrashReport(throwable)
 +                + net.minecraftforge.fml.common.CrashReportHooks.getStackTraceReport(throwable);
      }
  

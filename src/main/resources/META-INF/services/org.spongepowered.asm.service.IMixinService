@@ -1,1 +1,1 @@
-net.minecraftforge.cleanmix.service.CleanMixService
+net.minecraftforge.mixin.service.MixinService

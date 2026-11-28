@@ -22,7 +22,7 @@ public final class ModListConfig {
             "FML",
             "mcp",
             "outlands",
-            "cleanmix",
+            "mixin",
             "configanytime",
             "mixinbooter",
             "fugue",

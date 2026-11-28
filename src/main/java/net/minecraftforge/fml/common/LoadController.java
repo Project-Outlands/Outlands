@@ -19,7 +19,7 @@
 
 package net.minecraftforge.fml.common;
 
-import net.minecraftforge.cleanmix.CleanMixHooks;
+import net.minecraftforge.mixin.MixinHooks;
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;

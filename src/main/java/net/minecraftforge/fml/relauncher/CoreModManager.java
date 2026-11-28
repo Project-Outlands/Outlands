@@ -19,7 +19,7 @@
 
 package net.minecraftforge.fml.relauncher;
 
-import net.minecraftforge.cleanmix.CleanMixHooks;
+import net.minecraftforge.mixin.MixinHooks;
 import com.google.common.base.Strings;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
@@ -424,7 +424,7 @@ public class CoreModManager {
         // Load rescued (ForceLoadAsMod) coremods
         ModDiscoverer.instance().rescueDroppedCoremods();
         // Early Mixin Loaders Instantiation
-        CleanMixHooks.loadMixinBooterEarlyMixins(loadPlugins);
+        MixinHooks.loadMixinBooterEarlyMixins(loadPlugins);
         // Add loadPlugins (including rescued coremods)
         tweakers.addAll(loadPlugins);
     }

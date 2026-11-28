@@ -1,4 +1,4 @@
-package net.minecraftforge.cleanmix;
+package net.minecraftforge.mixin;
 
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
 import net.minecraftforge.fml.common.discovery.ASMDataTable;
@@ -14,7 +14,7 @@ import zone.rong.mixinbooter.*;
 
 import java.util.*;
 
-public class CleanMixHooks {
+public class MixinHooks {
 
     public static String addMixinMetadataToCrashReport(Throwable throwable) {
         Map<String, ClassInfo> classes = new LinkedHashMap<>();
@@ -59,17 +59,21 @@ public class CleanMixHooks {
     }
 
     public static void loadMixinBooterEarlyMixins(List<CoreModManager.FMLPluginWrapper> loadPlugins) {
-        ILogger logger = MixinService.getService().getLogger("CleanMix");
+        ILogger logger = MixinService.getService().getLogger("mixin");
         Set<String> presentMods = ModDiscoverer.instance().presentMods();
         Set<IEarlyMixinLoader> queuedLoaders = new LinkedHashSet<>();
         Context context = new Context(null, presentMods);
         for (CoreModManager.FMLPluginWrapper plugin : loadPlugins) {
             IFMLLoadingPlugin thePlugin = plugin.coreModInstance;
             if (thePlugin instanceof IMixinConfigHijacker interceptor) {
-                logger.info("Loading config hijacker {}.", interceptor.getClass().getName());
+                // Hijacking is deliberately not honoured. Stopping a configuration from loading so
+                // that something else can load it is another layer of interception in a stack that
+                // already has too many of them, and the configurations it targets load fine as they
+                // are. The interface is kept so that coremods implementing it still construct, and
+                // what it asks for is reported rather than acted on.
                 for (String hijacked : interceptor.getHijackedMixinConfigs(context)) {
-                    Config.blacklist(hijacked);
-                    logger.info("{} will hijack the mixin config {}", interceptor.getClass().getName(), hijacked);
+                    logger.warn("{} asked to hijack the mixin config {}, which this loader ignores; the config will load normally",
+                            interceptor.getClass().getName(), hijacked);
                 }
             }
             if (thePlugin instanceof IEarlyMixinLoader loader) {
@@ -94,7 +98,7 @@ public class CleanMixHooks {
     }
 
     public static void loadMixinBooterLateMixins(ASMDataTable data) {
-        ILogger logger = MixinService.getService().getLogger("CleanMix");
+        ILogger logger = MixinService.getService().getLogger("mixin");
 
         // Gather ILateMixinLoaders
         Set<ASMDataTable.ASMData> interfaceData = data.getAll(ILateMixinLoader.class.getName().replace('.', '/'));
@@ -143,7 +147,7 @@ public class CleanMixHooks {
     }
 
     private static boolean findAndAddMixinMetadata(StringBuilder mixinMetadataBuilder, String className, ClassInfo classInfo) {
-        Set<IMixinInfo> mixinInfos = classInfo.getMixins();
+        Set<IMixinInfo> mixinInfos = Mixins.getMixinsForClass(className);
         if (!mixinInfos.isEmpty()) {
             mixinMetadataBuilder.append("\n\t");
             mixinMetadataBuilder.append(className);

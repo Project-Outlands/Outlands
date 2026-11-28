@@ -22,7 +22,6 @@ package net.minecraftforge.fml.common.launcher;
 import java.io.File;
 import java.util.List;
 
-import net.minecraftforge.cleanmix.service.CleanMixService;
 import net.minecraft.launchwrapper.ITweaker;
 import net.minecraft.launchwrapper.LaunchClassLoader;
 import net.minecraftforge.fml.common.FMLLog;
@@ -54,8 +53,6 @@ public class FMLDeobfTweaker implements ITweaker {
         classLoader.registerTransformer("net.minecraftforge.fml.common.asm.transformers.ItemBlockTransformer");
         classLoader.registerTransformer("net.minecraftforge.fml.common.asm.transformers.ItemBlockSpecialTransformer");
         classLoader.registerTransformer("net.minecraftforge.fml.common.asm.transformers.PotionEffectTransformer");
-
-        ((CleanMixService) MixinService.getService()).transitionToInit();
 
         try
         {

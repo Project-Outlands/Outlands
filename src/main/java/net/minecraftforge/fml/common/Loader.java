@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import net.minecraftforge.cleanmix.CleanMixHooks;
+import net.minecraftforge.mixin.MixinHooks;
 import net.minecraftforge.client.LoadingTracker;
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.fml.common.discovery.ModDiscoverer;
@@ -550,7 +550,7 @@ public class Loader
         }
 
         ConfigManager.loadData(asmDataTable);
-        CleanMixHooks.loadMixinBooterLateMixins(asmDataTable);
+        MixinHooks.loadMixinBooterLateMixins(asmDataTable);
 
         modController.transition(LoaderState.CONSTRUCTING, false);
         modController.distributeStateMessage(LoaderState.CONSTRUCTING, modClassLoader, asmDataTable, reverseDependencies);
