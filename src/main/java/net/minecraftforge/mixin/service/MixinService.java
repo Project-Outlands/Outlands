@@ -79,6 +79,13 @@ public class MixinService extends MixinServiceLaunchWrapper implements IClassMet
      */
     @Override
     public MixinEnvironment.Phase getInitialPhase() {
+        // Upstream sets this while guessing the phase; keep it so that a ForgeGradle development
+        // launch still has its refmaps remapped, even though the guess itself is replaced.
+        String command = System.getProperty("sun.java.command");
+        if (command != null && command.contains("GradleStart")) {
+            System.setProperty("mixin.env.remapRefMap", "true");
+        }
+
         return MixinEnvironment.Phase.PREINIT;
     }
 
