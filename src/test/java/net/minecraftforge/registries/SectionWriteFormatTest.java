@@ -19,6 +19,8 @@ import net.minecraft.init.Blocks;
 import net.minecraft.item.EnumDyeColor;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
+import net.minecraft.nbt.NBTTagString;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.profiler.Profiler;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.datafix.DataFixer;
@@ -256,6 +258,7 @@ public class SectionWriteFormatTest
 
         NBTTagCompound section = findSection(level, 2);
         assertFalse("a vanilla section must not grow a Palette tag", section.hasKey("Palette"));
+        assertFalse("nor a name palette", section.hasKey("PaletteNames"));
         assertEquals((byte) 1, section.getByteArray("Blocks")[0]);
         assertEquals(0, new NibbleArray(section.getByteArray("Data")).get(0, 0, 0));
         assertEquals((byte) 35, section.getByteArray("Blocks")[1]);
@@ -280,11 +283,64 @@ public class SectionWriteFormatTest
         int index = paletteIndex(section.getByteArray("Blocks"), new NibbleArray(section.getByteArray("Data")), 0);
         assertEquals(WIDE_ID << 4 | 15, palette[index]);
 
+        // Every palette entry also carries a registry-order independent name, one per int entry.
+        assertEquals(palette.length, section.getTagList("PaletteNames", 8).tagCount());
+        assertEquals("test:wide[test_state=15]", section.getTagList("PaletteNames", 8).getStringTagAt(index));
+
         Chunk reloaded = new ReadableAnvilChunkLoader().read(world, level);
         assertSame(wide, reloaded.getBlockState(new BlockPos(0, 32, 0)));
     }
 
     /** The real writer, without the region file: {@code saveChunk} needs an FML sided delegate, this does not. */
+    /**
+     * The whole point of the name palette: the numeric entries can be wrong (mods added or removed since
+     * the chunk was written) and the states still come back right, because the names are consulted first.
+     */
+    @Test
+    public void namesWinOverNumericPaletteEntries() throws Exception
+    {
+        TestWorld world = new TestWorld();
+        Chunk chunk = new Chunk(world, 0, 0);
+        IBlockState wide = wideBlock.getStateFromMeta(15);
+        IBlockState stone = Blocks.STONE.getDefaultState();
+        chunk.setBlockState(new BlockPos(0, 32, 0), wide);
+        chunk.setBlockState(new BlockPos(1, 32, 0), stone);
+
+        NBTTagCompound level = writeChunk(world, chunk);
+        NBTTagCompound section = findSection(level, 2);
+
+        // Pretend the ids moved: every numeric palette entry now decodes to air.
+        int[] palette = section.getIntArray("Palette");
+        section.setIntArray("Palette", new int[palette.length]);
+
+        Chunk reloaded = new ReadableAnvilChunkLoader().read(world, level);
+        assertSame(wide, reloaded.getBlockState(new BlockPos(0, 32, 0)));
+        assertSame(stone, reloaded.getBlockState(new BlockPos(1, 32, 0)));
+    }
+
+    @Test
+    public void unresolvedNamesFallBackToTheNumericPalette() throws Exception
+    {
+        TestWorld world = new TestWorld();
+        Chunk chunk = new Chunk(world, 0, 0);
+        IBlockState wide = wideBlock.getStateFromMeta(15);
+        chunk.setBlockState(new BlockPos(0, 32, 0), wide);
+
+        NBTTagCompound level = writeChunk(world, chunk);
+        NBTTagCompound section = findSection(level, 2);
+
+        // A block that is not installed any more: the name is useless, the id is all that is left.
+        NBTTagList names = new NBTTagList();
+        for (int i = 0; i < section.getTagList("PaletteNames", 8).tagCount(); i++)
+        {
+            names.appendTag(new NBTTagString("gone:removed[causing=problems]"));
+        }
+        section.setTag("PaletteNames", names);
+
+        Chunk reloaded = new ReadableAnvilChunkLoader().read(world, level);
+        assertSame(wide, reloaded.getBlockState(new BlockPos(0, 32, 0)));
+    }
+
     private static NBTTagCompound writeChunk(TestWorld world, Chunk chunk) throws Exception
     {
         NBTTagCompound level = new NBTTagCompound();

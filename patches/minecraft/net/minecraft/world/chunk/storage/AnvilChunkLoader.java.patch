@@ -1,6 +1,36 @@
 --- before/net/minecraft/world/chunk/storage/AnvilChunkLoader.java
 +++ after/net/minecraft/world/chunk/storage/AnvilChunkLoader.java
-@@ -49,10 +49,32 @@
+@@ -11,11 +11,13 @@
+ import java.util.Set;
+ import javax.annotation.Nullable;
+ import net.minecraft.block.Block;
++import net.minecraft.block.state.IBlockState;
+ import net.minecraft.entity.Entity;
+ import net.minecraft.entity.EntityList;
+ import net.minecraft.nbt.CompressedStreamTools;
+ import net.minecraft.nbt.NBTTagCompound;
+ import net.minecraft.nbt.NBTTagList;
++import net.minecraft.nbt.NBTTagString;
+ import net.minecraft.tileentity.TileEntity;
+ import net.minecraft.util.ResourceLocation;
+ import net.minecraft.util.datafix.DataFixer;
+@@ -30,6 +32,7 @@
+ import net.minecraft.world.chunk.Chunk;
+ import net.minecraft.world.chunk.NibbleArray;
+ import net.minecraft.world.storage.IThreadedFileIO;
++import net.minecraftforge.common.util.BlockStateNames;
+ import net.minecraft.world.storage.ThreadedFileIOBase;
+ import org.apache.logging.log4j.LogManager;
+ import org.apache.logging.log4j.Logger;
+@@ -38,6 +41,7 @@
+ {
+     private static final Logger LOGGER = LogManager.getLogger();
+     private final Map<ChunkPos, NBTTagCompound> chunksToSave = Maps.newConcurrentMap();
++    private static final Set<String> UNKNOWN_PALETTE_NAMES = java.util.concurrent.ConcurrentHashMap.newKeySet();
+     private final Set<ChunkPos> chunksBeingSaved = Collections.newSetFromMap(Maps.newConcurrentMap());
+     public final File chunkSaveLocation;
+     private final DataFixer fixer;
+@@ -49,10 +53,32 @@
          this.fixer = dataFixerIn;
      }
  
@@ -33,7 +63,7 @@
          ChunkPos chunkpos = new ChunkPos(x, z);
          NBTTagCompound nbttagcompound = this.chunksToSave.get(chunkpos);
  
-@@ -66,9 +88,10 @@
+@@ -66,9 +92,10 @@
              }
  
              nbttagcompound = this.fixer.process(FixTypes.CHUNK, CompressedStreamTools.read(datainputstream));
@@ -45,7 +75,7 @@
      }
  
      @Override
-@@ -82,6 +105,13 @@
+@@ -82,6 +109,13 @@
      @Nullable
      protected Chunk checkedReadChunkFromNBT(World worldIn, int x, int z, NBTTagCompound compound)
      {
@@ -59,7 +89,7 @@
          if (!compound.hasKey("Level", 10))
          {
              LOGGER.error("Chunk file at {},{} is missing level data, skipping", x, z);
-@@ -113,14 +143,32 @@
+@@ -113,14 +147,32 @@
                      );
                      nbttagcompound.setInteger("xPos", x);
                      nbttagcompound.setInteger("zPos", z);
@@ -94,7 +124,7 @@
      @Override
      public void saveChunk(World worldIn, Chunk chunkIn) throws MinecraftException, IOException
      {
-@@ -132,12 +180,15 @@
+@@ -132,12 +184,15 @@
              NBTTagCompound nbttagcompound1 = new NBTTagCompound();
              nbttagcompound.setTag("Level", nbttagcompound1);
              nbttagcompound.setInteger("DataVersion", 1343);
@@ -111,7 +141,7 @@
          }
      }
  
-@@ -166,6 +217,7 @@
+@@ -166,6 +221,7 @@
          else
          {
              ChunkPos chunkpos = this.chunksToSave.keySet().iterator().next();
@@ -119,7 +149,7 @@
  
              try
              {
-@@ -180,16 +232,18 @@
+@@ -180,16 +236,18 @@
                      }
                      catch (Exception exception)
                      {
@@ -140,7 +170,7 @@
          }
      }
  
-@@ -286,6 +340,13 @@
+@@ -286,6 +344,22 @@
                  byte[] abyte = new byte[4096];
                  NibbleArray nibblearray = new NibbleArray();
                  NibbleArray nibblearray1 = extendedblockstorage.getData().getDataForNBT(abyte, nibblearray);
@@ -149,12 +179,21 @@
 +                if (palette != null)
 +                {
 +                    nbttagcompound.setIntArray("Palette", palette);
++                    IBlockState[] paletteStates = extendedblockstorage.getData().getTemporaryPaletteStates();
++                    NBTTagList names = new NBTTagList();
++
++                    for (int i = 0; i < palette.length; i++)
++                    {
++                        names.appendTag(new NBTTagString(BlockStateNames.toName(paletteStates[i])));
++                    }
++
++                    nbttagcompound.setTag("PaletteNames", names);
 +                }
 +
                  nbttagcompound.setByteArray("Blocks", abyte);
                  nbttagcompound.setByteArray("Data", nibblearray.getData());
  
-@@ -310,7 +371,15 @@
+@@ -310,7 +384,15 @@
          }
  
          compound.setTag("Sections", nbttaglist);
@@ -171,7 +210,7 @@
          chunkIn.setHasEntities(false);
          NBTTagList nbttaglist1 = new NBTTagList();
  
-@@ -320,11 +389,19 @@
+@@ -320,11 +402,19 @@
              {
                  NBTTagCompound nbttagcompound2 = new NBTTagCompound();
  
@@ -191,7 +230,7 @@
              }
          }
  
-@@ -333,8 +410,16 @@
+@@ -333,8 +423,16 @@
  
          for (TileEntity tileentity : chunkIn.getTileEntityMap().values())
          {
@@ -208,7 +247,7 @@
          }
  
          compound.setTag("TileEntities", nbttaglist2);
-@@ -360,6 +445,18 @@
+@@ -360,6 +458,47 @@
  
              compound.setTag("TileTicks", nbttaglist3);
          }
@@ -224,10 +263,39 @@
 +                net.minecraftforge.fml.common.FMLLog.log.error("A capability provider has thrown an exception trying to write state. It will not persist. Report this to the mod author", exception);
 +            }
 +        }
++    }
++
++    /**
++     * The state names of a palette section, one per palette entry, or null for a section without them.
++     * Unresolved names come back as null so the caller falls back to the numeric palette entry.
++     */
++    @Nullable
++    private static IBlockState[] readPaletteNames(NBTTagCompound section)
++    {
++        if (!section.hasKey("PaletteNames", 9))
++        {
++            return null;
++        }
++
++        NBTTagList names = section.getTagList("PaletteNames", 8);
++        IBlockState[] states = new IBlockState[names.tagCount()];
++
++        for (int i = 0; i < names.tagCount(); i++)
++        {
++            String name = names.getStringTagAt(i);
++            states[i] = BlockStateNames.fromName(name);
++
++            if (states[i] == null && UNKNOWN_PALETTE_NAMES.size() < 256 && UNKNOWN_PALETTE_NAMES.add(name))
++            {
++                LOGGER.warn("Unknown block state '{}' in a section palette, falling back to its numeric entry", name);
++            }
++        }
++
++        return states;
      }
  
      private Chunk readChunkFromNBT(World worldIn, NBTTagCompound compound)
-@@ -382,9 +479,24 @@
+@@ -382,9 +521,25 @@
              int i1 = nbttagcompound.getByte("Y");
              ExtendedBlockStorage extendedblockstorage = new ExtendedBlockStorage(i1 << 4, flag);
              byte[] abyte = nbttagcompound.getByteArray("Blocks");
@@ -241,6 +309,7 @@
 +                NibbleArray nibblearray1 = nbttagcompound.hasKey("Add", 7) ? new NibbleArray(nbttagcompound.getByteArray("Add")) : null;
 +                NibbleArray nibblearray2 = nbttagcompound.hasKey("Add2", 7) ? new NibbleArray(nbttagcompound.getByteArray("Add2")) : null;
 +                extendedblockstorage.getData().setTemporaryPalette(nbttagcompound.hasKey("Palette", 11) ? nbttagcompound.getIntArray("Palette") : null);
++                extendedblockstorage.getData().setTemporaryPaletteStates(readPaletteNames(nbttagcompound));
 +                extendedblockstorage.getData().setLegacyAdd2(nibblearray2);
 +                extendedblockstorage.getData().setDataFromNBT(abyte, nibblearray, nibblearray1);
 +            }
@@ -255,7 +324,7 @@
              extendedblockstorage.setBlockLight(new NibbleArray(nbttagcompound.getByteArray("BlockLight")));
  
              if (flag)
-@@ -398,11 +510,33 @@
+@@ -398,11 +553,33 @@
  
          chunk.setStorageArrays(aextendedblockstorage);
  
@@ -294,7 +363,7 @@
          NBTTagList nbttaglist1 = compound.getTagList("Entities", 10);
  
          for (int j1 = 0; j1 < nbttaglist1.tagCount(); j1++)
-@@ -451,8 +585,6 @@
+@@ -451,8 +628,6 @@
                  );
              }
          }
@@ -303,7 +372,7 @@
      }
  
      @Nullable
-@@ -584,5 +716,10 @@
+@@ -584,5 +759,10 @@
  
              return entity;
          }

@@ -16,16 +16,17 @@
  import net.minecraftforge.fml.relauncher.Side;
  import net.minecraftforge.fml.relauncher.SideOnly;
  
-@@ -17,6 +19,8 @@
+@@ -17,6 +19,9 @@
      protected BitArray storage;
      protected IBlockStatePalette palette;
      private int bits;
 +    private int[] temporaryPalette;
++    private IBlockState[] temporaryPaletteStates;
 +    private NibbleArray add2;
  
      public BlockStateContainer()
      {
-@@ -28,8 +32,26 @@
+@@ -28,8 +33,26 @@
          return y << 8 | z << 4 | x;
      }
  
@@ -52,7 +53,7 @@
          if (bitsIn != this.bits)
          {
              this.bits = bitsIn;
-@@ -46,7 +68,9 @@
+@@ -46,7 +69,9 @@
              else
              {
                  this.palette = REGISTRY_BASED_PALETTE;
@@ -63,7 +64,7 @@
              }
  
              this.palette.idFor(AIR_BLOCK_STATE);
-@@ -103,11 +127,15 @@
+@@ -103,11 +128,15 @@
  
          if (this.bits != i)
          {
@@ -80,7 +81,7 @@
      }
  
      public void write(PacketBuffer buf)
-@@ -118,44 +146,172 @@
+@@ -118,44 +147,205 @@
      }
  
      @Nullable
@@ -92,6 +93,25 @@
 +    public void setTemporaryPalette(@Nullable int[] temporaryPalette)
 +    {
 +        this.temporaryPalette = temporaryPalette;
++    }
++
++    /**
++     * The palette entries of the last {@link #getDataForNBT} call as state objects, so the writer can store
++     * stable names instead of registry ids. Null for sections written in the legacy format.
++     */
++    @Nullable
++    public IBlockState[] getTemporaryPaletteStates()
++    {
++        return this.temporaryPaletteStates;
++    }
++
++    /**
++     * States resolved from the {@code PaletteNames} tag, one per palette entry. A null entry means the name
++     * could not be resolved and the numeric palette entry should be used instead.
++     */
++    public void setTemporaryPaletteStates(@Nullable IBlockState[] temporaryPaletteStates)
++    {
++        this.temporaryPaletteStates = temporaryPaletteStates;
 +    }
 +
 +    public void setLegacyAdd2(@Nullable NibbleArray add2)
@@ -135,6 +155,7 @@
 -        return nibblearray;
 +        Map<IBlockState, Integer> stateIds = new IdentityHashMap<>();
 +        int[] palette = new int[4096];
++        IBlockState[] states = new IBlockState[16];
 +        int paletteSize = 0;
 +        boolean legacyExact = true;
 +
@@ -148,6 +169,12 @@
 +                paletteId = paletteSize++;
 +                stateIds.put(state, paletteId);
 +                palette[paletteId] = Block.BLOCK_STATE_IDS.get(state);
++
++                if (paletteId >= states.length)
++                {
++                    states = Arrays.copyOf(states, Math.min(4096, states.length * 2));
++                }
++                states[paletteId] = state;
 +
 +                // Only new palette entries can disqualify the section, so this runs a handful of times per section.
 +                if (legacyExact && !isLegacyRepresentable(state))
@@ -166,10 +193,12 @@
 +        if (legacyExact)
 +        {
 +            this.temporaryPalette = null;
++            this.temporaryPaletteStates = null;
 +            return this.writeLegacySection(blockIds, data, palette);
 +        }
 +
 +        this.temporaryPalette = Arrays.copyOf(palette, paletteSize);
++        this.temporaryPaletteStates = Arrays.copyOf(states, paletteSize);
 +        return null;
 +    }
 +
@@ -252,10 +281,15 @@
 +                    );
 +                }
 +
-+                this.set(i, Block.BLOCK_STATE_IDS.getByValue(this.temporaryPalette[paletteId]));
++                IBlockState named = this.temporaryPaletteStates != null && paletteId < this.temporaryPaletteStates.length
++                    ? this.temporaryPaletteStates[paletteId]
++                    : null;
++                // Names win: the numeric entry is only the fallback for a state whose name is gone.
++                this.set(i, named != null ? named : Block.BLOCK_STATE_IDS.getByValue(this.temporaryPalette[paletteId]));
 +            }
 +
 +            this.temporaryPalette = null;
++            this.temporaryPaletteStates = null;
 +            return;
 +        }
 +

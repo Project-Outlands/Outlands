@@ -86,6 +86,9 @@ Minecraft 源码通过 `patches/minecraft/**.java.patch` 修改。它们是标�
 * `./gradlew :outlands:checkPatches` 校验所有补丁仍然可用
 * `:mcpbase:makePatches` 从 `projects/mcpbase/patched` 重新生成补丁集
 
+> **顺序很重要**：直接改 `patched/` 后必须先跑 `:mcpbase:makePatches` 回写补丁，再编译/测试。
+> `applyPatches` 会从补丁重新铺一遍 `patched/`，没回写的改动会被静默冲掉。
+
 未打补丁的基线与打完补丁的树并排放，都是 MCP 名、都是生成物（gitignore）、都由 `:mcpbase:clean` 删除：
 
 | 路径 | 内容 |
