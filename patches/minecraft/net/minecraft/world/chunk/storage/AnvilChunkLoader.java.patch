@@ -154,16 +154,24 @@
                  nbttagcompound.setByteArray("Blocks", abyte);
                  nbttagcompound.setByteArray("Data", nibblearray.getData());
  
-@@ -310,7 +371,7 @@
+@@ -310,7 +371,15 @@
          }
  
          compound.setTag("Sections", nbttaglist);
 -        compound.setByteArray("Biomes", chunkIn.getBiomeArray());
-+        compound.setIntArray("Biomes", chunkIn.getBiomeIds());
++        if (chunkIn.hasWideBiomes())
++        {
++            compound.setIntArray("Biomes", chunkIn.getBiomeIds());
++        }
++        else
++        {
++            // Same tag type vanilla writes: a chunk that never saw a wide biome keeps loading anywhere.
++            compound.setByteArray("Biomes", chunkIn.getBiomeArray());
++        }
          chunkIn.setHasEntities(false);
          NBTTagList nbttaglist1 = new NBTTagList();
  
-@@ -320,11 +381,19 @@
+@@ -320,11 +389,19 @@
              {
                  NBTTagCompound nbttagcompound2 = new NBTTagCompound();
  
@@ -183,7 +191,7 @@
              }
          }
  
-@@ -333,8 +402,16 @@
+@@ -333,8 +410,16 @@
  
          for (TileEntity tileentity : chunkIn.getTileEntityMap().values())
          {
@@ -200,7 +208,7 @@
          }
  
          compound.setTag("TileEntities", nbttaglist2);
-@@ -360,6 +437,18 @@
+@@ -360,6 +445,18 @@
  
              compound.setTag("TileTicks", nbttaglist3);
          }
@@ -219,7 +227,7 @@
      }
  
      private Chunk readChunkFromNBT(World worldIn, NBTTagCompound compound)
-@@ -382,9 +471,24 @@
+@@ -382,9 +479,24 @@
              int i1 = nbttagcompound.getByte("Y");
              ExtendedBlockStorage extendedblockstorage = new ExtendedBlockStorage(i1 << 4, flag);
              byte[] abyte = nbttagcompound.getByteArray("Blocks");
@@ -247,7 +255,7 @@
              extendedblockstorage.setBlockLight(new NibbleArray(nbttagcompound.getByteArray("BlockLight")));
  
              if (flag)
-@@ -398,11 +502,33 @@
+@@ -398,11 +510,33 @@
  
          chunk.setStorageArrays(aextendedblockstorage);
  
@@ -286,7 +294,7 @@
          NBTTagList nbttaglist1 = compound.getTagList("Entities", 10);
  
          for (int j1 = 0; j1 < nbttaglist1.tagCount(); j1++)
-@@ -451,8 +577,6 @@
+@@ -451,8 +585,6 @@
                  );
              }
          }
@@ -295,7 +303,7 @@
      }
  
      @Nullable
-@@ -584,5 +708,10 @@
+@@ -584,5 +716,10 @@
  
              return entity;
          }

@@ -63,6 +63,7 @@ import org.junit.runner.RunWith;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -73,7 +74,6 @@ public class IntBiomeArrayTest
 {
     private static final int LEGACY_ID = 200;
     private static final int WIDE_ID = 300;
-    private static final ResourceLocation ERROR_BIOME_NAME = new ResourceLocation("reid", "error_biome");
 
     private static Biome legacyBiome;
     private static Biome wideBiome;
@@ -138,33 +138,70 @@ public class IntBiomeArrayTest
     }
 
     @Test
-    public void legacyByteArrayContainsOnlyErrorBiome()
+    public void freshChunkStartsWithUnsetNarrowBiomes()
     {
         World world = new TestWorld(new FixedBiomeProvider(wideBiome));
         Chunk chunk = new Chunk(world, 0, 0);
-        ForgeRegistry<Biome> registry = RegistryManager.ACTIVE.getRegistry(GameData.BIOMES);
-        Biome errorBiome = registry.getValue(ERROR_BIOME_NAME);
-        assertNotNull(errorBiome);
+
+        assertFalse(chunk.hasWideBiomes());
+        assertTrue(chunk.hasUnsetBiomes());
 
         byte[] expected = new byte[256];
-        Arrays.fill(expected, (byte)Biome.getIdForBiome(errorBiome));
+        Arrays.fill(expected, (byte) -1);
         assertArrayEquals(expected, chunk.getBiomeArray());
     }
 
     @Test
-    public void legacyByteWriterDoesNotChangeWideBiomes()
+    public void byteArrayIsTheRealStorageWhileNarrow()
     {
-        BiomeProvider provider = new FixedBiomeProvider(wideBiome);
+        // The vanilla generator idiom: take the array, write into it, never call the setter again.
+        BiomeProvider provider = new FixedBiomeProvider(Biomes.PLAINS);
         World world = new TestWorld(provider);
         Chunk chunk = new Chunk(world, 0, 0);
-        BlockPos pos = new BlockPos(3, 0, 7);
-        assertSame(wideBiome, chunk.getBiome(pos, provider));
 
-        byte[] legacy = new byte[256];
-        legacy[7 << 4 | 3] = (byte)LEGACY_ID;
-        chunk.setBiomeArray(legacy);
+        chunk.getBiomeArray()[3 << 4 | 7] = (byte) LEGACY_ID;
 
-        assertSame(wideBiome, chunk.getBiome(pos, provider));
+        assertSame(legacyBiome, chunk.getBiome(new BlockPos(7, 0, 3), provider));
+        assertFalse(chunk.hasWideBiomes());
+    }
+
+    @Test
+    public void wideCellsReadAsUnsetInTheByteView()
+    {
+        BiomeProvider provider = new FixedBiomeProvider(Biomes.PLAINS);
+        World world = new TestWorld(provider);
+        Chunk chunk = new Chunk(world, 0, 0);
+        int[] ids = new int[256];
+        Arrays.fill(ids, LEGACY_ID);
+        ids[3 << 4 | 7] = WIDE_ID;
+        chunk.setBiomeIds(ids);
+
+        assertTrue(chunk.hasWideBiomes());
+
+        byte[] view = chunk.getBiomeArray();
+        assertEquals((byte) LEGACY_ID, view[0]);
+        assertEquals((byte) -1, view[3 << 4 | 7]);
+        assertSame(wideBiome, chunk.getBiome(new BlockPos(7, 0, 3), provider));
+
+        // A byte write reaches a representable cell and leaves the wide one alone, because 255 there means
+        // "this view cannot see it" rather than "unset it".
+        view[0] = (byte) 42;
+        chunk.setBiomeArray(view);
+        assertEquals(42, chunk.getBiomeIds()[0]);
+        assertEquals(WIDE_ID, chunk.getBiomeIds()[3 << 4 | 7]);
+    }
+
+    @Test
+    public void setBiomeIdsStaysNarrowWhileEveryIdFits()
+    {
+        World world = new TestWorld(new FixedBiomeProvider(Biomes.PLAINS));
+        Chunk chunk = new Chunk(world, 0, 0);
+        int[] ids = new int[256];
+        Arrays.fill(ids, LEGACY_ID);
+        chunk.setBiomeIds(ids);
+
+        assertFalse(chunk.hasWideBiomes());
+        assertEquals((byte) LEGACY_ID, chunk.getBiomeArray()[0]);
     }
 
     @Test
@@ -195,6 +232,34 @@ public class IntBiomeArrayTest
         Chunk chunk = new ReadableAnvilChunkLoader().read(world, root);
 
         assertSame(wideBiome, chunk.getBiome(new BlockPos(4, 0, 9), provider));
+    }
+
+    @Test
+    public void anvilWritesLegacyByteBiomesWhileNarrow() throws Exception
+    {
+        BiomeProvider provider = new FixedBiomeProvider(Biomes.PLAINS);
+        World world = new TestWorld(provider);
+        Chunk chunk = new Chunk(world, 0, 0);
+        Arrays.fill(chunk.getBiomeArray(), (byte) LEGACY_ID);
+        AnvilChunkLoader loader = new AnvilChunkLoader(saveLocation, new DataFixer(1343));
+
+        loader.saveChunk(world, chunk);
+        loader.flush();
+
+        NBTTagCompound saved;
+        try (DataInputStream input = RegionFileCache.getChunkInputStream(saveLocation, 0, 0))
+        {
+            saved = CompressedStreamTools.read(input);
+        }
+        NBTTagCompound level = saved.getCompoundTag("Level");
+
+        // Same tag type vanilla writes, so a world that never saw a wide biome stays readable elsewhere.
+        assertTrue(level.hasKey("Biomes", 7));
+        assertEquals((byte) LEGACY_ID, level.getByteArray("Biomes")[0]);
+
+        Chunk reloaded = new ReadableAnvilChunkLoader().read(world, saved);
+        assertFalse(reloaded.hasWideBiomes());
+        assertSame(legacyBiome, reloaded.getBiome(new BlockPos(4, 0, 9), provider));
     }
 
     @Test
@@ -247,20 +312,6 @@ public class IntBiomeArrayTest
         int[] expected = new int[256];
         Arrays.fill(expected, WIDE_ID);
         assertArrayEquals(expected, chunk.getBiomeIds());
-    }
-
-    @Test
-    public void errorBiomeIdFollowsRegistryRemap()
-    {
-        int remappedId = 400;
-        remapBiome(ERROR_BIOME_NAME, remappedId);
-        assertEquals(remappedId, RegistryManager.ACTIVE.getRegistry(GameData.BIOMES).getID(ERROR_BIOME_NAME));
-
-        World world = new TestWorld(new FixedBiomeProvider(wideBiome));
-        byte[] legacy = new Chunk(world, 0, 0).getBiomeArray();
-        byte[] expected = new byte[256];
-        Arrays.fill(expected, (byte)remappedId);
-        assertArrayEquals(expected, legacy);
     }
 
     @Test

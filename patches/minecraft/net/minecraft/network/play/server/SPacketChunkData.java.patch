@@ -1,25 +1,46 @@
 --- before/net/minecraft/network/play/server/SPacketChunkData.java
 +++ after/net/minecraft/network/play/server/SPacketChunkData.java
-@@ -141,7 +141,7 @@
+@@ -141,7 +141,19 @@
  
          if (this.isFullChunk())
          {
 -            buf.writeBytes(chunkIn.getBiomeArray());
-+            buf.writeVarIntArray(chunkIn.getBiomeIds());
++            // One flag, then the narrow form (what vanilla sends) or the wide form. Reading it back is
++            // Chunk.fillChunk, so both sides agree.
++            boolean wide = chunkIn.hasWideBiomes();
++            buf.writeBoolean(wide);
++
++            if (wide)
++            {
++                buf.writeVarIntArray(chunkIn.getBiomeIds());
++            }
++            else
++            {
++                buf.writeBytes(chunkIn.getBiomeArray());
++            }
          }
  
          return i;
-@@ -171,7 +171,13 @@
+@@ -171,7 +183,22 @@
  
          if (this.isFullChunk())
          {
 -            i += chunkIn.getBiomeArray().length;
-+            int[] biomeIds = chunkIn.getBiomeIds();
-+            i += PacketBuffer.getVarIntSize(biomeIds.length);
++            i += 1; // the wide flag
 +
-+            for (int biomeId : biomeIds)
++            if (chunkIn.hasWideBiomes())
 +            {
-+                i += PacketBuffer.getVarIntSize(biomeId);
++                int[] biomeIds = chunkIn.getBiomeIds();
++                i += PacketBuffer.getVarIntSize(biomeIds.length);
++
++                for (int biomeId : biomeIds)
++                {
++                    i += PacketBuffer.getVarIntSize(biomeId);
++                }
++            }
++            else
++            {
++                i += 256;
 +            }
          }
  
