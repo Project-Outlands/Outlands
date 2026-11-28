@@ -7,6 +7,7 @@ import net.minecraftforge.fml.common.asm.transformers.deobf.FMLDeobfuscatingRema
 import org.spongepowered.asm.launch.platform.container.ContainerHandleURI;
 import org.spongepowered.asm.launch.platform.container.IContainerHandle;
 import org.spongepowered.asm.mixin.MixinEnvironment;
+import org.spongepowered.asm.mixin.throwables.MixinException;
 import org.spongepowered.asm.service.IClassBytecodeProvider;
 import org.spongepowered.asm.service.IClassMetadataProvider;
 import org.spongepowered.asm.service.IClassProvider;
@@ -50,6 +51,35 @@ public class MixinService extends MixinServiceLaunchWrapper implements IClassMet
         List<String> agents = new ArrayList<>(super.getPlatformAgents());
         agents.add(MixinSideAgent.class.getName());
         return agents;
+    }
+
+    /**
+     * The base class rejects a boot source which does not share {@code Launch}'s own class loader.
+     * That assumed the subsystem is defined by the parent loader and only the launcher is; here
+     * Foundation keeps the launcher on the system class path and loads both the game and the whole
+     * subsystem through the launch class loader, so the check rejected every correct setup.
+     *
+     * <p>What it is guarding is a second copy of the subsystem, so compare against this service's
+     * loader instead: the environment which booted us must come from the same copy.</p>
+     *
+     * @param bootSource object which triggered initialisation
+     */
+    @Override
+    public void checkEnv(Object bootSource) {
+        if (bootSource.getClass().getClassLoader() != MixinService.class.getClassLoader()) {
+            throw new MixinException("Attempted to init the mixin environment in the wrong classloader");
+        }
+    }
+
+    /**
+     * The base class decides between {@code PREINIT} and {@code DEFAULT} from how deep
+     * {@code Launch.launch} sits in the stack, which is a fixture of vanilla's launcher. Report the
+     * phase this launcher starts in instead; {@code EnvironmentStateTweaker} advances to
+     * {@code DEFAULT} before the game starts.
+     */
+    @Override
+    public MixinEnvironment.Phase getInitialPhase() {
+        return MixinEnvironment.Phase.PREINIT;
     }
 
     @Override
