@@ -39,6 +39,16 @@ TARGETS = {
     'getIdFromBlock': 'block_id',
     'func_149729_e': 'block_by_id',
     'getBlockById': 'block_by_id',
+    # full enumeration: iterating every state of a block, or every value of a property
+    'func_177619_a': 'states_all',
+    'getValidStates': 'states_all',
+    'func_177700_c': 'values_all',
+    'getAllowedValues': 'values_all',
+    'func_177227_a': 'keys_all',
+    'getPropertyKeys': 'keys_all',
+    'func_177623_d': 'props_all',
+    'func_177231_a': 'cycle',
+    'cycleProperty': 'cycle',
     # item damage carrying a block state (the classic "ItemBlock meta" pattern)
     'func_77960_j': 'item_meta',
     'getMetadata': 'item_meta',
@@ -269,6 +279,13 @@ def main():
     for jar, counter in sorted(per_jar.items(), key=lambda kv: -kv[1]['meta_out'])[:20]:
         if counter['meta_out']:
             print(f"  {counter['meta_out']:4d}  {jar[:56]:56} [{instance_of[jar]}]")
+    print("\n1.12.2 里全量遍历类调用的模组（states_all / values_all / keys_all）:")
+    for jar, counter in sorted(per_jar.items(), key=lambda kv: -(kv[1]['states_all'] * 8 + kv[1]['values_all'] + kv[1]['keys_all'])):
+        if not version_is_112(jar):
+            continue
+        if not (counter['states_all'] or counter['values_all'] or counter['keys_all']):
+            continue
+        print(f"  {jar[:46]:46} states_all={counter['states_all']:3d} values_all={counter['values_all']:3d} keys_all={counter['keys_all']:3d}   {classes['states_all'][jar][:2]}")
     print("\n1.12.2 里 meta_out 最多的模组（前 15）:")
     for jar, counter in sorted(per_jar.items(), key=lambda kv: -kv[1]['meta_out'])[:15]:
         if counter['meta_out'] and version_is_112(jar):
