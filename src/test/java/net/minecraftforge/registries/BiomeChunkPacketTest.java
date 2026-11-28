@@ -1,7 +1,11 @@
 package net.minecraftforge.registries;
 
+import java.util.Arrays;
+
 import io.netty.buffer.Unpooled;
 
+import net.minecraft.init.Biomes;
+import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.PacketBuffer;
 import net.minecraft.network.play.server.SPacketChunkData;
@@ -23,6 +27,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 
 @RunWith(ForgeTestRunner.class)
@@ -71,6 +76,54 @@ public class BiomeChunkPacketTest
                         assertSame(wideBiome, target.getBiome(new BlockPos(x, 0, z), provider));
                     }
                 }
+            }
+            finally
+            {
+                chunkData.release();
+            }
+        }
+        finally
+        {
+            wire.release();
+        }
+    }
+
+    /**
+     * The narrow half of the packet: same framing with the wide flag off, and a section present so the size
+     * accounting has to cover block data too. An under-estimate here would throw while the packet is built,
+     * which in game means the chunk is never sent.
+     */
+    @Test
+    public void fullChunkPacketRoundTripsLegacyBiomeIds() throws Exception
+    {
+        BiomeProvider provider = new FixedBiomeProvider(Biomes.PLAINS);
+        World world = new TestWorld(provider);
+        Chunk source = new Chunk(world, 0, 0);
+        Arrays.fill(source.getBiomeArray(), (byte) 1);
+
+        for (int y = 0; y < 40; y++)
+        {
+            source.setBlockState(new BlockPos(1, y, 2), Blocks.STONE.getDefaultState());
+        }
+
+        SPacketChunkData packet = new SPacketChunkData(source, 65535);
+        PacketBuffer wire = new PacketBuffer(Unpooled.buffer());
+        try
+        {
+            packet.writePacketData(wire);
+            SPacketChunkData decoded = new SPacketChunkData();
+            decoded.readPacketData(wire);
+            PacketBuffer chunkData = decoded.getReadBuffer();
+            try
+            {
+                Chunk target = new Chunk(world, 0, 0);
+                target.read(chunkData, decoded.getExtractedSize(), decoded.isFullChunk());
+
+                assertEquals(0, wire.readableBytes());
+                assertEquals(0, chunkData.readableBytes());
+                assertFalse(target.hasWideBiomes());
+                assertSame(Biomes.PLAINS, target.getBiome(new BlockPos(3, 0, 7), provider));
+                assertEquals(Blocks.STONE.getDefaultState(), target.getBlockState(new BlockPos(1, 20, 2)));
             }
             finally
             {
