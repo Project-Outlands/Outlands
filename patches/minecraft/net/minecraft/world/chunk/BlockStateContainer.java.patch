@@ -80,7 +80,7 @@
      }
  
      public void write(PacketBuffer buf)
-@@ -118,44 +146,103 @@
+@@ -118,44 +146,172 @@
      }
  
      @Nullable
@@ -99,16 +99,20 @@
 +        this.add2 = add2;
 +    }
 +
++    /**
++     * Fills the vanilla section arrays. When every state in the section can be expressed exactly by the
++     * legacy 12-bit (block id, metadata) pair, the section is written exactly like vanilla would write it
++     * (no {@code Palette} tag, id in {@code Blocks} + {@code Add}, metadata in {@code Data}) so that the
++     * chunk stays readable by unmodified 1.12 tools and by builds without the palette extension.
++     * Only sections that need it fall back to the palette format.
++     */
 +    @Nullable
      public NibbleArray getDataForNBT(byte[] blockIds, NibbleArray data)
      {
 -        NibbleArray nibblearray = null;
-+        Map<IBlockState, Integer> stateIds = new IdentityHashMap<>();
-+        int[] palette = new int[4096];
-+        int paletteSize = 0;
- 
-         for (int i = 0; i < 4096; i++)
-         {
+-
+-        for (int i = 0; i < 4096; i++)
+-        {
 -            int j = Block.BLOCK_STATE_IDS.get(this.get(i));
 -            int k = i & 15;
 -            int l = i >> 8 & 15;
@@ -117,6 +121,25 @@
 -            if ((j >> 12 & 15) != 0)
 -            {
 -                if (nibblearray == null)
+-                {
+-                    nibblearray = new NibbleArray();
+-                }
+-
+-                nibblearray.set(k, l, i1, j >> 12 & 15);
+-            }
+-
+-            blockIds[i] = (byte)(j >> 4 & 0xFF);
+-            data.set(k, l, i1, j & 15);
+-        }
+-
+-        return nibblearray;
++        Map<IBlockState, Integer> stateIds = new IdentityHashMap<>();
++        int[] palette = new int[4096];
++        int paletteSize = 0;
++        boolean legacyExact = true;
++
++        for (int i = 0; i < 4096; i++)
++        {
 +            IBlockState state = this.get(i);
 +            Integer paletteId = stateIds.get(state);
 +
@@ -125,6 +148,12 @@
 +                paletteId = paletteSize++;
 +                stateIds.put(state, paletteId);
 +                palette[paletteId] = Block.BLOCK_STATE_IDS.get(state);
++
++                // Only new palette entries can disqualify the section, so this runs a handful of times per section.
++                if (legacyExact && !isLegacyRepresentable(state))
++                {
++                    legacyExact = false;
++                }
 +            }
 +
 +            int j = i & 15;
@@ -134,12 +163,67 @@
 +            data.set(j, k, l, paletteId & 15);
 +        }
 +
++        if (legacyExact)
++        {
++            this.temporaryPalette = null;
++            return this.writeLegacySection(blockIds, data, palette);
++        }
++
 +        this.temporaryPalette = Arrays.copyOf(palette, paletteSize);
 +        return null;
 +    }
 +
-+    public void setDataFromNBT(byte[] blockIds, NibbleArray data, @Nullable NibbleArray blockIdExtension)
++    /**
++     * True when {@code (block id, metadata)} alone identifies this state, i.e. reading the legacy format
++     * back through {@link Block#getStateFromMeta(int)} returns this very state instance and the id fits
++     * the 12 bits vanilla reserves for it ({@code Blocks} + {@code Add}).
++     */
++    private static boolean isLegacyRepresentable(IBlockState state)
 +    {
++        Block block = state.getBlock();
++        int id = Block.getIdFromBlock(block);
++        int meta = block.getMetaFromState(state);
++        return id >= 0 && id < 4096
++            && meta >= 0 && meta < 16
++            && block.getStateFromMeta(meta) == state;
++    }
++
++    /**
++     * Rewrites the palette indices produced by the loop above as the legacy {@code Blocks}/{@code Data}
++     * (plus {@code Add} when a block id needs more than 8 bits) representation.
++     * Returns null when no {@code Add} tag is needed.
++     */
++    @Nullable
++    private NibbleArray writeLegacySection(byte[] blockIds, NibbleArray data, int[] palette)
++    {
++        NibbleArray add = null;
++
++        for (int i = 0; i < 4096; i++)
++        {
++            int j = i & 15;
++            int k = i >> 8 & 15;
++            int l = i >> 4 & 15;
++            int stateId = palette[((blockIds[i] & 255) << 4) | data.get(j, k, l)];
++
++            blockIds[i] = (byte)(stateId >> 4);
++            data.set(j, k, l, stateId & 15);
++
++            int idHigh = stateId >> 12;
++            if (idHigh != 0)
++            {
++                if (add == null)
++                {
++                    add = new NibbleArray();
++                }
++                add.set(j, k, l, idHigh & 15);
++            }
++        }
++
++        return add;
+     }
+ 
+     public void setDataFromNBT(byte[] blockIds, NibbleArray data, @Nullable NibbleArray blockIdExtension)
+     {
 +        if (this.temporaryPalette != null)
 +        {
 +            if (this.temporaryPalette.length == 0 || this.temporaryPalette.length > 4096)
@@ -162,28 +246,19 @@
 +                int paletteId = (blockIds[i] & 255) << 4 | data.get(j, k, l);
 +
 +                if (paletteId >= this.temporaryPalette.length)
-                 {
--                    nibblearray = new NibbleArray();
++                {
 +                    throw new IllegalArgumentException(
 +                        "Palette index " + paletteId + " at block " + i + " is outside palette size " + this.temporaryPalette.length
 +                    );
-                 }
- 
--                nibblearray.set(k, l, i1, j >> 12 & 15);
++                }
++
 +                this.set(i, Block.BLOCK_STATE_IDS.getByValue(this.temporaryPalette[paletteId]));
-             }
- 
--            blockIds[i] = (byte)(j >> 4 & 0xFF);
--            data.set(k, l, i1, j & 15);
++            }
++
 +            this.temporaryPalette = null;
 +            return;
-         }
- 
--        return nibblearray;
--    }
--
--    public void setDataFromNBT(byte[] blockIds, NibbleArray data, @Nullable NibbleArray blockIdExtension)
--    {
++        }
++
          for (int i = 0; i < 4096; i++)
          {
              int j = i & 15;
