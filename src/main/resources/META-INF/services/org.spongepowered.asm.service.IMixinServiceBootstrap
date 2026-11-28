@@ -1,1 +1,1 @@
-net.minecraftforge.cleanmix.service.CleanMixBootstrap
+net.minecraftforge.mixin.service.MixinServiceBootstrap

@@ -1,14 +1,14 @@
-package net.minecraftforge.cleanmix.service;
+package net.minecraftforge.mixin.service;
 
 import org.spongepowered.asm.service.IMixinServiceBootstrap;
 
-public class CleanMixBootstrap implements IMixinServiceBootstrap {
+public class MixinServiceBootstrap implements IMixinServiceBootstrap {
 
-    private static final String OWN_SERVICE = "net.minecraftforge.cleanmix.service.CleanMixService";
+    private static final String OWN_SERVICE = "net.minecraftforge.mixin.service.MixinService";
 
     @Override
     public String getName() {
-        return "CleanMix";
+        return "mixin";
     }
 
     @Override

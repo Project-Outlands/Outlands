@@ -1,4 +1,4 @@
-package net.minecraftforge.cleanmix;
+package net.minecraftforge.mixin;
 
 import com.google.common.eventbus.EventBus;
 import net.minecraftforge.fml.common.DummyModContainer;
@@ -16,7 +16,7 @@ import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
-public class CleanMixModContainer extends DummyModContainer {
+public class MixinModContainer extends DummyModContainer {
 
     public static File location() {
         try {
@@ -32,7 +32,7 @@ public class CleanMixModContainer extends DummyModContainer {
         return FMLSanityChecker.fmlLocation;
     }
 
-    public CleanMixModContainer() {
+    public MixinModContainer() {
         super(loadMetadata());
     }
 
@@ -44,12 +44,12 @@ public class CleanMixModContainer extends DummyModContainer {
 
     private static ModMetadata loadMetadata() {
         Map<String, Object> fallbackData = new HashMap<>();
-        fallbackData.put("name", "CleanMix");
+        fallbackData.put("name", "Mixin");
         fallbackData.put("version", "0.2.11");
 
-        InputStream inputStream = CleanMixModContainer.class.getClassLoader().getResourceAsStream("cleanmix.info");
+        InputStream inputStream = MixinModContainer.class.getClassLoader().getResourceAsStream("mixin.info");
         try {
-            return MetadataCollection.from(inputStream, "cleanmix.info").getMetadataForId("cleanmix", fallbackData);
+            return MetadataCollection.from(inputStream, "mixin.info").getMetadataForId("mixin", fallbackData);
         } finally {
             if (inputStream != null) {
                 try {

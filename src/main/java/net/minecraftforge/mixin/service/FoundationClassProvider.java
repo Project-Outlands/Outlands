@@ -1,4 +1,4 @@
-package net.minecraftforge.cleanmix.service;
+package net.minecraftforge.mixin.service;
 
 import net.minecraft.launchwrapper.Launch;
 import org.spongepowered.asm.service.IClassProvider;

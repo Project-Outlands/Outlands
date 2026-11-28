@@ -227,9 +227,9 @@ processResources {
     from(mcpBase.obf2Srg) {
         rename { "deobf_data-${props.minecraft_version}.tsrg" }
     }
-    inputs.property 'cleanmix_version', project.ext.cleanmixVersion
-    filesMatching('cleanmix.info') {
-        expand cleanmix_version: project.ext.cleanmixVersion
+    inputs.property 'mixin_version', project.ext.mixinVersion
+    filesMatching('mixin.info') {
+        expand mixin_version: project.ext.mixinVersion
     }
     // LwjglRuntime compares the release that actually runs with the one the shims are compiled against, and
     // CapabilityFieldCompatibilityTest checks that the shims stay runnable on the oldest supported one. Both bounds
@@ -476,7 +476,7 @@ def vanillaCleanJar = { String side, Provider<File> vanilla ->
 // endregion
 
 // The universal jar: what a launcher puts on the classpath. Srg named loader classes, the resources (deobf data,
-// cleanmix info) and the binary patches that turn Minecraft into the patched classes at startup.
+// mixin info) and the binary patches that turn Minecraft into the patched classes at startup.
 // The plain 'jar' task is a debugging aid only: it holds the whole compiled tree (MCP named Minecraft classes
 // included) and the resource copy, so it must not be published or globbed by a release. It is written outside
 // 'libs/' for exactly that reason.

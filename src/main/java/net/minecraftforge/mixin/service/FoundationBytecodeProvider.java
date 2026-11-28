@@ -1,4 +1,4 @@
-package net.minecraftforge.cleanmix.service;
+package net.minecraftforge.mixin.service;
 
 import com.google.common.io.ByteStreams;
 import net.minecraft.launchwrapper.Launch;

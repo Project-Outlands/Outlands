@@ -1,4 +1,4 @@
-package net.minecraftforge.cleanmix.service;
+package net.minecraftforge.mixin.service;
 
 import com.google.common.collect.Sets;
 import net.minecraft.launchwrapper.IClassTransformer;
@@ -7,7 +7,6 @@ import org.spongepowered.asm.service.ILegacyClassTransformer;
 import org.spongepowered.asm.service.ITransformer;
 import org.spongepowered.asm.service.ITransformerProvider;
 import org.spongepowered.asm.service.MixinService;
-import org.spongepowered.asm.service.mojang.LegacyTransformerHandle;
 import top.outlands.foundation.TransformerDelegate;
 
 import java.util.ArrayList;
@@ -45,7 +44,7 @@ final class FoundationTransformerProvider implements ITransformerProvider {
             if (transformer instanceof ITransformer) {
                 result.add((ITransformer) transformer);
             } else {
-                result.add(new LegacyTransformerHandle(transformer));
+                result.add(new FoundationTransformerHandle(transformer));
             }
         }
         return result;
@@ -72,7 +71,7 @@ final class FoundationTransformerProvider implements ITransformerProvider {
     }
 
     private void buildTransformerDelegationList() {
-        ILogger logger = MixinService.getService().getLogger("TransformerProvider");
+        ILogger logger = org.spongepowered.asm.service.MixinService.getService().getLogger("TransformerProvider");
         logger.debug("Rebuilding transformer delegation list:");
         this.delegatedTransformers = new ArrayList<>();
         for (ITransformer transformer : this.getTransformers()) {

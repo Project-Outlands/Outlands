@@ -19,7 +19,7 @@
 
 package net.minecraftforge.fml.common.discovery;
 
-import net.minecraftforge.cleanmix.CleanMixModContainer;
+import net.minecraftforge.mixin.MixinModContainer;
 import net.minecraftforge.fml.relauncher.FMLLaunchHandler;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.common.FMLLog;
@@ -101,6 +101,16 @@ public final class ModDiscoverer {
     private static final String FORCE_LOAD_AS_MOD = "ForceLoadAsMod";
     private static final String COREMOD_CONTAINS_FML_MOD = "FMLCorePluginContainsFMLMod";
     private static final String FML_CORE_PLUGIN = "FMLCorePlugin";
+
+    /**
+     * Manifest attributes which classify an archive. They belong to the loader, not to mixin:
+     * {@code ModType} names the metadata schema an archive declares, and the two values below are
+     * the ones this loader knows. A jar which declares {@code CRL} was built against a newer
+     * environment than {@code FML}.
+     */
+    private static final String MODTYPE = "ModType";
+    private static final String FORGEMODTYPE = "FML";
+    private static final String CLEANROOMMODTYPE = "CRL";
 
     public static ModDiscoverer instance() {
         return INSTANCE;
@@ -262,7 +272,7 @@ public final class ModDiscoverer {
         mods.add(new InjectedModContainer(mcp, new File("minecraft.jar")));
         // The loader itself
         mods.add(new InjectedModContainer(new LoaderContainer(), FMLSanityChecker.fmlLocation));
-        mods.add(new InjectedModContainer(new CleanMixModContainer(), CleanMixModContainer.location()));
+        mods.add(new InjectedModContainer(new MixinModContainer(), MixinModContainer.location()));
         // Included Mods
         this.builtInMods.stream().map(mc -> new InjectedModContainer(mc, FMLSanityChecker.fmlLocation)).forEach(mods::add);
     }
@@ -334,14 +344,14 @@ public final class ModDiscoverer {
             // A candidate that is not an archive is a directory on the classpath: the output directory of the module
             // being developed, built against the current environment. It has no metadata to parse and no LWJGL2 code
             // to rewrite, so it is the one source classified as modern without a declaration.
-            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), ManifestAttributes.CLEANROOMMODTYPE, List.of(), true, false, false, false, null, null);
+            DiscoveredMod info = new DiscoveredMod(absolute, null, List.of(), CLEANROOMMODTYPE, List.of(), true, false, false, false, null, null);
             discoveredFiles.put(absolute, info);
             return;
         }
 
         Attributes attributes = null;
         Set<String> modIds = new LinkedHashSet<>();
-        String modType = ManifestAttributes.FORGEMODTYPE;
+        String modType = FORGEMODTYPE;
         String coremod = null, tweaker = null;
         JarDeclaration declaration = null;
         boolean modernMetadata = false;
@@ -351,9 +361,9 @@ public final class ModDiscoverer {
             JarFile jarFile = borrow.jar();
             attributes = readManifestAttributes(absolute, jarFile);
             if (attributes != null) {
-                modType = attributes.getValue(ManifestAttributes.MODTYPE);
+                modType = attributes.getValue(MODTYPE);
                 if (Strings.isNullOrEmpty(modType)) {
-                    modType = ManifestAttributes.FORGEMODTYPE;
+                    modType = FORGEMODTYPE;
                 }
                 coremod = attributes.getValue(FML_CORE_PLUGIN);
                 tweaker = attributes.getValue(TWEAK_CLASS);
@@ -529,7 +539,7 @@ public final class ModDiscoverer {
             // rejected. It says nothing about the code inside - a jar declaring CRL was written while both LWJGL
             // generations were reachable - so the LWJGL2 filter decides on modernMetadata instead.
             String modType = discoveredMod.modType();
-            if (!ManifestAttributes.FORGEMODTYPE.equals(modType) && !ManifestAttributes.CLEANROOMMODTYPE.equals(modType)) {
+            if (!FORGEMODTYPE.equals(modType) && !CLEANROOMMODTYPE.equals(modType)) {
                 FMLLog.log.warn("Adding {} to the list of things to skip. It is not an FML or Outlands mod, it is of type: {}", file.getName(), modType);
                 CoreModManager.getIgnoredMods().add(file.getName());
                 return;
