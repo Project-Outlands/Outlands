@@ -1,0 +1,11 @@
+--- before/net/minecraft/command/CommandEnchant.java
++++ after/net/minecraft/command/CommandEnchant.java
+@@ -82,7 +82,7 @@
+ 
+                         for (int j = 0; j < nbttaglist.tagCount(); j++)
+                         {
+-                            int k = nbttaglist.getCompoundTagAt(j).getShort("id");
++                            int k = nbttaglist.getCompoundTagAt(j).getInteger("id");
+ 
+                             if (Enchantment.getEnchantmentByID(k) != null)
+                             {

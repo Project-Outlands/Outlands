@@ -1,5 +1,41 @@
 --- before/net/minecraft/enchantment/EnchantmentHelper.java
 +++ after/net/minecraft/enchantment/EnchantmentHelper.java
+@@ -43,7 +43,7 @@
+             for (int i = 0; i < nbttaglist.tagCount(); i++)
+             {
+                 NBTTagCompound nbttagcompound = nbttaglist.getCompoundTagAt(i);
+-                Enchantment enchantment = Enchantment.getEnchantmentByID(nbttagcompound.getShort("id"));
++                Enchantment enchantment = Enchantment.getEnchantmentByID(nbttagcompound.getInteger("id"));
+                 int j = nbttagcompound.getShort("lvl");
+ 
+                 if (enchantment == enchID)
+@@ -64,7 +64,7 @@
+         for (int i = 0; i < nbttaglist.tagCount(); i++)
+         {
+             NBTTagCompound nbttagcompound = nbttaglist.getCompoundTagAt(i);
+-            Enchantment enchantment = Enchantment.getEnchantmentByID(nbttagcompound.getShort("id"));
++            Enchantment enchantment = Enchantment.getEnchantmentByID(nbttagcompound.getInteger("id"));
+             int j = nbttagcompound.getShort("lvl");
+             map.put(enchantment, j);
+         }
+@@ -84,7 +84,7 @@
+             {
+                 int i = entry.getValue();
+                 NBTTagCompound nbttagcompound = new NBTTagCompound();
+-                nbttagcompound.setShort("id", (short)Enchantment.getEnchantmentID(enchantment));
++                nbttagcompound.setInteger("id", Enchantment.getEnchantmentID(enchantment));
+                 nbttagcompound.setShort("lvl", (short)i);
+                 nbttaglist.appendTag(nbttagcompound);
+ 
+@@ -116,7 +116,7 @@
+ 
+             for (int i = 0; i < nbttaglist.tagCount(); i++)
+             {
+-                int j = nbttaglist.getCompoundTagAt(i).getShort("id");
++                int j = nbttaglist.getCompoundTagAt(i).getInteger("id");
+                 int k = nbttaglist.getCompoundTagAt(i).getShort("lvl");
+ 
+                 if (Enchantment.getEnchantmentByID(j) != null)
 @@ -140,6 +140,7 @@
          ENCHANTMENT_MODIFIER_DAMAGE.damageModifier = 0;
          ENCHANTMENT_MODIFIER_DAMAGE.source = source;

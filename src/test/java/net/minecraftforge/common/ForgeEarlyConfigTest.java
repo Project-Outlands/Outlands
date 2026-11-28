@@ -63,7 +63,11 @@ class ForgeEarlyConfigTest {
         assertEquals("auto", prop(cfg, "early", "linuxVideoDriver").getString());
         assertEquals(1.0D, prop(cfg, "early", "inputScrollSpeed").getDouble(), 1e-9);
         assertEquals("FLAT", prop(cfg, "early", "modScanDepth").getString());
-        assertEquals(8, prop(cfg, "early", "loadingPluginBlacklist").getStringList().length);
+        String[] blacklist = prop(cfg, "early", "loadingPluginBlacklist").getStringList();
+        assertEquals(9, blacklist.length);
+        // Both wide-id core plugins stay out: this build supplies the ids itself (feat/wide-ids).
+        assertTrue(java.util.Arrays.asList(blacklist).contains("org.dimdev.jeid.JEIDLoadingPlugin"));
+        assertTrue(java.util.Arrays.asList(blacklist).contains("ru.fewizz.neid.asm.Plugin"));
         assertTrue(prop(cfg, "early", "openglVersionMajor").requiresMcRestart());
         assertFalse(prop(cfg, "early", "commandCompletion").requiresMcRestart());
         assertNotNull(prop(cfg, "early", "openglVersionMajor").getComment());

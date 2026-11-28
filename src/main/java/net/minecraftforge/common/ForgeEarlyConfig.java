@@ -32,6 +32,7 @@ public final class ForgeEarlyConfig
             "zone.rong.mixinbooter.MixinBooterPlugin",
             "ilib.asm.Loader",
             "org.dimdev.jeid.JEIDLoadingPlugin",
+            "ru.fewizz.neid.asm.Plugin",
             "lain.mods.skins.init.forge.asm.Plugin",
             "advancedshader.core.Core",
             "net.shadowfacts.forgelin.preloader.ForgelinPlugin",

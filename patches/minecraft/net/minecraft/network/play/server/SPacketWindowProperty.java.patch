@@ -1,0 +1,20 @@
+--- before/net/minecraft/network/play/server/SPacketWindowProperty.java
++++ after/net/minecraft/network/play/server/SPacketWindowProperty.java
+@@ -34,7 +34,7 @@
+     {
+         this.windowId = buf.readUnsignedByte();
+         this.property = buf.readShort();
+-        this.value = buf.readShort();
++        this.value = buf.readVarInt();
+     }
+ 
+     @Override
+@@ -42,7 +42,7 @@
+     {
+         buf.writeByte(this.windowId);
+         buf.writeShort(this.property);
+-        buf.writeShort(this.value);
++        buf.writeVarInt(this.value);
+     }
+ 
+     @SideOnly(Side.CLIENT)

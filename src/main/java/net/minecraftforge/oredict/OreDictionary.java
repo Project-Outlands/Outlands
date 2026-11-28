@@ -66,7 +66,7 @@ public class OreDictionary
     private static Map<String, Integer>  nameToId = new HashMap<String, Integer>(128);
     private static List<NonNullList<ItemStack>> idToStack = Lists.newArrayList();
     private static List<NonNullList<ItemStack>> idToStackUn = Lists.newArrayList();
-    private static Map<Integer, List<Integer>> stackToId = Maps.newHashMapWithExpectedSize((int)(128 * 0.75));
+    private static Map<Long, List<Integer>> stackToId = Maps.newHashMapWithExpectedSize((int)(128 * 0.75));
     public static final NonNullList<ItemStack> EMPTY_LIST = NonNullList.create();
 
     /**
@@ -519,9 +519,9 @@ public class OreDictionary
         {
             id = Item.REGISTRY.getIDForObject(stack.getItem().delegate.get());
         }
-        List<Integer> ids = stackToId.get(id);
+        List<Integer> ids = stackToId.get((long)id);
         if (ids != null) set.addAll(ids);
-        ids = stackToId.get(id | ((stack.getItemDamage() + 1) << 16));
+        ids = stackToId.get((long)id | ((long)stack.getItemDamage() + 1) << 32);
         if (ids != null) set.addAll(ids);
 
         Integer[] tmp = set.toArray(new Integer[set.size()]);
@@ -671,7 +671,7 @@ public class OreDictionary
         // IT should be noted that -1 will fail the gate further down, if an entry already exists with value -1 for this name. This is what is broken and being warned about.
         // APPARENTLY it's quite common to do this. OreDictionary should be considered alongside Recipes - you can't make them properly until you've registered with the game.
         ResourceLocation registryName = ore.getItem().delegate.name();
-        int hash;
+        long hash;
         if (registryName == null)
         {
             ModContainer modContainer = Loader.instance().activeModContainer();
@@ -687,7 +687,7 @@ public class OreDictionary
         }
         if (ore.getItemDamage() != WILDCARD_VALUE)
         {
-            hash |= ((ore.getItemDamage() + 1) << 16); // +1 so 0 is significant
+            hash |= ((long)ore.getItemDamage() + 1) << 32; // +1 so 0 is significant
         }
 
         //Add things to the baked version, and prevent duplicates
@@ -741,7 +741,7 @@ public class OreDictionary
             {
                 // HACK: use the registry name's ID. It is unique and it knows about substitutions
                 ResourceLocation name = ore.getItem().delegate.name();
-                int hash;
+                long hash;
                 if (name == null)
                 {
                     FMLLog.log.debug("Defaulting unregistered ore dictionary entry for ore dictionary {}: type {} to -1", getOreName(id), ore.getItem().getClass());
@@ -753,7 +753,7 @@ public class OreDictionary
                 }
                 if (ore.getItemDamage() != WILDCARD_VALUE)
                 {
-                    hash |= ((ore.getItemDamage() + 1) << 16); // +1 so meta 0 is significant
+                    hash |= ((long)ore.getItemDamage() + 1) << 32; // +1 so meta 0 is significant
                 }
                 List<Integer> ids = stackToId.computeIfAbsent(hash, k -> Lists.newArrayList());
                 ids.add(id);

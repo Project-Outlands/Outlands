@@ -269,6 +269,15 @@
          }
      }
  
+@@ -678,7 +727,7 @@
+                 for (int j = 0; j < nbttaglist.tagCount(); j++)
+                 {
+                     NBTTagCompound nbttagcompound = nbttaglist.getCompoundTagAt(j);
+-                    int k = nbttagcompound.getShort("id");
++                    int k = nbttagcompound.getInteger("id");
+                     int l = nbttagcompound.getShort("lvl");
+                     Enchantment enchantment = Enchantment.getEnchantmentByID(k);
+ 
 @@ -796,6 +845,7 @@
                                  I18n.translateToLocal("attribute.name." + entry.getKey())
                              )
@@ -293,6 +302,15 @@
      public EnumRarity getRarity()
      {
          return this.getItem().getRarity(this);
+@@ -904,7 +956,7 @@
+ 
+         NBTTagList nbttaglist = this.stackTagCompound.getTagList("ench", 10);
+         NBTTagCompound nbttagcompound = new NBTTagCompound();
+-        nbttagcompound.setShort("id", (short)Enchantment.getEnchantmentID(ench));
++        nbttagcompound.setInteger("id", Enchantment.getEnchantmentID(ench));
+         nbttagcompound.setShort("lvl", (byte)level);
+         nbttaglist.appendTag(nbttagcompound);
+     }
 @@ -985,7 +1037,7 @@
          }
          else

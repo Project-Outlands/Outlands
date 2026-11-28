@@ -1,5 +1,23 @@
 --- before/net/minecraft/entity/monster/EntityEnderman.java
 +++ after/net/minecraft/entity/monster/EntityEnderman.java
+@@ -178,7 +178,7 @@
+ 
+         if (iblockstate != null)
+         {
+-            compound.setShort("carried", (short)Block.getIdFromBlock(iblockstate.getBlock()));
++            compound.setInteger("carried", Block.getIdFromBlock(iblockstate.getBlock()));
+             compound.setShort("carriedData", (short)iblockstate.getBlock().getMetaFromState(iblockstate));
+         }
+     }
+@@ -195,7 +195,7 @@
+         }
+         else
+         {
+-            iblockstate = Block.getBlockById(compound.getShort("carried")).getStateFromMeta(compound.getShort("carriedData") & 65535);
++            iblockstate = Block.getBlockById(compound.getInteger("carried")).getStateFromMeta(compound.getShort("carriedData") & 65535);
+         }
+ 
+         if (iblockstate == null || iblockstate.getBlock() == null || iblockstate.getMaterial() == Material.AIR)
 @@ -306,7 +306,9 @@
  
      private boolean teleportTo(double x, double y, double z)

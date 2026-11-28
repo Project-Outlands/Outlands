@@ -1,6 +1,19 @@
 --- before/net/minecraft/network/PacketBuffer.java
 +++ after/net/minecraft/network/PacketBuffer.java
-@@ -330,7 +330,7 @@
+@@ -319,18 +319,18 @@
+     {
+         if (stack.isEmpty())
+         {
+-            this.writeShort(-1);
++            this.writeVarInt(-1);
+         }
+         else
+         {
+-            this.writeShort(Item.getIdFromItem(stack.getItem()));
++            this.writeVarInt(Item.getIdFromItem(stack.getItem()));
+             this.writeByte(stack.getCount());
+             this.writeShort(stack.getMetadata());
+             NBTTagCompound nbttagcompound = null;
  
              if (stack.getItem().isDamageable() || stack.getItem().getShareTag())
              {
@@ -9,6 +22,15 @@
              }
  
              this.writeCompoundTag(nbttagcompound);
+@@ -341,7 +341,7 @@
+ 
+     public ItemStack readItemStack() throws IOException
+     {
+-        int i = this.readShort();
++        int i = this.readVarInt();
+ 
+         if (i < 0)
+         {
 @@ -352,7 +352,7 @@
              int j = this.readByte();
              int k = this.readShort();

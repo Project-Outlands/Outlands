@@ -29,7 +29,13 @@
          return this.potion;
      }
  
-@@ -201,12 +209,13 @@
+@@ -196,17 +204,18 @@
+ 
+     public NBTTagCompound writeCustomPotionEffectToNBT(NBTTagCompound nbt)
+     {
+-        nbt.setByte("Id", (byte)Potion.getIdFromPotion(this.getPotion()));
++        nbt.setInteger("Id", Potion.getIdFromPotion(this.getPotion()));
+         nbt.setByte("Amplifier", (byte)this.getAmplifier());
          nbt.setInteger("Duration", this.getDuration());
          nbt.setBoolean("Ambient", this.getIsAmbient());
          nbt.setBoolean("ShowParticles", this.doesShowParticles());
@@ -40,7 +46,7 @@
      public static PotionEffect readCustomPotionEffectFromNBT(NBTTagCompound nbt)
      {
 -        int i = nbt.getByte("Id");
-+        int i = nbt.getByte("Id") & 0xFF;
++        int i = nbt.hasKey("Id", 1) ? nbt.getByte("Id") & 0xFF : nbt.getInteger("Id");
          Potion potion = Potion.getPotionById(i);
  
          if (potion == null)

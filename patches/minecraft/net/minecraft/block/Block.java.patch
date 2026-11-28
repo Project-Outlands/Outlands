@@ -32,7 +32,39 @@
      public float slipperiness = 0.6F;
      protected final BlockStateContainer blockState;
      private IBlockState defaultBlockState;
-@@ -322,7 +325,7 @@
+@@ -86,7 +89,13 @@
+     public static int getStateId(IBlockState state)
+     {
+         Block block = state.getBlock();
+-        return getIdFromBlock(block) + (block.getMetaFromState(state) << 12);
++        int id = getIdFromBlock(block);
++        if (id > 0x0FFFFFFF)
++        {
++            throw new IllegalArgumentException("Block " + block.getRegistryName() + " has ID " + id + ", which exceeds the 28-bit state ID limit");
++        }
++        int meta = block.getMetaFromState(state);
++        return id < 4096 ? id + (meta << 12) : (id << 4) | meta;
+     }
+ 
+     public static Block getBlockById(int id)
+@@ -94,11 +103,12 @@
+         return REGISTRY.getObjectById(id);
+     }
+ 
+-    public static IBlockState getStateById(int id)
++    public static IBlockState getStateById(int stateId)
+     {
+-        int i = id & 4095;
+-        int j = id >> 12 & 15;
+-        return getBlockById(i).getStateFromMeta(j);
++        boolean legacy = stateId >= 0 && stateId < 65536;
++        int blockId = legacy ? stateId & 4095 : (stateId >> 4) & 0x0FFFFFFF;
++        int meta = legacy ? stateId >> 12 & 15 : stateId & 15;
++        return getBlockById(blockId).getStateFromMeta(meta);
+     }
+ 
+     public static Block getBlockFromItem(@Nullable Item itemIn)
+@@ -322,7 +332,7 @@
  
      public boolean isReplaceable(IBlockAccess worldIn, BlockPos pos)
      {
@@ -41,7 +73,7 @@
      }
  
      public Block setHardness(float hardness)
-@@ -360,9 +363,10 @@
+@@ -360,9 +370,10 @@
          return this.needsRandomTick;
      }
  
@@ -53,7 +85,7 @@
      }
  
      @Deprecated
-@@ -375,13 +379,13 @@
+@@ -375,13 +386,13 @@
      @SideOnly(Side.CLIENT)
      public int getPackedLightmapCoords(IBlockState state, IBlockAccess source, BlockPos pos)
      {
@@ -69,7 +101,7 @@
          }
          else
          {
-@@ -445,7 +449,7 @@
+@@ -445,7 +456,7 @@
                  }
          }
  
@@ -78,7 +110,7 @@
      }
  
      @Deprecated
-@@ -545,6 +549,10 @@
+@@ -545,6 +556,10 @@
  
      public void breakBlock(World worldIn, BlockPos pos, IBlockState state)
      {
@@ -89,7 +121,7 @@
      }
  
      public int quantityDropped(Random random)
-@@ -560,18 +568,7 @@
+@@ -560,18 +575,7 @@
      @Deprecated
      public float getPlayerRelativeBlockHardness(IBlockState state, EntityPlayer player, World worldIn, BlockPos pos)
      {
@@ -109,7 +141,7 @@
      }
  
      public final void dropBlockAsItem(World worldIn, BlockPos pos, IBlockState state, int fortune)
-@@ -581,20 +578,16 @@
+@@ -581,20 +585,16 @@
  
      public void dropBlockAsItemWithChance(World worldIn, BlockPos pos, IBlockState state, float chance, int fortune)
      {
@@ -136,7 +168,7 @@
                  }
              }
          }
-@@ -602,8 +595,13 @@
+@@ -602,8 +602,13 @@
  
      public static void spawnAsEntity(World worldIn, BlockPos pos, ItemStack stack)
      {
@@ -151,7 +183,7 @@
              float f = 0.5F;
              double d0 = worldIn.rand.nextFloat() * 0.5F + 0.25;
              double d1 = worldIn.rand.nextFloat() * 0.5F + 0.25;
-@@ -636,6 +634,7 @@
+@@ -636,6 +641,7 @@
          return 0;
      }
  
@@ -159,7 +191,7 @@
      public float getExplosionResistance(Entity exploder)
      {
          return this.blockResistance / 5.0F;
-@@ -680,7 +679,7 @@
+@@ -680,7 +686,7 @@
  
      public boolean canPlaceBlockAt(World worldIn, BlockPos pos)
      {
@@ -168,7 +200,7 @@
      }
  
      public boolean onBlockActivated(
-@@ -702,6 +701,8 @@
+@@ -702,6 +708,8 @@
      {
      }
  
@@ -177,7 +209,7 @@
      public IBlockState getStateForPlacement(
          World worldIn,
          BlockPos pos,
-@@ -754,21 +755,35 @@
+@@ -754,21 +762,35 @@
          player.addStat(StatList.getBlockStats(this));
          player.addExhaustion(0.005F);
  
@@ -216,7 +248,7 @@
      }
  
      protected ItemStack getSilkTouchDrop(IBlockState state)
-@@ -854,6 +869,7 @@
+@@ -854,6 +876,7 @@
          entityIn.motionY = 0.0;
      }
  
@@ -224,7 +256,7 @@
      public ItemStack getItem(World worldIn, BlockPos pos, IBlockState state)
      {
          return new ItemStack(Item.getItemFromBlock(this), 1, this.damageDropped(state));
-@@ -967,6 +983,7 @@
+@@ -967,6 +990,7 @@
          }
      }
  
@@ -232,7 +264,7 @@
      public SoundType getSoundType()
      {
          return this.blockSoundType;
-@@ -983,6 +1000,1388 @@
+@@ -983,6 +1007,1388 @@
      {
      }
  
@@ -1405,7 +1437,7 @@
 +     {
 +         return null;
 +     }
-+     
++
 +     /**
 +      * Called when entities are moving to check if they are inside a liquid
 +      *
@@ -1419,10 +1451,10 @@
 +     {
 +         return null;
 +     }
-+     
++
 +     /**
 +      * Called when entities are swimming in the given liquid and returns the relative height (used by {@link net.minecraft.entity.item.EntityBoat})
-+      * 
++      *
 +      * @param world world that is being tested.
 +      * @param pos block thats being tested.
 +      * @param state state at world/pos
@@ -1621,7 +1653,7 @@
      public static void registerBlocks()
      {
          registerBlock(0, AIR_ID, new BlockAir().setTranslationKey("air"));
-@@ -1509,7 +2908,7 @@
+@@ -1509,7 +2915,7 @@
              "quartz_stairs",
              new BlockStairs(block11.getDefaultState().withProperty(BlockQuartz.VARIANT, BlockQuartz.EnumType.DEFAULT)).setTranslationKey("stairsQuartz")
          );
@@ -1630,7 +1662,7 @@
          registerBlock(158, "dropper", new BlockDropper().setHardness(3.5F).setSoundType(SoundType.STONE).setTranslationKey("dropper"));
          registerBlock(
              159,
-@@ -1925,28 +3324,6 @@
+@@ -1925,28 +3331,6 @@
                  }
  
                  block15.useNeighborBrightness = flag;
